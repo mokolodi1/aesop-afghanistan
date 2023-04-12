@@ -5,6 +5,7 @@ import click
 import os.path
 import sys
 import time
+import argparse
 
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
@@ -136,17 +137,18 @@ def create_buddy_email_map(buddies):
 
     return buddy_email_map
 
-def send_buddy_emails(gmail_service, buddies, buddy_pairs):
+def send_buddy_emails(gmail_service, buddies, buddy_pairs, really_send_emails):
     buddy_email_map = create_buddy_email_map(buddies)
-    print("Will wait %d seconds between each email." % BETWEEN_EMAIL_PAUSE_SECS)
+    if really_send_emails:
+        print("Will wait %d seconds between each email." % BETWEEN_EMAIL_PAUSE_SECS)
 
+    first_buddy_pair = True
     for buddy_pair in buddy_pairs:
-        time.sleep(BETWEEN_EMAIL_PAUSE_SECS)
+        if really_send_emails:
+            time.sleep(BETWEEN_EMAIL_PAUSE_SECS)
 
         first_buddy = buddy_email_map[buddy_pair[0]]
         second_buddy = buddy_email_map[buddy_pair[1]]
-
-        print("Sending email to %s and %s" % (first_buddy, second_buddy))
 
         pseudonyms = (first_buddy.pseudonym, second_buddy.pseudonym)
         subject = "Phone buddy introduction: %s and %s" % pseudonyms
@@ -162,13 +164,30 @@ You are AESOP phone buddies this week. Please find each of your contact informat
 
 Best,
 
-Your friendly AESOP Admin
-""" % (greeting, first_buddy.contact_text(), second_buddy.contact_text())
+Your friendly AESOP Admin""" %\
+                     (greeting, first_buddy.contact_text(), second_buddy.contact_text())
 
-        send_email(gmail_service, buddy_pair, subject, email_text)
+        print("Prepping email to %s and %s" % (first_buddy, second_buddy))
+        if first_buddy_pair:
+            first_buddy_pair = False
+            print("First buddy pair, so we'll print more info (subject, entire email text)")
+            print("Subject: %s" % subject)
+            print("Email text:")
+            print("====================================")
+            print(email_text)
+            print("====================================")
 
+        if really_send_emails:
+            send_email(gmail_service, buddy_pair, subject, email_text)
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--send-emails", action='store_true')
+
+    args = parser.parse_args()
+
+    really_send_emails = args.send_emails
+
     creds = get_credentials()
     drive_service = build('sheets', 'v4', credentials=creds)
     gmail_service = build('gmail', 'v1', credentials=creds)
@@ -176,16 +195,19 @@ def main():
     buddy_pairs = get_buddy_email_pairs(drive_service)
     buddies = get_buddies(drive_service)
 
-    click.confirm('You are about to send %s emails to phone buddy volunteers. Are you sure you want to continue?' % len(buddy_pairs), abort=True, default=False)
-    print("Okay... well let's just make you wait for a few seconds (5) and see if you change your mind.")
-    time.sleep(5)
-    click.confirm('Are you still absolutely, positively sure?', abort=True, default=False)
-    print("Hmm, you seem quite sure of yourself, but let's wait another 5 seconds just in case.")
-    time.sleep(5)
-    click.confirm('Last chance to cancel! Still sure?', abort=True, default=False)
-    print("Ugh, fine, we'll send the emails.\n")
+    if really_send_emails:
+        click.confirm('You are about to send %s emails to phone buddy volunteers. Are you sure you want to continue?' % len(buddy_pairs), abort=True, default=False)
+        print("Okay... well let's just make you wait for a few seconds (5) and see if you change your mind.")
+        time.sleep(5)
+        click.confirm('Are you still absolutely, positively sure?', abort=True, default=False)
+        print("Hmm, you seem quite sure of yourself, but let's wait another 5 seconds just in case.")
+        time.sleep(5)
+        click.confirm('Last chance to cancel! Still sure?', abort=True, default=False)
+        print("Ugh, fine, we'll send the emails.\n")
+    else:
+        print("--send-emails option not passed in, will calculate all emails to send but not actually send anything.")
 
-    send_buddy_emails(gmail_service, buddies, buddy_pairs)
+    send_buddy_emails(gmail_service, buddies, buddy_pairs, really_send_emails)
 
 if __name__ == '__main__':
     main()
