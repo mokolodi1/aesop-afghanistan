@@ -67,6 +67,23 @@ Location: %s
 Time zone: %s
 Introduction: %s""" % (self.pseudonym, self.email, self.phone, self.location, self.time_zone, self.user_message)
 
+
+class EmailInfo():
+    def __init__(self, drive_service):
+        self._parse_email_info(drive_service)
+
+    def _find_labeled_row_text(self, label_text):
+        return next(row[1] for row in self._raw_rows if row[0] == label_text)
+
+    def _parse_email_info(self, drive_service):
+        result = drive_service.spreadsheets().values().get(
+            spreadsheetId=DATA_SPREADSHEET_ID, range="'Email info'!A2:B500").execute()
+        self._raw_rows = result.get('values', [])
+
+        self.introduction = self._find_labeled_row_text("Intro")
+        self.topic = self._find_labeled_row_text("Topic")
+
+
 def get_credentials():
     creds = None
 
@@ -91,14 +108,14 @@ def get_credentials():
 
 def get_buddy_email_pairs(drive_service):
     result = drive_service.spreadsheets().values().get(
-        spreadsheetId=DATA_SPREADSHEET_ID, range="'PROD: Matched buddies'!A2:B500").execute()
+        spreadsheetId=DATA_SPREADSHEET_ID, range="'Matched'!A2:B500").execute()
     rows = result.get('values', [])
 
     return rows
 
 def get_buddies(drive_service):
     result = drive_service.spreadsheets().values().get(
-        spreadsheetId=DATA_SPREADSHEET_ID, range="'PROD: Buddy information'!A2:H500").execute()
+        spreadsheetId=DATA_SPREADSHEET_ID, range="'Database'!A2:H500").execute()
     rows = result.get('values', [])
 
     return [Buddy(row) for row in rows]
@@ -137,10 +154,12 @@ def create_buddy_email_map(buddies):
 
     return buddy_email_map
 
-def send_buddy_emails(gmail_service, buddies, buddy_pairs, really_send_emails):
+def send_buddy_emails(gmail_service, drive_service, buddies, buddy_pairs, really_send_emails):
     buddy_email_map = create_buddy_email_map(buddies)
     if really_send_emails:
         print("Will wait %d seconds between each email." % BETWEEN_EMAIL_PAUSE_SECS)
+
+    email_info = EmailInfo(drive_service)
 
     first_buddy_pair = True
     for buddy_pair in buddy_pairs:
@@ -151,12 +170,19 @@ def send_buddy_emails(gmail_service, buddies, buddy_pairs, really_send_emails):
         second_buddy = buddy_email_map[buddy_pair[1]]
 
         pseudonyms = (first_buddy.pseudonym, second_buddy.pseudonym)
+        name_and_name = "%s and %s" % pseudonyms
         subject = "Phone buddy introduction: %s and %s" % pseudonyms
 
-        greeting = "Hello %s and %s," % pseudonyms
+        greeting = "Hello %s," % name_and_name
+        phone_buddy_info = """%s, you are AESOP phone buddies this week. Please find each of your contact information below:
+
+%s
+
+%s
+""" % (name_and_name, first_buddy.contact_text(), second_buddy.contact_text())
         email_text = """%s
 
-You are AESOP phone buddies this week. Please find each of your contact information below:
+%s
 
 %s
 
@@ -165,7 +191,7 @@ You are AESOP phone buddies this week. Please find each of your contact informat
 Best,
 
 Your friendly AESOP Admin""" %\
-                     (greeting, first_buddy.contact_text(), second_buddy.contact_text())
+                     (greeting, email_info.introduction, phone_buddy_info, email_info.topic)
 
         print("Prepping email to %s and %s" % (first_buddy, second_buddy))
         if first_buddy_pair:
@@ -176,6 +202,15 @@ Your friendly AESOP Admin""" %\
             print("====================================")
             print(email_text)
             print("====================================")
+            if really_send_emails:
+                click.confirm("Does the above email look good to send to everyone?")
+                print("Okay... well let's just make you wait for a few seconds (5) and see if you change your mind.")
+                time.sleep(5)
+                click.confirm('Are you still absolutely, positively sure?', abort=True, default=False)
+                print("Hmm, you seem quite sure of yourself, but let's wait another 5 seconds just in case.")
+                time.sleep(5)
+                click.confirm('Last chance to cancel! Still sure?', abort=True, default=False)
+                print("Okay, here we go!\n")
 
         if really_send_emails:
             send_email(gmail_service, buddy_pair, subject, email_text)
@@ -197,17 +232,10 @@ def main():
 
     if really_send_emails:
         click.confirm('You are about to send %s emails to phone buddy volunteers. Are you sure you want to continue?' % len(buddy_pairs), abort=True, default=False)
-        print("Okay... well let's just make you wait for a few seconds (5) and see if you change your mind.")
-        time.sleep(5)
-        click.confirm('Are you still absolutely, positively sure?', abort=True, default=False)
-        print("Hmm, you seem quite sure of yourself, but let's wait another 5 seconds just in case.")
-        time.sleep(5)
-        click.confirm('Last chance to cancel! Still sure?', abort=True, default=False)
-        print("Ugh, fine, we'll send the emails.\n")
     else:
         print("--send-emails option not passed in, will calculate all emails to send but not actually send anything.")
 
-    send_buddy_emails(gmail_service, buddies, buddy_pairs, really_send_emails)
+    send_buddy_emails(gmail_service, drive_service, buddies, buddy_pairs, really_send_emails)
 
 if __name__ == '__main__':
     main()
