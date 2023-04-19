@@ -21,7 +21,7 @@ SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets"
 ]
 
-BETWEEN_EMAIL_PAUSE_SECS = 1
+BETWEEN_EMAIL_PAUSE_SECS = 2
 
 DATA_SPREADSHEET_ID = None
 with open("secrets/spreadsheet_id.txt", mode="r") as spreadsheet_id_file:
@@ -33,13 +33,13 @@ class Buddy:
         self._raw_row_info = row_info
 
         self._parse_row_attribute("email", 0)
-        self._parse_row_attribute("buddy_type", 1)
-        self._parse_row_attribute("full_name", 2)
-        self._parse_row_attribute("pseudonym", 3)
-        self._parse_row_attribute("phone", 4, required=False)
-        self._parse_row_attribute("location", 5, required=False)
-        self._parse_row_attribute("time_zone", 6, required=False)
-        self._parse_row_attribute("user_message", 7, required=False)
+        self._parse_row_attribute("buddy_type", 7)
+        self._parse_row_attribute("full_name", 6)
+        self._parse_row_attribute("pseudonym", 1)
+        self._parse_row_attribute("phone", 2, required=False)
+        self._parse_row_attribute("location", 3, required=False)
+        self._parse_row_attribute("time_zone", 4, required=False)
+        self._parse_row_attribute("user_message", 5, required=False)
 
     def __str__(self):
         return "%s (%s) - %s" % (self.full_name, self.pseudonym, self.email)
@@ -48,7 +48,9 @@ class Buddy:
         value = default
         data_provided = False
         if len(self._raw_row_info) >= row_index + 1:
-            value = self._raw_row_info[row_index]
+            new_value = self._raw_row_info[row_index]
+            if new_value != "":
+                value = new_value
 
             if value != "":
                 data_provided = True
@@ -60,15 +62,16 @@ class Buddy:
         setattr(self, attribute_name, value)
 
     def contact_text(self):
-        return """Pseudonym: %s
-Email: %s
-Phone: %s
-Location: %s
-Time zone: %s
-Introduction: %s""" % (self.pseudonym, self.email, self.phone, self.location, self.time_zone, self.user_message)
+        return f"""Pseudonym: {self.pseudonym}
+Buddy type: {self.buddy_type}
+Email: {self.email}
+Phone: {self.phone}
+Location: {self.location}
+Time zone: {self.time_zone}
+Introduction: {self.user_message}"""
 
 
-class EmailInfo():
+class EmailInfo:
     def __init__(self, drive_service):
         self._parse_email_info(drive_service)
 
@@ -106,19 +109,25 @@ def get_credentials():
 
     return creds
 
+
 def get_buddy_email_pairs(drive_service):
     result = drive_service.spreadsheets().values().get(
         spreadsheetId=DATA_SPREADSHEET_ID, range="'Matched'!A2:B500").execute()
     rows = result.get('values', [])
+    print(rows)
+    pairs = [r[0:2] for r in rows if len(r) >= 2]
+    print(pairs)
 
-    return rows
+    return pairs
+
 
 def get_buddies(drive_service):
     result = drive_service.spreadsheets().values().get(
-        spreadsheetId=DATA_SPREADSHEET_ID, range="'Database'!A2:H500").execute()
+        spreadsheetId=DATA_SPREADSHEET_ID, range="'Database'!A4:I500").execute()
     rows = result.get('values', [])
 
     return [Buddy(row) for row in rows]
+
 
 def send_email(gmail_service, to, subject, email_text):
     """
@@ -146,6 +155,7 @@ def send_email(gmail_service, to, subject, email_text):
 
     print("Message sent: %s" % send_message)
 
+
 def create_buddy_email_map(buddies):
     buddy_email_map = {}
 
@@ -154,44 +164,59 @@ def create_buddy_email_map(buddies):
 
     return buddy_email_map
 
+
 def send_buddy_emails(gmail_service, drive_service, buddies, buddy_pairs, really_send_emails):
     buddy_email_map = create_buddy_email_map(buddies)
-    if really_send_emails:
-        print("Will wait %d seconds between each email." % BETWEEN_EMAIL_PAUSE_SECS)
+
+    # Verify that all the pairs have buddy information
+    found_issue = False
+    flat_buddy_list = [email for buddy_pair in buddy_pairs for email in buddy_pair]
+    for email in flat_buddy_list:
+        try:
+            buddy_email_map[email]
+        except KeyError:
+            found_issue = True
+            print("Couldn't find info in the database for the following email: %s" % email)
+    if found_issue:
+        print("Found some issues - see above. Not sending emails ane exiting.")
+        sys.exit(1)
+
 
     email_info = EmailInfo(drive_service)
 
+    # Actually go send the emails
     first_buddy_pair = True
     for buddy_pair in buddy_pairs:
         if really_send_emails:
+            if first_buddy_pair:
+                print("Will wait %d seconds between each email." % BETWEEN_EMAIL_PAUSE_SECS)
             time.sleep(BETWEEN_EMAIL_PAUSE_SECS)
 
         first_buddy = buddy_email_map[buddy_pair[0]]
         second_buddy = buddy_email_map[buddy_pair[1]]
 
         pseudonyms = (first_buddy.pseudonym, second_buddy.pseudonym)
-        name_and_name = "%s and %s" % pseudonyms
         subject = "Phone buddy introduction: %s and %s" % pseudonyms
+        name_and_name = "%s and %s" % pseudonyms
+        print("here4")
+        email_text = f"""Hello {name_and_name}
 
-        greeting = "Hello %s," % name_and_name
-        phone_buddy_info = """%s, you are AESOP phone buddies this week. Please find each of your contact information below:
+{email_info.introduction}
 
-%s
+{name_and_name}, you are AESOP phone buddies this week. Please find each of your contact information below.
 
-%s
-""" % (name_and_name, first_buddy.contact_text(), second_buddy.contact_text())
-        email_text = """%s
+{first_buddy.contact_text()}
 
-%s
+{second_buddy.contact_text()}
 
-%s
+You can update your buddy information by submitting this form, which will overwrite any previous info:
+https://forms.gle/c8UZ6BXSxGmkw5GN7
 
-%s
+{email_info.topic}
 
 Best,
 
-Your friendly AESOP Admin""" %\
-                     (greeting, email_info.introduction, phone_buddy_info, email_info.topic)
+Your friendly AESOP Admin"""
 
         print("Prepping email to %s and %s" % (first_buddy, second_buddy))
         if first_buddy_pair:
@@ -215,6 +240,7 @@ Your friendly AESOP Admin""" %\
         if really_send_emails:
             send_email(gmail_service, buddy_pair, subject, email_text)
 
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--send-emails", action='store_true')
@@ -231,11 +257,13 @@ def main():
     buddies = get_buddies(drive_service)
 
     if really_send_emails:
-        click.confirm('You are about to send %s emails to phone buddy volunteers. Are you sure you want to continue?' % len(buddy_pairs), abort=True, default=False)
+        click.confirm('You are about to send %s emails to phone buddy volunteers. Are you sure you want to continue?' %
+                      len(buddy_pairs), abort=True, default=False)
     else:
         print("--send-emails option not passed in, will calculate all emails to send but not actually send anything.")
 
     send_buddy_emails(gmail_service, drive_service, buddies, buddy_pairs, really_send_emails)
+
 
 if __name__ == '__main__':
     main()
