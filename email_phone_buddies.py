@@ -45,19 +45,20 @@ class Buddy:
         return "%s (%s) - %s" % (self.full_name, self.pseudonym, self.email)
 
     def _parse_row_attribute(self, attribute_name, row_index, required=True, default="None provided"):
-        value = default
-        data_provided = False
+        value = None
         if len(self._raw_row_info) >= row_index + 1:
             new_value = self._raw_row_info[row_index]
+
+            # If a cell is blank but has cells to the right of it that are not blank, the value will be ""
             if new_value != "":
                 value = new_value
 
-            if value != "":
-                data_provided = True
-
-        if required and not data_provided:
-            print("ERROR: missing required %s data for buddy: %s" % (attribute_name, self._raw_row_info))
-            sys.exit(1)
+        if value is None:
+            if required:
+                print("ERROR: missing %s data for buddy: %s" % (attribute_name, self._raw_row_info))
+                sys.exit(1)
+            else:
+                value = default
 
         setattr(self, attribute_name, value)
 
@@ -114,9 +115,7 @@ def get_buddy_email_pairs(drive_service):
     result = drive_service.spreadsheets().values().get(
         spreadsheetId=DATA_SPREADSHEET_ID, range="'Matched'!A2:B500").execute()
     rows = result.get('values', [])
-    print(rows)
     pairs = [r[0:2] for r in rows if len(r) >= 2]
-    print(pairs)
 
     return pairs
 
@@ -181,7 +180,6 @@ def send_buddy_emails(gmail_service, drive_service, buddies, buddy_pairs, really
         print("Found some issues - see above. Not sending emails ane exiting.")
         sys.exit(1)
 
-
     email_info = EmailInfo(drive_service)
 
     # Actually go send the emails
@@ -198,8 +196,7 @@ def send_buddy_emails(gmail_service, drive_service, buddies, buddy_pairs, really
         pseudonyms = (first_buddy.pseudonym, second_buddy.pseudonym)
         subject = "Phone buddy introduction: %s and %s" % pseudonyms
         name_and_name = "%s and %s" % pseudonyms
-        print("here4")
-        email_text = f"""Hello {name_and_name}
+        email_text = f"""Hello {name_and_name},
 
 {email_info.introduction}
 
