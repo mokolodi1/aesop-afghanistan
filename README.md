@@ -2,18 +2,30 @@
 
 Various scripts used to arrange phone buddies and manage the organization
 
-## Scripts
+# Scripts
 
-### Email phone buddies
+## Email phone buddies
 
 This script emails phone buddy pairs information about each other to allow them to connect.
 
-#### Installation
+### Installation
 
-TODO: not done quite yet
-1. Follow [quickstart guide here](https://developers.google.com/gmail/api/quickstart/python)
+1. Install Python
+   1. 
+      You should get to a point where you can write this on the terminal and it says you're using version 3.something.
+      ```
+      $ python3 --version
+      ```
+2. Install dependencies (TODO)
+   1. Maybe: follow [quickstart guide here](https://developers.google.com/gmail/api/quickstart/python)
+3. Log into the AESOP Google account
+3. Clone the repo (either using `git clone` or downloading the zip file)
+   1. Either:`git clone https://github.com/mokolodi1/aesop-afghanistan`
+   2. Or: go [here](https://github.com/mokolodi1/aesop-afghanistan) and click `Code` => `Download ZIP`
+4. Get secret files from Teo (he'll send them via Discord/WhatsApp)
 
-#### Using
+
+### Using
 1. `gcloud auth application-default login`
 
 Example of use:

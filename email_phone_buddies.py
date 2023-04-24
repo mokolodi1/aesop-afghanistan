@@ -141,7 +141,7 @@ def send_email(gmail_service, to, subject, email_text):
         message['To'] = to
     else:
         message['To'] = ", ".join(to)
-    message['From'] = 'teo@aesopafghanistan.org'
+    message['From'] = 'contact@aesopafghanistan.org'
     message['Subject'] = subject
 
     # encoded message
