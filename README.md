@@ -1,36 +1,54 @@
 # AESOP Afghanistan
 
-Various scripts used to arrange phone buddies and manage the organization
+Various scripts used to arrange phone buddies and manage the organization.
 
 # Scripts
 
-## Email phone buddies
+## Email phone buddies script
 
 This script emails phone buddy pairs information about each other to allow them to connect.
 
 ### Installation
 
-1. Install Python
-   1. 
-      You should get to a point where you can write this on the terminal and it says you're using version 3.something.
-      ```
-      $ python3 --version
-      ```
-2. Install dependencies (TODO)
-   1. Maybe: follow [quickstart guide here](https://developers.google.com/gmail/api/quickstart/python)
-3. Log into the AESOP Google account
-3. Clone the repo (either using `git clone` or downloading the zip file)
-   1. Either:`git clone https://github.com/mokolodi1/aesop-afghanistan`
-   2. Or: go [here](https://github.com/mokolodi1/aesop-afghanistan) and click `Code` => `Download ZIP`
-4. Get secret files from Teo (he'll send them via Discord/WhatsApp)
+The following steps are used to set up a fresh EC2 server.
 
+```
+# On laptop - move over PEM file and secrets folder and ssh into server
+IP=0.0.0.0 #get this from Teo prior to executing these steps (look on Discord)
+scp -r -i /path/to/phone_buddy_key_pair.pem /path/to/secrets ec2-user@$IP:/home/ec2-user/aesop-afghanistan
+ssh -i /path/to/phone_buddy_key_pair.pem ec2-user@$IP
 
-### Using
-1. `gcloud auth application-default login`
+# On server - install updates, tools, and download code
+sudo yum update -y && sudo yum install git tmux python3-pip -y
+tmux
+git clone https://github.com/mokolodi1/aesop-afghanistan
+
+# On server - install Python 3.10
+# Pulled from: https://devopsmania.com/how-to-install-python3-on-amazon-linux-2/
+sudo yum update -y
+sudo yum groupinstall "Development Tools" -y
+sudo yum install openssl-devel libffi-devel bzip2-devel wget -y
+cd /opt
+sudo wget https://www.python.org/ftp/python/3.10.2/Python-3.10.2.tgz
+sudo tar xzf Python-3.10.2.tgz
+cd Python-3.10.2
+sudo ./configure --enable-optimizations
+make -j $(nproc)
+sudo make altinstall
+
+# On server - install Google dependencies
+# (Following steps here: https://developers.google.com/gmail/api/quickstart/python)
+pip3.10 install --upgrade google-api-python-client google-auth-httplib2 google-auth-oauthlib click
+```
+
+### Use
 
 Example of use:
 ```
-$ python3 email_phone_buddies.py
+laptop$ IP=0.0.0.0 #get this from Teo prior to executing these steps (look on Discord)
+laptop$ ssh -i /path/to/phone_buddy_key_pair.pem ec2-user@$IP
+server$ tmux a # attach to running tmux session
+server$ python3 email_phone_buddies.py --send-emails
 You are about to send 23 emails to phone buddy volunteers. Are you sure you want to continue? [y/N]: y
 Okay... well let's just make you wait for a few seconds (5) and see if you change your mind.
 Are you still absolutely, positively sure? [y/N]: y
