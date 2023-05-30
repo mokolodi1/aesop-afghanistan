@@ -19,7 +19,7 @@ scp -r -i /path/to/phone_buddy_key_pair.pem /path/to/secrets ec2-user@$IP:/home/
 ssh -i /path/to/phone_buddy_key_pair.pem ec2-user@$IP
 
 # On server - install updates, tools, and download code
-sudo yum update -y && sudo yum install git tmux python3-pip -y
+sudo yum update -y && sudo yum install git tmux python3-pip emacs-nox -y
 tmux
 git clone https://github.com/mokolodi1/aesop-afghanistan
 
@@ -39,16 +39,31 @@ sudo make altinstall
 # On server - install Google dependencies
 # (Following steps here: https://developers.google.com/gmail/api/quickstart/python)
 pip3.10 install --upgrade google-api-python-client google-auth-httplib2 google-auth-oauthlib click
+
+# On server - install Teo's dotfiles
+cd ~
+git clone https://github.com/mokolodi1/dotfiles
+cd dotfiles
+./install.sh
 ```
 
 ### Use
+
+If the `tmux` session is not set up as you're used to, check out this cheat sheet: https://tmuxcheatsheet.com/
 
 Example of use:
 ```
 laptop$ IP=0.0.0.0 #get this from Teo prior to executing these steps (look on Discord)
 laptop$ ssh -i /path/to/phone_buddy_key_pair.pem ec2-user@$IP
-server$ tmux a # attach to running tmux session
-server$ python3 email_phone_buddies.py --send-emails
+server$ tmux a          # attach to running tmux session
+server$ cd ~/aesop-afghanistan/
+server$ rm token.json   # if the token file has expired
+server$ python3.10 email_phone_buddies.py  # to validate the emails look good
+Please visit this URL to authorize this application: https://accounts.google.com/o/oauth2/...
+
+server2$ curl "http://localhost:60325/..."
+
+server$ python3.10 email_phone_buddies.py --send-emails
 You are about to send 23 emails to phone buddy volunteers. Are you sure you want to continue? [y/N]: y
 Okay... well let's just make you wait for a few seconds (5) and see if you change your mind.
 Are you still absolutely, positively sure? [y/N]: y
@@ -60,4 +75,9 @@ Will wait 1 seconds between each email.
 Sending email to Zahra (Zahra) - zahra@aesopafghanistan.org and Teo Fleming (Teo) - mokolodi1@gmail.com
 Message sent: {'id': '1875330a9539d62d', 'threadId': '1875330a9539d62d', 'labelIds': ['UNREAD', 'SENT', 'INBOX']}
 ...
+```
+
+If you get a scary-looking file permissions error, run the following:
+```
+chmod 700 /path/to/phone_buddy_key_pair.pem
 ```
