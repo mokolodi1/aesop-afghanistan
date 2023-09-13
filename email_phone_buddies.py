@@ -2,9 +2,10 @@ from __future__ import print_function
 
 import base64
 import click
+from datetime import datetime
 import os.path
-import sys
 import time
+import traceback
 import argparse
 
 from google.auth.transport.requests import Request
@@ -26,6 +27,11 @@ BETWEEN_EMAIL_PAUSE_SECS = 2
 DATA_SPREADSHEET_ID = None
 with open("secrets/spreadsheet_id.txt", mode="r") as spreadsheet_id_file:
     DATA_SPREADSHEET_ID = spreadsheet_id_file.read()
+
+
+BETA_BUDDY_PAIRS = None
+with open("secrets/beta_emails.txt", mode="r") as beta_emails_file:
+    BETA_BUDDY_PAIRS = [line.split(",") for line in beta_emails_file.readlines()]
 
 
 class Buddy:
@@ -55,8 +61,7 @@ class Buddy:
 
         if value is None:
             if required:
-                print("ERROR: missing %s data for buddy: %s" % (attribute_name, self._raw_row_info))
-                sys.exit(1)
+                raise Exception("ERROR: missing %s data for buddy: %s" % (attribute_name, self._raw_row_info))
             else:
                 value = default
 
@@ -164,21 +169,23 @@ def create_buddy_email_map(buddies):
     return buddy_email_map
 
 
-def send_buddy_emails(gmail_service, drive_service, buddies, buddy_pairs, really_send_emails):
+def send_buddy_emails(gmail_service, drive_service, buddies, buddy_pairs, really_send_emails, robot_actor):
+    if really_send_emails:
+        if not robot_actor:
+            click.confirm('You are about to send %s emails to phone buddy volunteers. Are you sure you want to continue?' %
+                          len(buddy_pairs), abort=True, default=False)
+    else:
+        print("--send-emails option not passed in, will calculate all emails to send but not actually send anything.")
+
     buddy_email_map = create_buddy_email_map(buddies)
 
     # Verify that all the pairs have buddy information
-    found_issue = False
     flat_buddy_list = [email for buddy_pair in buddy_pairs for email in buddy_pair]
     for email in flat_buddy_list:
         try:
             buddy_email_map[email]
         except KeyError:
-            found_issue = True
-            print("Couldn't find info in the database for the following email: %s" % email)
-    if found_issue:
-        print("Found some issues - see above. Not sending emails ane exiting.")
-        sys.exit(1)
+            raise Exception("Couldn't find info in the database for the following email: \"%s\"" % email)
 
     email_info = EmailInfo(drive_service)
 
@@ -224,7 +231,9 @@ Your friendly AESOP Admin"""
             print("====================================")
             print(email_text)
             print("====================================")
-            if really_send_emails:
+
+            # Last check for the humans before sending the emails
+            if really_send_emails and not robot_actor:
                 click.confirm("Does the above email look good to send to everyone?")
                 print("Okay... well let's just make you wait for a few seconds (5) and see if you change your mind.")
                 time.sleep(5)
@@ -238,28 +247,107 @@ Your friendly AESOP Admin"""
             send_email(gmail_service, buddy_pair, subject, email_text)
 
 
+def read_process_sheet(drive_service):
+    result = drive_service.spreadsheets().values().get(
+        spreadsheetId=DATA_SPREADSHEET_ID, range="'Process'!A3:H500").execute()
+    return result.get('values', [])
+
+
+def should_send_emails(process_data, robot_actor):
+    for i, row_data in enumerate(process_data):
+        print("Processing row %d: %s" % (i, str(row_data)))
+        date_str, *process_steps = row_data
+
+        try:
+            date = datetime.strptime(date_str, "%A, %B %d, %Y").replace(year=datetime.now().year)
+        except ValueError:
+            print("Incorrect date - skipping")
+            continue  # skip this row if it has an incorrect date
+
+        if date > datetime.now():
+            print("Date in future - not checking more rows")
+            break
+
+        # Munge the process steps a bit (add missing rows and rewrite yes or y as Yes)
+        process_steps += ["" for i in range(6 - len(process_steps))]
+        process_steps = ["Yes" if value.upper() == "YES" or value.upper() == "Y" else value for value in process_steps]
+        print("After munging process steps: %s" % str(process_steps))
+
+        # For beta, all previous steps need to be true until the send beta emails step
+        if all(step == 'Yes' for step in process_steps[:-2]) and process_steps[-2] != "Yes":
+            print("Sending beta emails!")
+            return True, True, i
+
+        # All steps need to be done except the last one
+        if all(step == 'Yes' for step in process_steps[:-1]) and process_steps[-1] != "Yes":
+            print("Sending emails!")
+            return True, False, i
+
+        print("Nope, not running on this row")
+
+    if robot_actor:
+        return False, None, None
+    else:
+        return True, False, None
+
+
+def update_process_sheet(drive_service, beta_email, row_number, status):
+    if row_number is None:
+        print("Row number is None - must be a human running this when the process is messed up...")
+        print("Not updating anything on the process sheet!")
+        return
+
+    sheet_location = f"{'F' if beta_email else 'G'}{row_number + 2 + 1}"
+    print("Updating process sheet: %s to %s" % (sheet_location, status))
+
+    drive_service.spreadsheets().values().update(
+        spreadsheetId=DATA_SPREADSHEET_ID,
+        range=f"'Process'!{sheet_location}",
+        body={"values": [[status]]},
+        valueInputOption="RAW"
+    ).execute()
+
+
+def update_error_message(drive_service, error_message):
+    drive_service.spreadsheets().values().update(
+        spreadsheetId=DATA_SPREADSHEET_ID,
+        range=f"'Errors'!A1",
+        body={"values": [[error_message]]},
+        valueInputOption="RAW"
+    ).execute()
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--send-emails", action='store_true')
+    parser.add_argument("--robot", action='store_true')
 
     args = parser.parse_args()
-
-    really_send_emails = args.send_emails
 
     creds = get_credentials()
     drive_service = build('sheets', 'v4', credentials=creds)
     gmail_service = build('gmail', 'v1', credentials=creds)
 
-    buddy_pairs = get_buddy_email_pairs(drive_service)
-    buddies = get_buddies(drive_service)
+    process_data = read_process_sheet(drive_service)
+    should_send, beta_email, row_number = should_send_emails(process_data, args.robot)
 
-    if really_send_emails:
-        click.confirm('You are about to send %s emails to phone buddy volunteers. Are you sure you want to continue?' %
-                      len(buddy_pairs), abort=True, default=False)
-    else:
-        print("--send-emails option not passed in, will calculate all emails to send but not actually send anything.")
+    if should_send:
+        try:
+            buddy_pairs = BETA_BUDDY_PAIRS if beta_email else get_buddy_email_pairs(drive_service)
+            buddies = get_buddies(drive_service)
 
-    send_buddy_emails(gmail_service, drive_service, buddies, buddy_pairs, really_send_emails)
+            send_buddy_emails(gmail_service, drive_service, buddies, buddy_pairs, args.send_emails, args.robot)
+
+            if args.send_emails:
+                update_process_sheet(drive_service, beta_email, row_number, "Yes")
+            else:
+                update_process_sheet(drive_service, beta_email, row_number, "Ran dry-run")
+        except Exception as e:
+            print("Had some sort of exception while trying to send:")
+            trace = traceback.format_exc()
+            print(trace)
+            update_process_sheet(drive_service, beta_email, row_number, "Error")
+            update_error_message(drive_service, trace)
 
 
 if __name__ == '__main__':

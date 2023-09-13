@@ -2,11 +2,33 @@
 
 Various scripts used to arrange phone buddies and manage the organization.
 
+# To prospective employers
+
+Hi! This repo leaves much to be desired in terms of code quality.
+I have a list of todos that I'll leave here for what I'd change,
+but suffice to say that much of the time,
+my volunteer effort is better spent on other things.  
+
+## What I would change
+
+- Refactoring to allow for easier comprehension and modifications to the system
+  - Adding comments to functions and classes 
+- Adding unit tests
+- Moving to a more robust system than an EC2 box and Cron
+
 # Scripts
 
 ## Email phone buddies script
 
 This script emails phone buddy pairs information about each other to allow them to connect.
+
+Every 24 hours at midnight or 1 am (depending on daylight savings), the following script runs:
+```
+python3.10 email_phone_buddies.py --send-emails --robot
+```
+
+More info on how this works in practice (in human-digestible terms) is on
+[Discord (linked)](https://discord.com/channels/1086570523267440790/1095031520101671005/1151396841670328340).
 
 ### Installation
 
@@ -19,8 +41,11 @@ scp -r -i /path/to/phone_buddy_key_pair.pem /path/to/secrets ec2-user@$IP:/home/
 ssh -i /path/to/phone_buddy_key_pair.pem ec2-user@$IP
 
 # On server - install updates, tools, and download code
-sudo yum update -y && sudo yum install git tmux python3-pip emacs-nox -y
+sudo yum update -y && sudo yum install git tmux python3-pip emacs-nox cronie -y
 tmux
+sudo systemctl enable crond
+sudo systemctl start crond
+
 git clone https://github.com/mokolodi1/aesop-afghanistan
 
 # On server - install Python 3.10
