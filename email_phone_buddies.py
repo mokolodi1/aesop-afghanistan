@@ -109,9 +109,13 @@ def get_credentials():
         else:
             flow = InstalledAppFlow.from_client_secrets_file('secrets/credentials.json', SCOPES)
             creds = flow.run_local_server(port=0)
-        # Save the credentials for the next run
-        with open('token.json', 'w') as token:
-            token.write(creds.to_json())
+    else:
+        # always try to refresh the credentials - might as well try!
+        creds.refresh(Request())
+
+    # Save the credentials for the next run (regardless of whether they've been updated)
+    with open('token.json', 'w') as token:
+        token.write(creds.to_json())
 
     return creds
 
