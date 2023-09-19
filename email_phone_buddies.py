@@ -31,7 +31,7 @@ with open("secrets/spreadsheet_id.txt", mode="r") as spreadsheet_id_file:
 
 BETA_BUDDY_PAIRS = None
 with open("secrets/beta_emails.txt", mode="r") as beta_emails_file:
-    BETA_BUDDY_PAIRS = [line.split(",") for line in beta_emails_file.readlines()]
+    BETA_BUDDY_PAIRS = [line.strip().split(",") for line in beta_emails_file.readlines()]
 
 
 class Buddy:
