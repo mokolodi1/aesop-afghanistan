@@ -7,6 +7,9 @@ import os.path
 import time
 import traceback
 import argparse
+import itertools
+
+from enum import Enum
 
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
@@ -14,7 +17,6 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 
 from email.message import EmailMessage
-
 
 # NOTE: When modifying these scopes, delete the file token.json.
 SCOPES = [
@@ -28,10 +30,17 @@ DATA_SPREADSHEET_ID = None
 with open("secrets/spreadsheet_id.txt", mode="r") as spreadsheet_id_file:
     DATA_SPREADSHEET_ID = spreadsheet_id_file.read()
 
-
 BETA_BUDDY_PAIRS = None
 with open("secrets/beta_emails.txt", mode="r") as beta_emails_file:
     BETA_BUDDY_PAIRS = [line.strip().split(",") for line in beta_emails_file.readlines()]
+
+
+class EmailListAction(Enum):
+    SEND_TO_ALL = 1
+    SEND_TO_BETA = 2
+    REMIND_ADMINS = 3
+    NOTHING = 4
+    # TODO: dryrun send to all
 
 
 class Buddy:
@@ -176,8 +185,9 @@ def create_buddy_email_map(buddies):
 def send_buddy_emails(gmail_service, drive_service, buddies, buddy_pairs, really_send_emails, robot_actor):
     if really_send_emails:
         if not robot_actor:
-            click.confirm('You are about to send %s emails to phone buddy volunteers. Are you sure you want to continue?' %
-                          len(buddy_pairs), abort=True, default=False)
+            click.confirm(
+                'You are about to send %s emails to phone buddy volunteers. Are you sure you want to continue?' %
+                len(buddy_pairs), abort=True, default=False)
     else:
         print("--send-emails option not passed in, will calculate all emails to send but not actually send anything.")
 
@@ -257,7 +267,28 @@ def read_process_sheet(drive_service):
     return result.get('values', [])
 
 
+def remind_admins(gmail_service):
+    for admin_email in set(itertools.chain(*BETA_BUDDY_PAIRS)):
+        email_text = f"""Hi AESOP Phone Buddy Admin,
+
+Don't forget to fill out the Process sheet for the AESOP phone buddies!
+
+https://docs.google.com/spreadsheets/d/{DATA_SPREADSHEET_ID}/edit#gid=136000488
+
+Best,
+
+Teo
+"""
+
+        send_email(gmail_service, admin_email, "AESOP Phone Buddy Reminder", email_text)
+
+
 def should_send_emails(process_data, robot_actor):
+    """
+    :param process_data: data from the process sheet
+    :param robot_actor: whether this is a robot running the script
+    :return: email_list_action, row_number
+    """
     for i, row_data in enumerate(process_data):
         print("Processing row %d: %s" % (i, str(row_data)))
         date_str, *process_steps = row_data
@@ -280,19 +311,23 @@ def should_send_emails(process_data, robot_actor):
         # For beta, all previous steps need to be true until the send beta emails step
         if all(step == 'Yes' for step in process_steps[:-2]) and process_steps[-2] != "Yes":
             print("Sending beta emails!")
-            return True, True, i
+            return EmailListAction.SEND_TO_BETA, i
 
         # All steps need to be done except the last one
         if all(step == 'Yes' for step in process_steps[:-1]) and process_steps[-1] != "Yes":
             print("Sending emails!")
-            return True, False, i
+            return EmailListAction.SEND_TO_ALL, i
 
-        print("Nope, not running on this row")
+        if all(step == '' for step in process_steps):
+            print("Reminding admins ;)")
+            return EmailListAction.REMIND_ADMINS, None
+
+        print("Nope, not running on this row...")
 
     if robot_actor:
-        return False, None, None
+        return EmailListAction.NOTHING, None
     else:
-        return True, False, None
+        return EmailListAction.SEND_TO_ALL, None
 
 
 def update_process_sheet(drive_service, beta_email, row_number, status):
@@ -333,25 +368,29 @@ def main():
     gmail_service = build('gmail', 'v1', credentials=creds)
 
     process_data = read_process_sheet(drive_service)
-    should_send, beta_email, row_number = should_send_emails(process_data, args.robot)
+    email_list_action, row_number = should_send_emails(process_data, args.robot)
 
-    if should_send:
+    if email_list_action in [EmailListAction.SEND_TO_ALL, EmailListAction.SEND_TO_BETA]:
+        is_beta_email = email_list_action == EmailListAction.SEND_TO_BETA
+
         try:
-            buddy_pairs = BETA_BUDDY_PAIRS if beta_email else get_buddy_email_pairs(drive_service)
+            buddy_pairs = BETA_BUDDY_PAIRS if is_beta_email else get_buddy_email_pairs(drive_service)
             buddies = get_buddies(drive_service)
 
             send_buddy_emails(gmail_service, drive_service, buddies, buddy_pairs, args.send_emails, args.robot)
 
             if args.send_emails:
-                update_process_sheet(drive_service, beta_email, row_number, "Yes")
+                update_process_sheet(drive_service, is_beta_email, row_number, "Yes")
             else:
-                update_process_sheet(drive_service, beta_email, row_number, "Ran dry-run")
+                update_process_sheet(drive_service, is_beta_email, row_number, "Ran dry-run")
         except Exception as e:
             print("Had some sort of exception while trying to send:")
             trace = traceback.format_exc()
             print(trace)
-            update_process_sheet(drive_service, beta_email, row_number, "Error")
+            update_process_sheet(drive_service, is_beta_email, row_number, "Error")
             update_error_message(drive_service, trace)
+    elif email_list_action == EmailListAction.REMIND_ADMINS:
+        remind_admins(gmail_service)
 
 
 if __name__ == '__main__':
