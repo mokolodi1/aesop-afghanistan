@@ -72,6 +72,14 @@ cd dotfiles
 ./install.sh
 ```
 
+#### Set up Cron
+
+Set up `cron` as follows with `crontab -e`:
+
+```
+0 9 * * * { echo "[$(date +\%Y-\%m-\%d\ \%H:\%M:\%S)] Starting job"; cd /home/ec2-user/aesop-afghanistan && /usr/local/bin/python3.10 /home/ec2-user/aesop-afghanistan/email_phone_buddies.py --send-emails --robot; echo "[$(date +\%Y-\%m-\%d\ \%H:\%M:\%S)] Job completed"; } >> /home/ec2-user/aesop-afghanistan/cron_logs.txt 2>&1
+```
+
 ### Use
 
 If the `tmux` session is not set up as you're used to, check out this cheat sheet: https://tmuxcheatsheet.com/
