@@ -28,7 +28,8 @@ python3.10 email_phone_buddies.py --send-emails --robot
 ```
 
 More info on how this works in practice (in human-digestible terms) is on
-[Discord (linked)](https://discord.com/channels/1086570523267440790/1095031520101671005/1151396841670328340).
+[Discord (linked)](https://discord.com/channels/1086570523267440790/1095031520101671005/1151396841670328340)
+(You need to be on the Discord in order to see the link)
 
 ### Installation
 
