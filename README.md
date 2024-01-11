@@ -115,3 +115,7 @@ If you get a scary-looking file permissions error, run the following:
 ```
 chmod 700 /path/to/phone_buddy_key_pair.pem
 ```
+
+# Contributing
+
+As of January 2023, we're having weekly meetings to check in on development and move this project along. If you're interested in helping out, send Teo a WhatsApp at +33 6 17 50 71 28. 
