@@ -141,20 +141,43 @@ As of January 2023, we're having weekly meetings to check in on development and 
 
 ## How to set up your local device for development work
 
-1. Clone this git repo locally
+### 0. Get access to the spreadsheet
+
+TODO: write this (e.g. ask Teo to add you)
+
+### 1. Clone this git repo locally
 ```
 git clone https://github.com/mokolodi1/aesop-afghanistan
 cd aesop-afghanistan
 ```
 
-2. Install Docker
+### 2. Install Docker
 
 TODO: link to docker installation documentation online
 
-3. Get access to the spreadsheet
+### 3. Set up secrets locally
 
-TODO: write this (e.g. ask Teo to add you)
+You'll need to set up several files locally in order to successfully run the script. Ask Teo for directions!
 
-4. Test to validate everything works
+### 4. Run the test suite
 
-TODO: more info
+TODO: can fill this in once we we have info on the test suite
+
+### 5. Manual testing
+
+You can get yourself into an environment where you can test the script using the following commands. 
+```sh
+docker build -t aesop-phone-buddy-script . && docker run -it --rm -v "$(pwd)":/app aesop-phone-buddy-script
+```
+
+You will be dropped into a Docker shell session where you can run commands that will execute the script, like so:
+```
+# Test the script without sending any emails
+python email_phone_buddies.py
+
+# Test the script without the user prompts (this is how it will run on the server)
+python email_phone_buddies.py --robot
+
+# Actually send emails (use with caution!)
+python email_phone_buddies.py --send-emails
+```
