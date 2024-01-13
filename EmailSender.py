@@ -31,11 +31,11 @@ class EmailSender:
         self.service = GoogleServiceProvider.gmail_service()
 
 
-    def enable_email_sending():
+    def enable_email_sending(self):
         """
         Call this method in order to really send emails. Otherwise, emails will not actually send.
         """
-        _really_send_emails = True
+        self._really_send_emails = True
 
 
     def __rate_limit_emails():

@@ -13,7 +13,7 @@ from ResultTracker import ResultTracker
 
 ADMIN_EMAILS = None
 with open("secrets/admin_emails.txt", mode="r") as admin_emails_file:
-    ADMIN_EMAILS = set(itertools.chain(*[line.strip().split(",") for line in admin_emails_file.readlines()]))
+    ADMIN_EMAILS = list(set(itertools.chain(*[line.strip().split(",") for line in admin_emails_file.readlines()])))
 
 
 class PhoneBuddyManager:
@@ -28,6 +28,9 @@ class PhoneBuddyManager:
 
         self._db_connector = DatabaseConnector.get_instance()
         self._email_sender = EmailSender.get_instance()
+        
+        if self._really_send_emails:
+            self._email_sender.enable_email_sending()
 
 
     def give_humans_one_last_chance_to_review(self):
@@ -96,7 +99,11 @@ class PhoneBuddyManager:
         if len(ADMIN_EMAILS) != 2:
             ResultTracker.add_issue("Different number of admins than expected")
 
-        return ADMIN_EMAILS[:2]
+        return [ADMIN_EMAILS[:2]]
+
+
+    def emails_sent_status(self):
+        return "Yes" if self._really_send_emails else "Dry-run complete"
 
 
     def manage_phone_buddy_list(self):
@@ -118,9 +125,11 @@ class PhoneBuddyManager:
                 ResultTracker.set_result("Phone buddy list already sent this week.")
             elif process.admin_email_sent:
                 self.send_buddy_emails(buddy_pairs)
+                self._db_connector.update_process_buddies_emailed(process, self.emails_sent_status())
                 ResultTracker.set_result("Phone buddy list sent")
             elif process.human_process_complete:
                 self.send_buddy_emails(self.admin_buddy_pairs())
+                self._db_connector.update_process_admins_emailed(process, self.emails_sent_status())
                 ResultTracker.set_result("Admins emailed with trial email")
             else:
                 self.send_admin_reminder_emails()

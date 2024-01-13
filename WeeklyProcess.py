@@ -6,17 +6,18 @@ class WeeklyProcess:
     Represent the process that we go through each week in order to send out the phone buddy list
     """
 
-    def __init__(self, week_start_date, human_process_complete, admin_email_sent, phone_buddy_emails_sent):
+    def __init__(self, week_start_date, human_process_complete, admin_email_sent, phone_buddy_emails_sent, row_index):
         self.week_start_date = week_start_date
         self.is_current_week = week_start_date >= datetime.now() - timedelta(days=7)
         self.is_in_the_future = week_start_date > datetime.now()
         self.human_process_complete = human_process_complete
         self.admin_email_sent = admin_email_sent
         self.phone_buddy_emails_sent = phone_buddy_emails_sent
+        self.row_index = row_index
         
 
     @staticmethod
-    def parse_from_google_sheet_row(row_data):
+    def parse_from_google_sheet_row(row_data, row_index):
         """
         Try to parse a WeeklyProcess object from the row data passed in.
         
@@ -51,4 +52,4 @@ class WeeklyProcess:
         elif all(step == 'Yes' for step in process_steps[:-2]):
             human_process_complete = True
 
-        return WeeklyProcess(date, human_process_complete, admin_email_sent, phone_buddy_emails_sent)
+        return WeeklyProcess(date, human_process_complete, admin_email_sent, phone_buddy_emails_sent, row_index)

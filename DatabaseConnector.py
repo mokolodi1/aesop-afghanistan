@@ -1,4 +1,5 @@
 from functools import cache
+import logging
 from Buddy import Buddy
 from EmailInfo import EmailInfo
 from GoogleServiceProvider import GoogleServiceProvider
@@ -38,6 +39,17 @@ class DatabaseConnector:
         
         return result.get('values', [])
     
+
+    def _set_cell(self, sheet_name, sheet_location, new_value):
+        logging.debug('Setting "%s"!%s to %s' % (sheet_name, sheet_location, new_value))
+
+        self._service.spreadsheets().values().update(
+            spreadsheetId=DatabaseConnector.get_instance()._data_spreadsheet_id,
+            range=f"'{sheet_name}'!{sheet_location}",
+            body={"values": [[new_value]]},
+            valueInputOption="RAW"
+        ).execute()
+
 
     @staticmethod
     def get_database_link(self):
@@ -100,41 +112,27 @@ class DatabaseConnector:
             buddy_email_map[buddy.email] = buddy
 
         return buddy_email_map
+    
+
+    def _update_process_sheet(self, process_row_index, column, status):
+        sheet_location = f"{column}{process_row_index + 3}"
+
+        self._set_cell("Process", sheet_location, status)
 
 
-    def set_error_message(sheets_service, error_message):
-        """
-        Sets the error message so that it can be viewed by a user for easy diagnosis.
-        """
-        sheets_service.spreadsheets().values().update(
-            spreadsheetId=DatabaseConnector.get_instance()._data_spreadsheet_id,
-            range=f"'Errors'!A1",
-            body={"values": [[error_message]]},
-            valueInputOption="RAW"
-        ).execute()
+    def update_process_admins_emailed(self, process: WeeklyProcess, status):
+        self._update_process_sheet(process.row_index, "F", status)
 
-    def update_process_sheet(sheets_service, beta_email, row_number, status):
-        if row_number is None:
-            print("Row number is None - must be a human running this when the process is messed up...")
-            print("Not updating anything on the process sheet!")
-            return
 
-        sheet_location = f"{'F' if beta_email else 'G'}{row_number + 2 + 1}"
-        print("Updating process sheet: %s to %s" % (sheet_location, status))
-
-        sheets_service.spreadsheets().values().update(
-            spreadsheetId=DatabaseConnector.get_instance()._data_spreadsheet_id,
-            range=f"'Process'!{sheet_location}",
-            body={"values": [[status]]},
-            valueInputOption="RAW"
-        ).execute()
+    def update_process_buddies_emailed(self, process: WeeklyProcess, status):
+        self._update_process_sheet(process.row_index, "G", status)
 
 
     @cache
     def get_this_weeks_process(self):
         data = self._get_cells("'Process'!A3:H500")
 
-        processes = [WeeklyProcess.parse_from_google_sheet_row(row) for row in data]
+        processes = [WeeklyProcess.parse_from_google_sheet_row(row, index) for index, row in enumerate(data)]
 
         # Remove the invalid entries (parse_from_google_sheet_row returns None if invalid)
         processes = [process for process in processes if process is not None]
