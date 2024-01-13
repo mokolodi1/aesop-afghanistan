@@ -1,4 +1,6 @@
+from functools import cache
 import os.path
+from urllib.parse import parse_qs, urlparse
 
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
@@ -14,6 +16,7 @@ SCOPES = [
 
 class GoogleServiceProvider:
     @staticmethod
+    @cache
     def __get_credentials():
         creds = None
 
@@ -28,8 +31,26 @@ class GoogleServiceProvider:
             if creds and creds.expired and creds.refresh_token:
                 creds.refresh(Request())
             else:
-                flow = InstalledAppFlow.from_client_secrets_file('secrets/credentials.json', SCOPES)
-                creds = flow.run_local_server(port=0)
+                flow = InstalledAppFlow.from_client_secrets_file(
+                    'secrets/credentials.json', SCOPES)
+
+                # Use a local server for the redirect_uri
+                flow.redirect_uri = 'http://localhost:8080/'
+
+                auth_url, _ = flow.authorization_url(prompt='consent')
+
+                print("Please go to this URL and finish the authentication process: {}".format(auth_url))
+                url = input("Enter the URL you are forwarded to: ")
+
+                # Extract the authorization code from the URL
+                parsed_url = urlparse(url)
+                query_params = parse_qs(parsed_url.query)
+                auth_code = query_params.get("code", [None])[0]
+
+                # TODO: ask again if they sent in something that doesn't make sense (add a while loop that allows them to try a few times)
+
+                flow.fetch_token(code=auth_code)
+                creds = flow.credentials
         else:
             # always try to refresh the credentials - might as well try!
             creds.refresh(Request())
@@ -38,12 +59,13 @@ class GoogleServiceProvider:
         with open('token.json', 'w') as token:
             token.write(creds.to_json())
 
+        print("creds at the end: %s", creds)
         return creds
 
     @staticmethod
-    def drive_service():
-        build('sheets', 'v4', credentials=GoogleServiceProvider.__get_credentials())
+    def sheets_service():
+        return build('sheets', 'v4', credentials=GoogleServiceProvider.__get_credentials())
 
     @staticmethod
     def gmail_service():
-        build('gmail', 'v1', credentials=GoogleServiceProvider.__get_credentials())
+        return build('gmail', 'v1', credentials=GoogleServiceProvider.__get_credentials())

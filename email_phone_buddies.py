@@ -3,9 +3,6 @@ import argparse
 import logging
 import sys
 
-logging.debug('A debug message!')
-logging.info('We processed %d records', len(processed_records))
-
 
 def main():
     parser = argparse.ArgumentParser(description="Email the AESOP phone buddies if the time is right.")

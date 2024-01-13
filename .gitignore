@@ -2,3 +2,4 @@
 .idea
 token.json
 secrets*
+__pycache__

@@ -23,14 +23,14 @@ class DatabaseConnector:
     def __init__(self):
         if DatabaseConnector._instance is not None:
             raise Exception("This class is a singleton!")
-        else:
-            self.service = GoogleServiceProvider.sheets_service()
+        
+        self._service = GoogleServiceProvider.sheets_service()
 
-            with open("secrets/spreadsheet_id.txt", mode="r") as spreadsheet_id_file:
-                self._data_spreadsheet_id = spreadsheet_id_file.read()
+        with open("secrets/spreadsheet_id.txt", mode="r") as spreadsheet_id_file:
+            self._data_spreadsheet_id = spreadsheet_id_file.read()
 
     def _get_cells(self, cells_description):
-        result = self.service.spreadsheets().values().get(
+        result = self._service.spreadsheets().values().get(
             spreadsheetId=self._data_spreadsheet_id, range=cells_description).execute()
         
         return result.get('values', [])
@@ -97,18 +97,18 @@ class DatabaseConnector:
         return buddy_email_map
 
 
-    def set_error_message(drive_service, error_message):
+    def set_error_message(sheets_service, error_message):
         """
         Sets the error message so that it can be viewed by a user for easy diagnosis.
         """
-        drive_service.spreadsheets().values().update(
+        sheets_service.spreadsheets().values().update(
             spreadsheetId=DatabaseConnector.get_instance()._data_spreadsheet_id,
             range=f"'Errors'!A1",
             body={"values": [[error_message]]},
             valueInputOption="RAW"
         ).execute()
 
-    def update_process_sheet(drive_service, beta_email, row_number, status):
+    def update_process_sheet(sheets_service, beta_email, row_number, status):
         if row_number is None:
             print("Row number is None - must be a human running this when the process is messed up...")
             print("Not updating anything on the process sheet!")
@@ -117,7 +117,7 @@ class DatabaseConnector:
         sheet_location = f"{'F' if beta_email else 'G'}{row_number + 2 + 1}"
         print("Updating process sheet: %s to %s" % (sheet_location, status))
 
-        drive_service.spreadsheets().values().update(
+        sheets_service.spreadsheets().values().update(
             spreadsheetId=DatabaseConnector.get_instance()._data_spreadsheet_id,
             range=f"'Process'!{sheet_location}",
             body={"values": [[status]]},

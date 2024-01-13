@@ -28,7 +28,7 @@ class EmailSender:
         if EmailSender._instance is not None:
             raise Exception("This class is a singleton!")
         
-        self.service = GoogleServiceProvider.sheets_service()
+        self.service = GoogleServiceProvider.gmail_service()
 
 
     def enable_email_sending():
@@ -36,6 +36,7 @@ class EmailSender:
         Call this method in order to really send emails. Otherwise, emails will not actually send.
         """
         _really_send_emails = True
+
 
     def __rate_limit_emails():
         """

@@ -21,8 +21,8 @@ class ResultTracker:
         if ResultTracker._instance is not None:
             raise Exception("This class is a singleton!")
         
-        _issues = []
-        _result_description = "No result set"
+        self._issues = []
+        self._result_description = "No result set"
 
     @staticmethod
     def set_result(description):
@@ -34,7 +34,7 @@ class ResultTracker:
         ResultTracker.get_instance()._issues.append(description)
 
     @staticmethod
-    def get_summary(description):
+    def get_summary():
         """
         Returns a summary of the result of this run so far.
         """
@@ -50,6 +50,8 @@ class ResultTracker:
                 # TODO: add four spaces before all lines in the issue text other than the first one
                 # (so it's easy to see the issues)
                 summary += "\n%d. %s" % (index + 1, issue_description)
+        
+        return summary
     
     @staticmethod
     def get_issues():
