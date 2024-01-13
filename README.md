@@ -138,3 +138,23 @@ chmod 400 /path/to/phone_buddy_key_pair.pem
 # Contributing
 
 As of January 2023, we're having weekly meetings to check in on development and move this project along. If you're interested in helping out, send Teo a WhatsApp at +33 6 17 50 71 28. 
+
+## How to set up your local device for development work
+
+1. Clone this git repo locally
+```
+git clone https://github.com/mokolodi1/aesop-afghanistan
+cd aesop-afghanistan
+```
+
+2. Install Docker
+
+TODO: link to docker installation documentation online
+
+3. Get access to the spreadsheet
+
+TODO: write this (e.g. ask Teo to add you)
+
+4. Test to validate everything works
+
+TODO: more info
