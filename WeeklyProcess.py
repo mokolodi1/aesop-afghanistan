@@ -1,4 +1,4 @@
-import datetime
+from datetime import datetime, timedelta
 
 
 class WeeklyProcess:
@@ -8,7 +8,7 @@ class WeeklyProcess:
 
     def __init__(self, week_start_date, human_process_complete, admin_email_sent, phone_buddy_emails_sent):
         self.week_start_date = week_start_date
-        self.is_current_week = week_start_date >= datetime.now() - datetime.timedelta(days=7)
+        self.is_current_week = week_start_date >= datetime.now() - timedelta(days=7)
         self.is_in_the_future = week_start_date > datetime.now()
         self.human_process_complete = human_process_complete
         self.admin_email_sent = admin_email_sent
@@ -35,7 +35,6 @@ class WeeklyProcess:
         # - rewrite yes or y as Yes)
         process_steps += ["" for i in range(6 - len(process_steps))]
         process_steps = ["Yes" if value.upper() == "YES" or value.upper() == "Y" else value for value in process_steps]
-        print("After munging process steps: %s" % str(process_steps))
 
         human_process_complete = False
         admin_email_sent = False

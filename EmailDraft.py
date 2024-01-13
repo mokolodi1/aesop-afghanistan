@@ -17,7 +17,7 @@ class EmailDraft:
 
 
     def __str__(self) -> str:
-        return "EmailDraft(to=%s, from=%s, subject=%s, contents_length=%d)" % (self.to, self.coming_from, self.subject, len(self.contents))
+        return 'EmailDraft(to=%s; from=%s; subject="%s"; contents_length=%d)' % (self.to, self.coming_from, self.subject, len(self.contents))
 
 
     def draft_buddies_email(email_info: EmailInfo, first_buddy: Buddy, second_buddy: Buddy):

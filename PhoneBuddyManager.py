@@ -31,6 +31,9 @@ class PhoneBuddyManager:
 
 
     def give_humans_one_last_chance_to_review(self):
+        if not self._really_send_emails:
+            logging.info("Don't worry: emails won't actually be sent after the following questions!")
+
         click.confirm("Does the above email look good to send to everyone?")
         logging.info("Okay... well let's just make you wait for a few seconds (5) and see if you change your mind.")
         time.sleep(5)
@@ -62,7 +65,7 @@ class PhoneBuddyManager:
 
             if first_buddy_pair:
                 first_buddy_pair = False
-                print("This is the first buddy pair, so we'll print a bit more info...")
+                print("This is the first buddy pair, so we'll print a bit more info to allow for typechecking")
                 print("Draft: %s" % str(draft))
                 print("Email text:")
                 print("====================================")
@@ -70,7 +73,7 @@ class PhoneBuddyManager:
                 print("====================================")
 
                 # Last check for the humans before sending the emails
-                if self._really_send_emails and not self._is_robot:
+                if not self._is_robot:
                     self.give_humans_one_last_chance_to_review()
 
             self._email_sender.send_email(draft)
@@ -99,12 +102,13 @@ class PhoneBuddyManager:
     def manage_phone_buddy_list(self):
         # Read in the database to check whether there's any issues
         buddy_pairs = []
-        buddies = []
         try:
             buddy_pairs = self._db_connector.get_buddy_email_pairs()
-            buddies = self._db_connector.get_buddies()
+
+            # This is intentionally not accessed, but we want to get it so that we catch any issues
+            self._db_connector.get_all_buddies()
         except Exception as e:
-            ResultTracker.add_issue("Error fetching the database: %s" % str(e))
+            ResultTracker.add_issue("Error fetching the database: %s" % str(e), save_traceback=True)
 
         # Check whether we should send out any emails and then do that
         try:
@@ -122,9 +126,11 @@ class PhoneBuddyManager:
                 self.send_admin_reminder_emails()
                 ResultTracker.set_result("Admins reminded")
         except Exception as e:
-            ResultTracker.add_issue("Error checking whether to and sending emails: %s" % str(e))
+            ResultTracker.add_issue("Error checking whether to and sending emails: %s" % str(e), save_traceback=True)
 
         # If any issues were found, report those
         # TODO: if the result was different from the last run (and it was a robot), add a new line to the output sheet
+        print()
+        print()
         logging.info(ResultTracker.get_summary())
         

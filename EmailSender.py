@@ -80,11 +80,11 @@ class EmailSender:
 
             to_send = self.service.users().messages().send(userId="me", body=create_message)
 
-            if self.email_sending_enabled:
+            if self._really_send_emails:
                 to_send.execute()
                 logging.info("Email sent: %s" % draft)
             else:
-                logging.info("Email not sent (but would have been): " % draft)
+                logging.info("Email not sent (but would have been): %s" % draft)
         except Exception as e:
-            ResultTracker.add_issue("Issue sending email %s: " % (str(draft), str(e)))
+            ResultTracker.add_issue("Issue sending email %s: %s" % (str(draft), str(e)), save_traceback=True)
         

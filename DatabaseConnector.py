@@ -27,7 +27,10 @@ class DatabaseConnector:
         self._service = GoogleServiceProvider.sheets_service()
 
         with open("secrets/spreadsheet_id.txt", mode="r") as spreadsheet_id_file:
-            self._data_spreadsheet_id = spreadsheet_id_file.read()
+            # TODO: go to all the different places where we read from secrets and make it easier to identify errors.
+            # Consider employing a more robust secrets system than a set of files sitting on the disk ;)
+            self._data_spreadsheet_id = spreadsheet_id_file.read().strip()
+
 
     def _get_cells(self, cells_description):
         result = self._service.spreadsheets().values().get(
@@ -43,7 +46,7 @@ class DatabaseConnector:
         """
         instance = DatabaseConnector.get_instance()
 
-        return "https://docs.google.com/spreadsheets/d/{DATA_SPREADSHEET_ID}/edit#gid=136000488" % instance._data_spreadsheet_id
+        return "https://docs.google.com/spreadsheets/d/%s/edit#gid=136000488" % instance._data_spreadsheet_id
 
     @cache
     def get_buddy_email_pairs(self):
@@ -59,7 +62,7 @@ class DatabaseConnector:
             reject_pair = False
 
             for email in pair:
-                if email not in buddy_map:
+                if email not in buddy_map.keys():
                     ResultTracker.add_issue("No data in database for email in pair '%s': '%s'" % (str(pair), email))
                     reject_pair = True
             
@@ -78,8 +81,10 @@ class DatabaseConnector:
         for row in rows:
             try:
                 buddy = Buddy(row)
+
+                buddies.append(buddy)
             except Exception as e:
-                ResultTracker.add_issue("Error reading buddy data for row '%s': %s" % (str(row), str(e)))
+                ResultTracker.add_issue("Error reading buddy data for row '%s': %s" % (str(row), str(e)), save_traceback=True)
 
         return buddies
 
@@ -124,8 +129,10 @@ class DatabaseConnector:
             valueInputOption="RAW"
         ).execute()
 
+
+    @cache
     def get_this_weeks_process(self):
-        data = self._get_cells("'Process'!A3:H500").execute()
+        data = self._get_cells("'Process'!A3:H500")
 
         processes = [WeeklyProcess.parse_from_google_sheet_row(row) for row in data]
 
@@ -140,14 +147,11 @@ class DatabaseConnector:
         
         return this_week
     
-    def get_email_info():
-        def _find_labeled_row_text(self, label_text):
-            return next(row[1] for row in self._raw_rows if row[0] == label_text)
+    def get_email_info(self):
+        raw_rows = self._get_cells("'Email info'!A2:B500")
 
-        result = DatabaseConnector.get_instance().service.spreadsheets().values().get(
-            spreadsheetId=DatabaseConnector.get_instance()._data_spreadsheet_id,
-            range="'Email info'!A2:B500").execute()
-        raw_rows = result.get('values', [])
+        def _find_labeled_row_text(label_text):
+            return next(row[1] for row in raw_rows if row[0] == label_text)
 
         intro = _find_labeled_row_text("Intro")
         topic = _find_labeled_row_text("Topic")
