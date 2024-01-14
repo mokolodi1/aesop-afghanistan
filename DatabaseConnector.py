@@ -30,6 +30,7 @@ class DatabaseConnector:
         with open("secrets/spreadsheet_id.txt", mode="r") as spreadsheet_id_file:
             # TODO: go to all the different places where we read from secrets and make it easier to identify errors.
             # Consider employing a more robust secrets system than a set of files sitting on the disk ;)
+            # (https://github.com/mokolodi1/aesop-afghanistan/issues/26)
             self._data_spreadsheet_id = spreadsheet_id_file.read().strip()
 
 
