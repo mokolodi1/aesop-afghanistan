@@ -157,8 +157,10 @@ class DatabaseConnector:
     
     def lock_database():
         # TODO
+        # Implement lock and unlock functionality: https://github.com/mokolodi1/aesop-afghanistan/issues/12
         pass
 
     def unlock_database():
         # TODO
+        # Implement lock and unlock functionality: https://github.com/mokolodi1/aesop-afghanistan/issues/12
         pass
