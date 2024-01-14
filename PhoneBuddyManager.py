@@ -84,7 +84,7 @@ class PhoneBuddyManager:
 
     def send_admin_reminder_emails(self):
         # TODO: check whether we recently reminded them and don't remind them if it's happened within the last 24 hours
-
+        # (https://github.com/mokolodi1/aesop-afghanistan/issues/23)
         for email in ADMIN_EMAILS:
             draft = EmailDraft.draft_overdue_process_admin_reminder(email)
 
@@ -139,6 +139,7 @@ class PhoneBuddyManager:
 
         # If any issues were found, report those
         # TODO: if the result was different from the last run (and it was a robot), add a new line to the output sheet
+        # (https://github.com/mokolodi1/aesop-afghanistan/issues/24)
         print()
         print()
         logging.info(ResultTracker.get_summary())

@@ -47,7 +47,9 @@ class GoogleServiceProvider:
                 query_params = parse_qs(parsed_url.query)
                 auth_code = query_params.get("code", [None])[0]
 
-                # TODO: ask again if they sent in something that doesn't make sense (add a while loop that allows them to try a few times)
+                # TODO: ask again if they sent in something that doesn't make sense 
+                # (add a while loop that allows them to try a few times)
+                # (https://github.com/mokolodi1/aesop-afghanistan/issues/22)
 
                 flow.fetch_token(code=auth_code)
                 creds = flow.credentials

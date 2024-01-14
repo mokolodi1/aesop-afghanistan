@@ -161,7 +161,7 @@ You'll need to set up several files locally in order to successfully run the scr
 
 ### 4. Run the test suite
 
-TODO: can fill this in once we we have info on the test suite
+TODO: can fill this in once we have info on the test suite
 
 ### 5. Manual testing
 

@@ -10,6 +10,8 @@ class EmailDraft:
     def __init__(self, to, subject, contents):
         # TODO: for development purposes, allow us to change the coming_from email via a file in secrets/
         # NOTE: likely break this into EmailDrafter and EmailDraft
+        # (https://github.com/mokolodi1/aesop-afghanistan/issues/21)
+        
         self.to = to
         self.coming_from = "contact@aesopafgahnistan.org"
         self.subject = subject
