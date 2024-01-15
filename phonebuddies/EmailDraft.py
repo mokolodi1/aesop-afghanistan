@@ -1,8 +1,8 @@
 import itertools
-from Buddy import Buddy
 
-from DatabaseConnector import DatabaseConnector
-from EmailInfo import EmailInfo
+from phonebuddies.Buddy import Buddy
+from phonebuddies.DatabaseConnector import DatabaseConnector
+from phonebuddies.EmailInfo import EmailInfo
 
 
 class EmailDraft:

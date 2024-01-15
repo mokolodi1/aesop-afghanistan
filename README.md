@@ -155,22 +155,28 @@ cd aesop-afghanistan
 
 TODO: link to docker installation documentation online
 
+You can get yourself into an environment where you can test the script using the following commands. 
+```sh
+docker build -t aesop-phone-buddy-script . && docker run -it --rm -v "$(pwd)":/app aesop-phone-buddy-script
+```
+
+You will be dropped into a Docker shell session where you can run commands in Python on the code that's on your filesystem.
+
 ### 3. Set up secrets locally
 
 You'll need to set up several files locally in order to successfully run the script. Ask Teo for directions!
 
 ### 4. Run the test suite
 
-TODO: can fill this in once we have info on the test suite
+This can be run in interactive mode in Docker to discover all the tests and run them:
+
+```
+python -m unittest discover
+```
 
 ### 5. Manual testing
 
-You can get yourself into an environment where you can test the script using the following commands. 
-```sh
-docker build -t aesop-phone-buddy-script . && docker run -it --rm -v "$(pwd)":/app aesop-phone-buddy-script
-```
-
-You will be dropped into a Docker shell session where you can run commands that will execute the script, like so:
+Some examples of what you can run when running in intefactive mode in Docker:
 ```
 # Test the script without sending any emails
 python email_phone_buddies.py

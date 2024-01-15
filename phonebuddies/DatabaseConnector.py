@@ -1,10 +1,11 @@
 from functools import cache
 import logging
-from Buddy import Buddy
-from EmailInfo import EmailInfo
-from GoogleServiceProvider import GoogleServiceProvider
-from ResultTracker import ResultTracker
-from WeeklyProcess import WeeklyProcess
+
+from phonebuddies.Buddy import Buddy
+from phonebuddies.EmailInfo import EmailInfo
+from phonebuddies.GoogleServiceProvider import GoogleServiceProvider
+from phonebuddies.ResultTracker import ResultTracker
+from phonebuddies.WeeklyProcess import WeeklyProcess
 
 
 class DatabaseConnector:

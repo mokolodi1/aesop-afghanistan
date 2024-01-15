@@ -4,12 +4,11 @@ import click
 from enum import Enum
 import itertools
 import logging
-from Buddy import Buddy
-from DatabaseConnector import DatabaseConnector
-from EmailDraft import EmailDraft
-from EmailSender import EmailSender
-from ResultTracker import ResultTracker
 
+from phonebuddies.DatabaseConnector import DatabaseConnector
+from phonebuddies.EmailDraft import EmailDraft
+from phonebuddies.EmailSender import EmailSender
+from phonebuddies.ResultTracker import ResultTracker
 
 ADMIN_EMAILS = None
 with open("secrets/admin_emails.txt", mode="r") as admin_emails_file:
@@ -32,32 +31,39 @@ class PhoneBuddyManager:
         if self._really_send_emails:
             self._email_sender.enable_email_sending()
 
+    
+    def log_email_and_review(self, draft):
+        logging.info("This is the first buddy pair, so we'll print a bit more info to allow for typechecking")
+        logging.info("Draft: %s" % str(draft))
+        logging.info("Email text:")
+        logging.info("====================================")
+        logging.info(draft.contents)
+        logging.info("====================================")
 
-    def give_humans_one_last_chance_to_review(self):
-        if not self._really_send_emails:
-            logging.info("Don't worry: emails won't actually be sent after the following questions!")
+        # Last check for the humans before sending the emails
+        if not self._is_robot:
+            if not self._really_send_emails:
+                logging.info("Don't worry: emails won't actually be sent after the following questions!")
 
-        click.confirm("Does the above email look good to send to everyone?")
-        logging.info("Okay... well let's just make you wait for a few seconds (5) and see if you change your mind.")
-        time.sleep(5)
-        click.confirm('Are you still absolutely, positively sure?', abort=True, default=False)
-        logging.info("Hmm, you seem quite sure of yourself, but let's wait another 5 seconds just in case.")
-        time.sleep(5)
-        click.confirm('Last chance to cancel! Still sure?', abort=True, default=False)
-        logging.info("Okay, here we go!\n")
+            click.confirm("Does the above email look good to send to everyone?")
+            logging.info("Okay... well let's just make you wait for a few seconds (5) and see if you change your mind.")
+            time.sleep(5)
+            click.confirm('Are you still absolutely, positively sure?', abort=True, default=False)
+            logging.info("Hmm, you seem quite sure of yourself, but let's wait another 5 seconds just in case.")
+            time.sleep(5)
+            click.confirm('Last chance to cancel! Still sure?', abort=True, default=False)
+            logging.info("Okay, here we go!\n")
 
 
     def send_buddy_emails(self, buddy_pairs):
         buddy_map = self._db_connector.get_all_buddies_map()
-
         email_info = self._db_connector.get_email_info()
 
+        # Verify humans really want to send the emails
         if self._really_send_emails and not self._is_robot:
             click.confirm(
                 'You are about to send %s emails to phone buddy volunteers. Are you sure you want to continue?' %
                 len(buddy_pairs), abort=True, default=False)
-        else:
-            logging.debug("--send-emails option not passed in. Will calculate all emails to send but not actually send anything.")
 
         # Actually go send the emails
         first_buddy_pair = True
@@ -68,16 +74,7 @@ class PhoneBuddyManager:
 
             if first_buddy_pair:
                 first_buddy_pair = False
-                print("This is the first buddy pair, so we'll print a bit more info to allow for typechecking")
-                print("Draft: %s" % str(draft))
-                print("Email text:")
-                print("====================================")
-                print(draft.contents)
-                print("====================================")
-
-                # Last check for the humans before sending the emails
-                if not self._is_robot:
-                    self.give_humans_one_last_chance_to_review()
+                self.log_email_and_review(draft)
 
             self._email_sender.send_email(draft)
 

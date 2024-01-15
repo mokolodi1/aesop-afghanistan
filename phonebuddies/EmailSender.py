@@ -2,10 +2,10 @@ import base64
 from email.message import EmailMessage
 import logging
 import time
-from EmailDraft import EmailDraft
 
-from GoogleServiceProvider import GoogleServiceProvider
-from ResultTracker import ResultTracker
+from phonebuddies.EmailDraft import EmailDraft
+from phonebuddies.GoogleServiceProvider import GoogleServiceProvider
+from phonebuddies.ResultTracker import ResultTracker
 
 
 class EmailSender:
