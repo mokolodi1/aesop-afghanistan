@@ -1,5 +1,9 @@
+from datetime import datetime
+from parameterized import parameterized
 import unittest
 from unittest.mock import patch, MagicMock
+from phonebuddies.ResultTracker import ResultTracker
+from phonebuddies.WeeklyProcess import WeeklyProcess
 from phonebuddies.PhoneBuddyManager import PhoneBuddyManager
 from phonebuddies.Buddy import Buddy
 from phonebuddies.EmailInfo import EmailInfo
@@ -20,6 +24,8 @@ class TestPhoneBuddyManager(unittest.TestCase):
         ]
 
         self.mock_email_info = EmailInfo("Intro", "Topic")
+
+        self.today_process_date = datetime.now().strftime("%A, %B %d, %Y")
 
 
     @patch('phonebuddies.PhoneBuddyManager.EmailSender')
@@ -48,6 +54,32 @@ class TestPhoneBuddyManager(unittest.TestCase):
             pseudonyms = (first_buddy.pseudonym, second_buddy.pseudonym)
             expected_subject = "AESOP Phone buddy introduction: %s and %s" % pseudonyms
             self.assertEqual(expected_subject, draft.subject)
+
+
+    # NOTE: the 3s here are totally useless and serve only to tell @parameterized that it should
+    #       treat the following list as a single parameter and not as a list of parameters
+    @parameterized.expand([
+        (3, ["", "", "", "", "", ""]),
+        (3, ["Yes", "", "", "", "", ""]),
+        (3, ["Yes", "Yes", "", "", "", ""]),
+        (3, ["Yes", "Yes", "Yes", "", "", ""])
+    ])
+    @patch('phonebuddies.PhoneBuddyManager.EmailSender')
+    @patch('phonebuddies.PhoneBuddyManager.DatabaseConnector')
+    def test_manage_phone_buddy_list_remind_admins(self, useless, process_entry_data, mock_db_connector, mock_email_sender):
+        process_row_data = [self.today_process_date] + process_entry_data
+        db_instance = mock_db_connector.get_instance.return_value
+        db_instance.get_this_weeks_process.return_value = WeeklyProcess.parse_from_google_sheet_row(process_row_data, 0)
+
+        email_sender_instance = mock_email_sender.get_instance.return_value
+
+        # Set up the object and perform the test
+        manager = PhoneBuddyManager(really_send_emails=False, is_robot=True)
+        manager.manage_phone_buddy_list()
+
+        # Verify that emails were sent to the two admins and that the result is correct
+        self.assertEqual(email_sender_instance.send_email.call_count, 2)
+        self.assertEqual(ResultTracker.get_result(), "Admins reminded")
 
 
 if __name__ == '__main__':

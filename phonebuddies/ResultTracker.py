@@ -68,3 +68,7 @@ class ResultTracker:
     @staticmethod
     def get_issues():
         return ResultTracker.get_instance()._issues
+    
+    @staticmethod
+    def get_result():
+        return ResultTracker.get_instance()._result_description

@@ -137,7 +137,6 @@ class PhoneBuddyManager:
         # If any issues were found, report those
         # TODO: if the result was different from the last run (and it was a robot), add a new line to the output sheet
         # (https://github.com/mokolodi1/aesop-afghanistan/issues/24)
-        print()
-        print()
-        logging.info(ResultTracker.get_summary())
+
+        logging.info("\n\n" + ResultTracker.get_summary())
         
