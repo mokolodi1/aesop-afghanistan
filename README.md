@@ -1,20 +1,22 @@
 # AESOP Afghanistan
 
-Various scripts used to arrange phone buddies and manage the organization.
+This repo contains various scripts used to arrange phone buddies and manage the organization.
 
-# To prospective employers
+[For more information about AESOP Afghanistan and the phone buddy script specifically, please refer to our website (linked).](https://aesopafghanistan.org/about)
 
-Hi! This repo leaves much to be desired in terms of code quality.
-I have a list of todos that I'll leave here for what I'd change,
-but suffice to say that much of the time,
-my volunteer effort is better spent on other things.  
+# To prospective employers of Teo (and others!)
 
-## What I would change
+Hi! This project is under active development. We are currently working on fixing bugs and refactoring to allow for future development.
 
+Our long-term goal (within the next 6 months to a year) is to have a system that can be administered by a group of Afghan volunteers instead of Seth and Teo.
+
+## Future projects
+
+- Fixing bugs (see project issues for specifics)
 - Refactoring to allow for easier comprehension and modifications to the system
-  - Adding comments to functions and classes 
-- Adding unit tests
-- Moving to a more robust system than an EC2 box and Cron
+  - Adding comments to functions and classes to make it clearer for very junior engineers
+- Adding integration and unit tests
+- Moving to a more robust deployment than an EC2 box with Cron (not pretty, but it's worked for over 6 months with zero issues)
 
 # Scripts
 
@@ -22,14 +24,29 @@ my volunteer effort is better spent on other things.
 
 This script emails phone buddy pairs information about each other to allow them to connect.
 
-Every 24 hours at midnight or 1 am (depending on daylight savings), the following script runs:
+### What the phone buddy script does
+
+Every 24 hours at midnight or 1 am California/Pacific Time (depending on daylight savings), the following script runs:
 ```
 python3.10 email_phone_buddies.py --send-emails --robot
 ```
 
-More info on how this works in practice (in human-digestible terms) is on
-[Discord (linked)](https://discord.com/channels/1086570523267440790/1095031520101671005/1151396841670328340)
-(You need to be on the Discord in order to see the link)
+Coming soon: we'd like to run the script every 30 minutes instead of every 24 hours in order for it to report whether there would be any issues (like data being incorrectly filled out, etc.)
+
+It does the following:
+1. Coming soon: validates the database and that the list of buddies looks good. If there are any issues, report those to the admins if it's been more than 30 minutes since the issue occurred.
+1. Checks whether there's a date in the Process sheet that meets the following criteria:
+    1. Has a date that's in the past (assumes it's sorted)
+    1. Has all the prerequisite rows filled out with `y` or `yes` (case insensitive)
+1. Checks whether it should send to the admin group or real email list depending on whether the beta column has a `y` or `yes` (case insensitive)
+1. Sends the phone buddy list to the appropriate list (admins or phone buddies)
+1. Saves the output
+    1. Fills in the corresponding cell in the Process sheet with an update on the outcome (Yes or Error). This means that Seth (or anyone else) can easily see if something went wrong with the script that Teo needs to check on or if the script didn't run at all.
+    1. Coming soon: Writes a row to the `Script Output` sheet if it did anything (sent emails, validated things, etc.)
+
+In practice, this means that the admin list (Seth, Teo, and others if we deem appropriate) will receive an email one day before the "real" email list is sent out, and it'll mark the Admin email sent column as Yes in the spreadsheet. We'll review this and make changes if there are any issues (spelling mistakes, etc.).
+
+Given that the Process sheet has dates on Monday, the beta emails will be sent on Sunday night (technically early Monday morning), and the real emails on Monday night. It also means that if the prerequisite cells aren't filled out on the spreadsheet, it'll skip sending the emails for that night, and everything will be pushed to the next day (beta email will be sent first, then real email).
 
 ### Installation
 
@@ -81,20 +98,22 @@ Set up `cron` as follows with `crontab -e`:
 0 9 * * * { echo "[$(date +\%Y-\%m-\%d\ \%H:\%M:\%S)] Starting job"; cd /home/ec2-user/aesop-afghanistan && /usr/local/bin/python3.10 /home/ec2-user/aesop-afghanistan/email_phone_buddies.py --send-emails --robot; echo "[$(date +\%Y-\%m-\%d\ \%H:\%M:\%S)] Job completed"; } >> /home/ec2-user/aesop-afghanistan/cron_logs.txt 2>&1
 ```
 
-### Use
+### Manual use
 
 If the `tmux` session is not set up as you're used to, check out this cheat sheet: https://tmuxcheatsheet.com/
 
 Example of use:
 ```
-laptop$ IP=0.0.0.0 #get this from Teo prior to executing these steps (look on Discord)
+laptop$ IP=0.0.0.0                         # get this and the .pem file from Teo prior to executing these steps
 laptop$ ssh -i /path/to/phone_buddy_key_pair.pem ec2-user@$IP
-server$ tmux a          # attach to running tmux session
+server$ tmux a                             # attach to running tmux session
 server$ cd ~/aesop-afghanistan/
-server$ rm token.json   # if the token file has expired
+server$ rm token.json                      # if the token file has expired
 server$ python3.10 email_phone_buddies.py  # to validate the emails look good
 Please visit this URL to authorize this application: https://accounts.google.com/o/oauth2/...
 
+# In a different window (could be via tmux or re-ssh-ing onto the host), run the command
+# that you get after authorizing with the Google URL from above ^^
 server2$ curl "http://localhost:60325/..."
 
 server$ python3.10 email_phone_buddies.py --send-emails
@@ -113,9 +132,58 @@ Message sent: {'id': '1875330a9539d62d', 'threadId': '1875330a9539d62d', 'labelI
 
 If you get a scary-looking file permissions error, run the following:
 ```
-chmod 700 /path/to/phone_buddy_key_pair.pem
+chmod 400 /path/to/phone_buddy_key_pair.pem
 ```
 
 # Contributing
 
 As of January 2023, we're having weekly meetings to check in on development and move this project along. If you're interested in helping out, send Teo a WhatsApp at +33 6 17 50 71 28. 
+
+## How to set up your local device for development work
+
+### 0. Get access to the spreadsheet
+
+TODO: write this (e.g. ask Teo to add you)
+
+### 1. Clone this git repo locally
+```
+git clone https://github.com/mokolodi1/aesop-afghanistan
+cd aesop-afghanistan
+```
+
+### 2. Install Docker
+
+TODO: link to docker installation documentation online
+
+You can get yourself into an environment where you can test the script using the following commands. 
+```sh
+docker build -t aesop-phone-buddy-script . && docker run -it --rm -v "$(pwd)":/app aesop-phone-buddy-script
+```
+
+You will be dropped into a Docker shell session where you can run commands in Python on the code that's on your filesystem.
+
+### 3. Set up secrets locally
+
+You'll need to set up several files locally in order to successfully run the script. Ask Teo for directions!
+
+### 4. Run the test suite
+
+This can be run in interactive mode in Docker to discover all the tests and run them:
+
+```
+python -m unittest discover
+```
+
+### 5. Manual testing
+
+Some examples of what you can run when running in intefactive mode in Docker:
+```
+# Test the script without sending any emails
+python email_phone_buddies.py
+
+# Test the script without the user prompts (this is how it will run on the server)
+python email_phone_buddies.py --robot
+
+# Actually send emails (use with caution!)
+python email_phone_buddies.py --send-emails
+```
