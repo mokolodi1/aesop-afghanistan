@@ -145,15 +145,20 @@ As of January 2023, we're having weekly meetings to check in on development and 
 
 TODO: write this (e.g. ask Teo to add you)
 
-### 1. Clone this git repo locally
+### 1. Fork the Repository: 
+
+If you haven't already, fork the project's repository to your own GitHub account.
+
+### 2. Clone this git repo locally
 ```
 git clone https://github.com/mokolodi1/aesop-afghanistan
 cd aesop-afghanistan
 ```
 
-### 2. Install Docker
+### 3. Install Docker
 
-TODO: link to docker installation documentation online
+Ensure that Docker is installed on your local machine. If you don't have Docker installed, you can follow the installation instructions for your specific operating system on the official Docker website: [Docker Installation Guide](https://docs.docker.com/get-docker/).
+
 
 You can get yourself into an environment where you can test the script using the following commands. 
 ```sh
@@ -162,11 +167,11 @@ docker build -t aesop-phone-buddy-script . && docker run -it --rm -v "$(pwd)":/a
 
 You will be dropped into a Docker shell session where you can run commands in Python on the code that's on your filesystem.
 
-### 3. Set up secrets locally
+### 4. Set up secrets locally
 
 You'll need to set up several files locally in order to successfully run the script. Ask Teo for directions!
 
-### 4. Run the test suite
+### 5. Run the test suite
 
 This can be run in interactive mode in Docker to discover all the tests and run them:
 
@@ -174,7 +179,7 @@ This can be run in interactive mode in Docker to discover all the tests and run 
 python -m unittest discover
 ```
 
-### 5. Manual testing
+### 6. Manual testing
 
 Some examples of what you can run when running in intefactive mode in Docker:
 ```
@@ -187,3 +192,34 @@ python email_phone_buddies.py --robot
 # Actually send emails (use with caution!)
 python email_phone_buddies.py --send-emails
 ```
+
+### 7. Create a new branch 
+
+You can create a new branch for your contributions. For example:
+
+```bash
+git checkout -b feature/new-feature
+```
+
+### 8. Make Changes
+
+Make the necessary changes to the codebase, documentation, or other project files.
+
+### 9. Commit Changes
+
+```bash
+git commit -m "Your commit message here."
+```
+
+### 10. Push Changes
+
+You can push your branch to your forked repository on GitHub:
+
+```bash
+git push origin feature/new-feature
+```
+
+### 11. Submit a Pull Request
+
+After making changes and ensuring that the tests pass, open a pull request from your branch to the main repository's `main`  branch. You can provide the description of your changes and reference any related issues or pull requests.
+
