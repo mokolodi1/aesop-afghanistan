@@ -139,6 +139,16 @@ chmod 400 /path/to/phone_buddy_key_pair.pem
 
 As of January 2023, we're having weekly meetings to check in on development and move this project along. If you're interested in helping out, send Teo a WhatsApp at +33 6 17 50 71 28. 
 
+
+## Team Meeting Time
+
+All team members are expected to attend.
+
+**Meeting Time**: Fridays, 9:30 - 10:30 PM Afghanistan Time (UTC+4:30)
+**Time Zone**: Afghanistan Time (UTC+4:30)
+**Meeting Location**: [Google Meet link]
+
+
 ## How to set up your local device for development work
 
 ### 0. Get access to the spreadsheet
