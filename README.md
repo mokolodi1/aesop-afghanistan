@@ -137,7 +137,7 @@ chmod 400 /path/to/phone_buddy_key_pair.pem
 
 # Contributing
 
-As of January 2023, we're having weekly meetings to check in on development and move this project along. If you're interested in helping out, send Teo a WhatsApp at +33 6 17 50 71 28. 
+As of January 2024, we're having weekly meetings to check in on development and move this project along. If you're interested in helping out, send Teo a WhatsApp at +33 6 17 50 71 28.
 
 ## How to set up your local device for development work
 
@@ -164,7 +164,12 @@ You will be dropped into a Docker shell session where you can run commands in Py
 
 ### 3. Set up secrets locally
 
-You'll need to set up several files locally in order to successfully run the script. Ask Teo for directions!
+You'll need to set up several files locally in order to successfully run the script. Ask another team member to provide these files for you.
+
+In the `secrets` folder, you'll need:
+- `credentials.json`: Google Auth credentials file (can be downloaded from Teo's Google account [here](https://console.cloud.google.com/apis/credentials?project=aesop-afghanistan)).
+- `admin_emails.txt`: A list of emails to be notified of issues/errors by the script. (Looks like: `email1@example.com,email2@example.com`)
+- `spreadsheet_id.txt`: Contains the Google Sheets document ID. (Looks like `1LM8lzRMn9L5uwTWyes6tGfYiIiBFUxWIzQDFrbceDTA`.)
 
 ### 4. Run the test suite
 
@@ -179,11 +184,11 @@ python -m unittest discover
 Some examples of what you can run when running in intefactive mode in Docker:
 ```
 # Test the script without sending any emails
-python email_phone_buddies.py
+PYTHONPATH=/app python phonebuddies/email_phone_buddies.py
 
 # Test the script without the user prompts (this is how it will run on the server)
-python email_phone_buddies.py --robot
+PYTHONPATH=/app python phonebuddies/email_phone_buddies.py --robot
 
 # Actually send emails (use with caution!)
-python email_phone_buddies.py --send-emails
+PYTHONPATH=/app python phonebuddies/email_phone_buddies.py --send-emails
 ```
