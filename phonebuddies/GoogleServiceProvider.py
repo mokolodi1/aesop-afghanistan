@@ -14,6 +14,12 @@ SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets"
 ]
 
+
+AUTH_INSTRUCTIONS = """Please go to the following URL and finish the authentication process. \
+After you complete the process, you will be forwarded to a URL that will appear to be broken - this is normal. \
+You will copy and paste that URL here in order to complete the authentication process."""
+
+
 class GoogleServiceProvider:
     @staticmethod
     @cache
@@ -35,12 +41,16 @@ class GoogleServiceProvider:
                     'secrets/credentials.json', SCOPES)
 
                 # Use a local server for the redirect_uri
-                flow.redirect_uri = 'http://localhost:8080/'
+                redirect_url = 'http://localhost:8080/'
+                flow.redirect_uri = redirect_url
 
                 auth_url, _ = flow.authorization_url(prompt='consent')
 
-                print("Please go to this URL and finish the authentication process: {}".format(auth_url))
-                url = input("Enter the URL you are forwarded to: ")
+                print(AUTH_INSTRUCTIONS)
+                print()
+                print(auth_url)
+                print()
+                url = input("Enter the URL you are forwarded to (which appears broken and starts with %s): " % redirect_url)
 
                 # Extract the authorization code from the URL
                 parsed_url = urlparse(url)
