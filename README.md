@@ -144,7 +144,7 @@ As of January 2023, we're having weekly meetings to check in on development and 
 
 All team members are expected to attend.
 
-**Meeting Time**: Every Saturday, 9:30 PM Pacific Time (UTC-7)
+**Meeting Time**: Every Saturday, 9:30 AM Pacific Time (UTC-7)
 **Time Zone**: https://timezonewizard.com/gv-jsd
 
 **Meeting Location**: (Teo will add you to the meeting.)
