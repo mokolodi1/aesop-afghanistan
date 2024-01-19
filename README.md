@@ -137,18 +137,14 @@ chmod 400 /path/to/phone_buddy_key_pair.pem
 
 # Contributing
 
-As of January 2023, we're having weekly meetings to check in on development and move this project along. If you're interested in helping out, send Teo a WhatsApp at +33 6 17 50 71 28. 
+As of January 2024, we're having weekly meetings to check in on development and move this project along. If you're interested in helping out, send Teo a WhatsApp at +33 6 17 50 71 28. 
 
 
 ## Team Meeting Time
 
 All team members are expected to attend.
 
-**Meeting Time**: Every Saturday, 9:30 AM Pacific Time (UTC-7)
-**Time Zone**: https://timezonewizard.com/gv-jsd
-
-**Meeting Location**: (Teo will add you to the meeting.)
-
+**Meeting Time**: Every Sunday, 9:00 AM Pacific Time (UTC-7)
 
 ## How to set up your local device for development work
 
