@@ -1,26 +1,8 @@
 from __future__ import print_function
 
-import base64
-import os.path
-import sys
 import time
 
-from google.auth.exceptions import RefreshError
-from google.auth.transport.requests import Request
-from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
-from googleapiclient.discovery import build
-
-from email.message import EmailMessage
-
 from twilio.rest import Client
-
-
-# NOTE: When modifying these scopes, delete the file token.json.
-SCOPES = [
-    'https://www.googleapis.com/auth/gmail.send',
-    "https://www.googleapis.com/auth/spreadsheets"
-]
 
 
 TWILIO_ACCOUNT_SID = "ACf5ecfbf9e3a6ddc33ea046091ffed50a"
