@@ -145,6 +145,7 @@ As of January 2024, we're having weekly meetings to check in on development and 
 
 TODO: write this (e.g. ask Teo to add you)
 
+
 ### 1. Clone this git repo locally
 ```
 git clone https://github.com/mokolodi1/aesop-afghanistan
@@ -153,7 +154,8 @@ cd aesop-afghanistan
 
 ### 2. Install Docker
 
-TODO: link to docker installation documentation online
+Ensure that Docker is installed on your local machine. If you don't have Docker installed, you can follow the installation instructions for your specific operating system on the official Docker website: [Docker Installation Guide](https://docs.docker.com/get-docker/).
+
 
 You can get yourself into an environment where you can test the script using the following commands. 
 ```sh
@@ -192,3 +194,33 @@ PYTHONPATH=/app python phonebuddies/email_phone_buddies.py --robot
 # Actually send emails (use with caution!)
 PYTHONPATH=/app python phonebuddies/email_phone_buddies.py --send-emails
 ```
+
+### 6. Create a new branch 
+
+You can create a new branch for your contributions. For example:
+
+```bash
+git checkout -b feature/new-feature
+```
+
+### 7. Make Changes
+
+Make the necessary changes to the codebase, documentation, or other project files.
+
+### 8. Commit Changes
+
+```bash
+git commit -m "Your commit message here."
+```
+
+### 9. Push Changes
+
+You can push your branch to your forked repository on GitHub:
+
+```bash
+git push origin feature/new-feature
+```
+
+### 10. Submit a Pull Request
+
+After making changes and ensuring that the tests pass, open a pull request from your branch to the main repository's `main`  branch. You can provide the description of your changes and reference any related issues or pull requests.
