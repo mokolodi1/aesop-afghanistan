@@ -28,10 +28,12 @@ class ResultTracker:
             raise Exception("This class is a singleton!")
         
         self._issues = []
+        self._result_set = False
         self._result_description = "No result set. Usually this is an indication there was an error."
 
     @staticmethod
     def set_result(description):
+        ResultTracker.get_instance()._result_set = True
         ResultTracker.get_instance()._result_description = description
 
     @staticmethod
@@ -69,6 +71,10 @@ class ResultTracker:
     def get_issues():
         return ResultTracker.get_instance()._issues
     
+    @staticmethod
+    def get_result_set():
+        return ResultTracker.get_instance()._result_set
+
     @staticmethod
     def get_result():
         return ResultTracker.get_instance()._result_description
