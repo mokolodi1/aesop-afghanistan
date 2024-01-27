@@ -13,8 +13,6 @@ Our long-term goal (within the next 6 months to a year) is to have a system that
 ## Future projects
 
 - Fixing bugs (see project issues for specifics)
-- Refactoring to allow for easier comprehension and modifications to the system
-  - Adding comments to functions and classes to make it clearer for very junior engineers
 - Adding integration and unit tests
 - Moving to a more robust deployment than an EC2 box with Cron (not pretty, but it's worked for over 6 months with zero issues)
 
@@ -28,7 +26,7 @@ This script emails phone buddy pairs information about each other to allow them 
 
 Every 24 hours at midnight or 1 am California/Pacific Time (depending on daylight savings), the following script runs:
 ```
-python3.10 email_phone_buddies.py --send-emails --robot
+python email_phone_buddies.py --send-emails --robot
 ```
 
 Coming soon: we'd like to run the script every 30 minutes instead of every 24 hours in order for it to report whether there would be any issues (like data being incorrectly filled out, etc.)
@@ -54,40 +52,28 @@ The following steps are used to set up a fresh EC2 server.
 
 ```
 # On laptop - move over PEM file and secrets folder and ssh into server
-IP=0.0.0.0 #get this from Teo prior to executing these steps (look on Discord)
+IP=0.0.0.0 # get this from Teo prior to executing these steps (look on Discord)
 scp -r -i /path/to/phone_buddy_key_pair.pem /path/to/secrets ec2-user@$IP:/home/ec2-user/aesop-afghanistan
 ssh -i /path/to/phone_buddy_key_pair.pem ec2-user@$IP
 
 # On server - install updates, tools, and download code
-sudo yum update -y && sudo yum install git tmux python3-pip emacs-nox cronie -y
+sudo yum update -y && sudo yum install git tmux docker emacs-nox cronie -y
 tmux
 sudo systemctl enable crond
 sudo systemctl start crond
+sudo systemctl start docker
+sudo usermod -aG docker ec2-user
 
-git clone https://github.com/mokolodi1/aesop-afghanistan
+# Reconnect to the server to allow the changes to take affect
 
-# On server - install Python 3.10
-# Pulled from: https://devopsmania.com/how-to-install-python3-on-amazon-linux-2/
-sudo yum update -y
-sudo yum groupinstall "Development Tools" -y
-sudo yum install openssl-devel libffi-devel bzip2-devel wget -y
-cd /opt
-sudo wget https://www.python.org/ftp/python/3.10.2/Python-3.10.2.tgz
-sudo tar xzf Python-3.10.2.tgz
-cd Python-3.10.2
-sudo ./configure --enable-optimizations
-make -j $(nproc)
-sudo make altinstall
-
-# On server - install Google dependencies
-# (Following steps here: https://developers.google.com/gmail/api/quickstart/python)
-pip3.10 install --upgrade google-api-python-client google-auth-httplib2 google-auth-oauthlib click
-
-# On server - install Teo's dotfiles
+# Install code and Teo's dotfiles
 cd ~
+git clone https://github.com/mokolodi1/aesop-afghanistan
 git clone https://github.com/mokolodi1/dotfiles
 cd dotfiles
 ./install.sh
+
+# Note: might want to restart tmux in order to pull latest configuration file
 ```
 
 #### Set up Cron
@@ -95,10 +81,10 @@ cd dotfiles
 Set up `cron` as follows with `crontab -e`:
 
 ```
-0 9 * * * { echo "[$(date +\%Y-\%m-\%d\ \%H:\%M:\%S)] Starting job"; cd /home/ec2-user/aesop-afghanistan && /usr/local/bin/python3.10 /home/ec2-user/aesop-afghanistan/email_phone_buddies.py --send-emails --robot; echo "[$(date +\%Y-\%m-\%d\ \%H:\%M:\%S)] Job completed"; } >> /home/ec2-user/aesop-afghanistan/cron_logs.txt 2>&1
+0 9 * * * { echo "[$(date +\%Y-\%m-\%d\ \%H:\%M:\%S)] Starting job"; /usr/bin/docker run -it --rm -v /home/ec2-user/aesop-afghanistan:/app aesop-phone-buddy-script python phonebuddies/email_phone_buddies.py --send-emails --robot; echo "[$(date +\%Y-\%m-\%d\ \%H:\%M:\%S)] Job completed"; } >> /home/ec2-user/aesop-afghanistan/cron_logs.txt 2>&1
 ```
 
-### Manual use
+### Manual use - production
 
 If the `tmux` session is not set up as you're used to, check out this cheat sheet: https://tmuxcheatsheet.com/
 
@@ -109,25 +95,7 @@ laptop$ ssh -i /path/to/phone_buddy_key_pair.pem ec2-user@$IP
 server$ tmux a                             # attach to running tmux session
 server$ cd ~/aesop-afghanistan/
 server$ rm token.json                      # if the token file has expired
-server$ python3.10 email_phone_buddies.py  # to validate the emails look good
-Please visit this URL to authorize this application: https://accounts.google.com/o/oauth2/...
-
-# In a different window (could be via tmux or re-ssh-ing onto the host), run the command
-# that you get after authorizing with the Google URL from above ^^
-server2$ curl "http://localhost:60325/..."
-
-server$ python3.10 email_phone_buddies.py --send-emails
-You are about to send 23 emails to phone buddy volunteers. Are you sure you want to continue? [y/N]: y
-Okay... well let's just make you wait for a few seconds (5) and see if you change your mind.
-Are you still absolutely, positively sure? [y/N]: y
-Hmm, you seem quite sure of yourself, but let's wait another 5 seconds just in case.
-Last chance to cancel! Still sure? [y/N]: y
-Ugh, fine, we'll send the emails.
-
-Will wait 1 seconds between each email.
-Sending email to Zahra (Zahra) - zahra@aesopafghanistan.org and Teo Fleming (Teo) - mokolodi1@gmail.com
-Message sent: {'id': '1875330a9539d62d', 'threadId': '1875330a9539d62d', 'labelIds': ['UNREAD', 'SENT', 'INBOX']}
-...
+server$ /usr/bin/docker run -it --rm -v /home/ec2-user/aesop-afghanistan:/app aesop-phone-buddy-script
 ```
 
 If you get a scary-looking file permissions error, run the following:
@@ -137,13 +105,13 @@ chmod 400 /path/to/phone_buddy_key_pair.pem
 
 # Contributing
 
-As of January 2023, we're having weekly meetings to check in on development and move this project along. If you're interested in helping out, send Teo a WhatsApp at +33 6 17 50 71 28. 
+As of January 2024, we're having weekly meetings to check in on development and move this project along. If you're interested in helping out, send Teo a WhatsApp at +33 6 17 50 71 28.
 
 ## How to set up your local device for development work
 
 ### 0. Get access to the spreadsheet
 
-TODO: write this (e.g. ask Teo to add you)
+Teo will add you to the spreadsheet and appropriate documents. Bug him if he doesn't reach out and let you know where to look!
 
 ### 1. Clone this git repo locally
 ```
@@ -153,7 +121,8 @@ cd aesop-afghanistan
 
 ### 2. Install Docker
 
-TODO: link to docker installation documentation online
+Ensure that Docker is installed on your local machine. If you don't have Docker installed, you can follow the installation instructions for your specific operating system on the official Docker website: [Docker Installation Guide](https://docs.docker.com/get-docker/).
+
 
 You can get yourself into an environment where you can test the script using the following commands. 
 ```sh
@@ -164,7 +133,12 @@ You will be dropped into a Docker shell session where you can run commands in Py
 
 ### 3. Set up secrets locally
 
-You'll need to set up several files locally in order to successfully run the script. Ask Teo for directions!
+You'll need to set up several files locally in order to successfully run the script. Ask another team member to provide these files for you.
+
+In the `secrets` folder, you'll need:
+- `credentials.json`: Google Auth credentials file (can be downloaded from Teo's Google account [here](https://console.cloud.google.com/apis/credentials?project=aesop-afghanistan)).
+- `admin_emails.txt`: A list of emails to be notified of issues/errors by the script. (Looks like: `email1@example.com,email2@example.com`)
+- `spreadsheet_id.txt`: Contains the Google Sheets document ID. (Looks like `1LM8lzRMn9L5uwTWyes6tGfYiIiBFUxWIzQDFrbceDTA`.)
 
 ### 4. Run the test suite
 
@@ -179,11 +153,41 @@ python -m unittest discover
 Some examples of what you can run when running in intefactive mode in Docker:
 ```
 # Test the script without sending any emails
-python email_phone_buddies.py
+python phonebuddies/email_phone_buddies.py
 
 # Test the script without the user prompts (this is how it will run on the server)
-python email_phone_buddies.py --robot
+python phonebuddies/email_phone_buddies.py --robot
 
 # Actually send emails (use with caution!)
-python email_phone_buddies.py --send-emails
+python phonebuddies/email_phone_buddies.py --send-emails
 ```
+
+### 6. Create a new branch 
+
+You can create a new branch for your contributions. For example:
+
+```bash
+git checkout -b feature/new-feature
+```
+
+### 7. Make Changes
+
+Make the necessary changes to the codebase, documentation, or other project files.
+
+### 8. Commit Changes
+
+```bash
+git commit -m "Your commit message here."
+```
+
+### 9. Push Changes
+
+You can push your branch to your forked repository on GitHub:
+
+```bash
+git push origin feature/new-feature
+```
+
+### 10. Submit a Pull Request
+
+After making changes and ensuring that the tests pass, open a pull request from your branch to the main repository's `main`  branch. You can provide the description of your changes and reference any related issues or pull requests.

@@ -1,5 +1,5 @@
 .DS_Store
 .idea
 token.json
-secrets*
+secrets/*
 __pycache__
