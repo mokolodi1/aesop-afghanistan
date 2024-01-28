@@ -50,29 +50,44 @@ class GoogleServiceProvider:
                 print()
                 print(auth_url)
                 print()
-                url = input("Enter the URL you are forwarded to (which appears broken and starts with %s): " % redirect_url)
+                
+                retry_auth_attempts = 0
+                max_retry_auth_attempts = 5
+                while retry_auth_attempts < max_retry_auth_attempts:
+                    url = input("Enter the URL you are forwarded to (which appears broken and starts with %s): " % redirect_url)
 
-                # Extract the authorization code from the URL
-                parsed_url = urlparse(url)
-                query_params = parse_qs(parsed_url.query)
-                auth_code = query_params.get("code", [None])[0]
+                    # Extract the authorization code from the URL
+                    parsed_url = urlparse(url)
+                    query_params = parse_qs(parsed_url.query)
+                    auth_code = query_params.get("code", [None])[0]
 
-                # TODO: ask again if they sent in something that doesn't make sense 
-                # (add a while loop that allows them to try a few times)
-                # (https://github.com/mokolodi1/aesop-afghanistan/issues/22)
+                    if auth_code:
+                        try:
+                            flow.fetch_token(code=auth_code)
+                            creds = flow.credentials
+                            break
+                        except Exception as e:
+                            print(f"An error occurred: {e}")
+                    else:
+                        print("Invalid URL or authorization code. Please try again.")
+                    
+                    retry_auth_attempts += 1
+                    if retry_auth_attempts >= max_retry_auth_attempts:
+                        print("Maximum number of attempts reached. Exiting.")
+                        return None
+            if creds:
+                # always try to refresh the credentials - might as well try!
+                creds.refresh(Request())
 
-                flow.fetch_token(code=auth_code)
-                creds = flow.credentials
+            # Save the credentials for the next run (regardless of whether they've been updated)
+            with open('token.json', 'w') as token:
+                token.write(creds.to_json())
+
+            print("creds at the end: %s", creds)
+            return creds
         else:
-            # always try to refresh the credentials - might as well try!
-            creds.refresh(Request())
-
-        # Save the credentials for the next run (regardless of whether they've been updated)
-        with open('token.json', 'w') as token:
-            token.write(creds.to_json())
-
-        print("creds at the end: %s", creds)
-        return creds
+            print("failed to obtain valid credentials.")
+            return None
 
     @staticmethod
     def sheets_service():
