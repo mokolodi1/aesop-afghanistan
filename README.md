@@ -148,6 +148,12 @@ This can be run in interactive mode in Docker to discover all the tests and run 
 python -m unittest discover
 ```
 
+Run a specific test like this:
+
+```
+python -m unittest test.phonebuddies.test_PhoneBuddyManager.TestPhoneBuddyManager.test_manage_phone_buddy_list_send_admin_trial_emails
+```
+
 ### 5. Manual testing
 
 Some examples of what you can run when running in intefactive mode in Docker:
