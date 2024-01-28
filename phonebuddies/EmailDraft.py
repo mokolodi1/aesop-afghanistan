@@ -50,6 +50,7 @@ Your friendly AESOP Admin"""
         return EmailDraft(to, subject, email_text)
 
 
+    @staticmethod
     def draft_overdue_process_admin_reminder(email):
         message = f"""Hi AESOP Phone Buddy Admin,
 
