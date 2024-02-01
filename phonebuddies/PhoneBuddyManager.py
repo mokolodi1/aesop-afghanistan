@@ -1,4 +1,5 @@
 import datetime
+import sys
 import time
 import click
 from enum import Enum
@@ -10,9 +11,12 @@ from phonebuddies.EmailDraft import EmailDraft
 from phonebuddies.EmailSender import EmailSender
 from phonebuddies.ResultTracker import ResultTracker
 
-ADMIN_EMAILS = None
-with open("secrets/admin_emails.txt", mode="r") as admin_emails_file:
-    ADMIN_EMAILS = list(set(itertools.chain(*[line.strip().split(",") for line in admin_emails_file.readlines()])))
+# XXX: need to fix this as part of: https://github.com/mokolodi1/aesop-afghanistan/issues/26
+# There's no obvious, easy way to fix this in the general case in the short-term before we fix #26, so this hack will do.
+ADMIN_EMAILS = ["email1@gmail.com", "email2@gmail.com"]
+if 'unittest' not in sys.modules:
+     with open("secrets/admin_emails.txt", mode="r") as admin_emails_file:
+        ADMIN_EMAILS = list(set(itertools.chain(*[line.strip().split(",") for line in admin_emails_file.readlines()])))
 
 
 class PhoneBuddyManager:
