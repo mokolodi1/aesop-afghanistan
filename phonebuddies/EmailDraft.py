@@ -13,7 +13,7 @@ class EmailDraft:
         # (https://github.com/mokolodi1/aesop-afghanistan/issues/21)
         
         self.to = to
-        self.coming_from = "contact@aesopafgahnistan.org"
+        self.coming_from = "phonebuddies@aesopafgahnistan.org"
         self.subject = subject
         self.contents = contents
 
