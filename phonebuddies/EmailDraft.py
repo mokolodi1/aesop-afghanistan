@@ -52,11 +52,13 @@ Your friendly AESOP Admin"""
 
     @staticmethod
     def draft_overdue_process_admin_reminder(email):
+        database_connector = DatabaseConnector()  
+        database_link = database_connector.get_database_link()  
         message = f"""Hi AESOP Phone Buddy Admin,
 
 Don't forget to fill out the Process sheet for the AESOP phone buddies!
 
-{DatabaseConnector.get_database_link}
+{database_link}
 
 Best,
 
