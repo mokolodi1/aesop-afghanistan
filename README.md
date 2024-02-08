@@ -46,9 +46,9 @@ In practice, this means that the admin list (Seth, Teo, and others if we deem ap
 
 Given that the Process sheet has dates on Monday, the beta emails will be sent on Sunday night (technically early Monday morning), and the real emails on Monday night. It also means that if the prerequisite cells aren't filled out on the spreadsheet, it'll skip sending the emails for that night, and everything will be pushed to the next day (beta email will be sent first, then real email).
 
-### Installation
+### Installation on production server
 
-The following steps are used to set up a fresh EC2 server.
+The following steps are used to set up a fresh EC2 server. Don't use this section if you're a new contributor!
 
 ```
 # On laptop - move over PEM file and secrets folder and ssh into server
@@ -106,6 +106,10 @@ chmod 400 /path/to/phone_buddy_key_pair.pem
 # Contributing
 
 As of January 2024, we're having weekly meetings to check in on development and move this project along. If you're interested in helping out, send Teo a WhatsApp at +33 6 17 50 71 28.
+
+## Watch this first
+
+This video walks you through setting up from scratch: https://www.loom.com/share/94f6a709d71843abbad769c87861cd80
 
 ## How to set up your local device for development work
 
