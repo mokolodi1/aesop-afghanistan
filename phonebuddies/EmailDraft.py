@@ -63,3 +63,14 @@ Teo
 """
 
         return EmailDraft(email, "ACTION NEEDED: AESOP Phone Buddy Reminder", message)
+
+    def draft_admins_without_buddy_emails(email):
+            message = f"""This is a friendly reminder that you are an administrator without a buddy. They dry-run of buddy emails has been sent, and 
+    any errors have been documented on the error tab here:
+    {DatabaseConnector.get_database_link}
+
+    Best,
+
+    Teo
+    """
+            return EmailDraft(email, "You don't have a buddy", message)
