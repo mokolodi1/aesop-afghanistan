@@ -102,10 +102,30 @@ class PhoneBuddyManager:
 
         return [ADMIN_EMAILS[:2]]
 
+    #send email to admins without buddies
+    def send_admin_no_buddy_emails(self , buddy_pairs):
 
+        #Blank list will contain individual buddy emails
+        buddy_emails=[]
+        #Iterate through each sublist in the email_lists
+        for sublist in buddy_pairs:
+            #Extend the all_emails list with email addresses from each sublist
+            buddy_emails.extend(sublist)
+        
+        '''comment out line below once end_admin_no_buddy_emails(self , buddy_pairs) works'''
+        self.admins=ADMIN_EMAILS
+        self.admins.append("adminwithoutbuddy@gmail.com")
+
+
+        for email in self.admins:
+            if email not in buddy_emails:
+                print (email, "is an admin without a buddy")
+            #draft = EmailDraft.draft_admin_no_buddy_emails(email)
+
+            #self._email_sender.send_email(draft)
+        
     def emails_sent_status(self):
         return "Yes" if self._really_send_emails else "Dry-run complete"
-
 
     def manage_phone_buddy_list(self):
         # Read in the database to check whether there's any issues
@@ -114,28 +134,36 @@ class PhoneBuddyManager:
             buddy_pairs = self._db_connector.get_buddy_email_pairs()
 
             # This is intentionally not accessed, but we want to get it so that we catch any issues
-            self._db_connector.get_all_buddies()
+            self._db_connector.get_all_buddies()         
         except Exception as e:
             ResultTracker.add_issue("Error fetching the database: %s" % str(e), save_traceback=True)
-
         # Check whether we should send out any emails and then do that
         try:
             process = self._db_connector.get_this_weeks_process()
-
             if process.phone_buddy_emails_sent:
                 ResultTracker.set_result("Phone buddy list already sent this week.")
+                print("unique phone_buddy_emails_sent")
             elif process.admin_email_sent:
-                self.send_buddy_emails(buddy_pairs)
+                #self.send_buddy_emails(buddy_pairs)
                 self._db_connector.update_process_buddies_emailed(process, self.emails_sent_status())
                 ResultTracker.set_result("Phone buddy list sent")
+
+                #send emails to admins without buddies
+                self.send_admin_no_buddy_emails(buddy_pairs)
+
+                ResultTracker.set_result("Phone buddy list sent")
             elif process.human_process_complete:
-                self.send_buddy_emails(self.admin_buddy_pairs())
+                print("unique human process complete")
+                #self.send_buddy_emails(self.admin_buddy_pairs())
                 self._db_connector.update_process_admins_emailed(process, self.emails_sent_status())
                 ResultTracker.set_result("Admins emailed with trial email")
             else:
-                self.send_admin_reminder_emails()
+                #self.send_admin_reminder_emails()
                 ResultTracker.set_result("Admins reminded")
+                print("unique send_admin_reminder_emails")
+                #print("else case, so Admins reminded")
         except Exception as e:
+            print("unique Exception as e")
             ResultTracker.add_issue("Error checking whether to and sending emails: %s" % str(e), save_traceback=True)
 
         # If any issues were found, report those
