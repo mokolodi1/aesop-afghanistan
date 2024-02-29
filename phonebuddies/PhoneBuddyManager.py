@@ -103,7 +103,6 @@ class PhoneBuddyManager:
         return [ADMIN_EMAILS[:2]]
 
     def send_admins_without_buddy_emails(self , buddy_pairs):
-        print("send_admins_without_buddy_emails started")
         #extract a list of email addresses from buddy_pairs
         buddy_emails_list=[]
         for sublist in buddy_pairs:
