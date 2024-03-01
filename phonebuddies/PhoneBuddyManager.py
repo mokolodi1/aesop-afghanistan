@@ -102,26 +102,37 @@ class PhoneBuddyManager:
 
         return [ADMIN_EMAILS[:2]]
 
-    def send_admins_without_buddy_emails(self , buddy_pairs):
-        #extract a list of email addresses from buddy_pairs
+
+    def send_admins_without_buddy_emails(self, buddy_pairs):
         buddy_emails_list=[]
+        admins=ADMIN_EMAILS
+        admins_without_buddies=[]
+
+        #extract a list of email addresses from buddy_pairs
         for sublist in buddy_pairs:
             buddy_emails_list.extend(sublist)
-        
-        self.admins=ADMIN_EMAILS
-        self.are_there_any_admins_without_buddies = False
+
+        for email in admins:
+            if email not in buddy_emails_list:
+                admins_without_buddies.append(email)
 
         #only send to admins without buddies
-        for email in self.admins:
-            if email not in buddy_emails_list:
-                self.are_there_any_admins_without_buddies = True
-                draft = EmailDraft.draft_admins_without_buddy_emails(email)
-                self._email_sender.send_email(draft)
+        for email in admins_without_buddies:
+            draft = EmailDraft.draft_admins_without_buddy_emails(email)
+            self._email_sender.send_email(draft)
 
-        return(self.are_there_any_admins_without_buddies)
-        
+        #if all admins have buddies, log it
+        if len(admins_without_buddies)==0:
+            logging.info("All admins have buddies")
+
+        #log email addresses of admins without buddies
+        else:
+            logging.info(f"Admins without buddies email has been sent to: {', '.join(admins_without_buddies)}")
+
+
     def emails_sent_status(self):
         return "Yes" if self._really_send_emails else "Dry-run complete"
+
 
     def manage_phone_buddy_list(self):
         # Read in the database to check whether there's any issues
@@ -130,21 +141,18 @@ class PhoneBuddyManager:
             buddy_pairs = self._db_connector.get_buddy_email_pairs()
 
             # This is intentionally not accessed, but we want to get it so that we catch any issues
-            self._db_connector.get_all_buddies()         
+            self._db_connector.get_all_buddies()
         except Exception as e:
             ResultTracker.add_issue("Error fetching the database: %s" % str(e), save_traceback=True)
+
         # Check whether we should send out any emails and then do that
         try:
             process = self._db_connector.get_this_weeks_process()
+
             if process.phone_buddy_emails_sent:
                 ResultTracker.set_result("Phone buddy list already sent this week.")
             elif process.admin_email_sent:
-                #send emails to admins without buddies
                 self.send_admins_without_buddy_emails(buddy_pairs)
-                if self.are_there_any_admins_without_buddies:
-                    ResultTracker.set_result("One or more admins without buddies reminded")
-                else: 
-                    ResultTracker.set_result("All admins have buddies")
                 self.send_buddy_emails(buddy_pairs)
                 self._db_connector.update_process_buddies_emailed(process, self.emails_sent_status())
                 ResultTracker.set_result("Phone buddy list sent")
@@ -155,7 +163,6 @@ class PhoneBuddyManager:
             else:
                 self.send_admin_reminder_emails()
                 ResultTracker.set_result("Admins reminded")
-
         except Exception as e:
             ResultTracker.add_issue("Error checking whether to and sending emails: %s" % str(e), save_traceback=True)
 
