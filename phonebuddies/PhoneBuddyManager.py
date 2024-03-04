@@ -104,11 +104,11 @@ class PhoneBuddyManager:
 
 
     def send_admins_without_buddy_emails(self, buddy_pairs):
-        buddy_emails_list=[]
+        buddy_emails_list = []
         admins=ADMIN_EMAILS
-        admins_without_buddies=[]
+        admins_without_buddies = []
 
-        #extract a list of email addresses from buddy_pairs
+        # extract a list of email addresses from buddy_pairs
         for sublist in buddy_pairs:
             buddy_emails_list.extend(sublist)
 
