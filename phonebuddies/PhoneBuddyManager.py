@@ -26,6 +26,8 @@ class PhoneBuddyManager:
 
 
     def __init__(self, really_send_emails, is_robot):
+        self._admin_emails = ADMIN_EMAILS
+
         self._really_send_emails = really_send_emails
         self._is_robot = is_robot
 
@@ -86,7 +88,7 @@ class PhoneBuddyManager:
     def send_admin_reminder_emails(self):
         # TODO: check whether we recently reminded them and don't remind them if it's happened within the last 24 hours
         # (https://github.com/mokolodi1/aesop-afghanistan/issues/23)
-        for email in ADMIN_EMAILS:
+        for email in self._admin_emails:
             draft = EmailDraft.draft_overdue_process_admin_reminder(email)
 
             self._email_sender.send_email(draft)
@@ -97,10 +99,35 @@ class PhoneBuddyManager:
         Generate a list of buddy pairs from the admin emails
         """
         # TODO: fix this if there's a different number of admins than 2
-        if len(ADMIN_EMAILS) != 2:
+        if len(self._admin_emails) != 2:
             ResultTracker.add_issue("Different number of admins than expected")
 
-        return [ADMIN_EMAILS[:2]]
+        return [self._admin_emails[:2]]
+
+
+    def send_admins_without_buddy_courtesy_emails(self, buddy_pairs):
+        buddy_emails_list = []
+        admins = self._admin_emails
+        admins_without_buddies = []
+
+        # Extract a list of email addresses from buddy_pairs
+        for sublist in buddy_pairs:
+            buddy_emails_list.extend(sublist)
+
+        for email in admins:
+            if email not in buddy_emails_list:
+                admins_without_buddies.append(email)
+
+        # Only send to admins without buddies
+        for email in admins_without_buddies:
+            draft = EmailDraft.draft_admins_without_buddy_emails(email)
+            self._email_sender.send_email(draft)
+
+        # Log what happened (if any emails were sent to admins or none were)
+        if len(admins_without_buddies) == 0:
+            logging.info("All admins have buddies, so no courtesy emails sent saying the buddy emails were sent.")
+        else:
+            logging.info(f"Admins without buddies courtesy email has been sent to: {', '.join(admins_without_buddies)}")
 
 
     def emails_sent_status(self):
@@ -128,6 +155,8 @@ class PhoneBuddyManager:
                 self.send_buddy_emails(buddy_pairs)
                 self._db_connector.update_process_buddies_emailed(process, self.emails_sent_status())
                 ResultTracker.set_result("Phone buddy list sent")
+
+                self.send_admins_without_buddy_courtesy_emails(buddy_pairs)
             elif process.human_process_complete:
                 self.send_buddy_emails(self.admin_buddy_pairs())
                 self._db_connector.update_process_admins_emailed(process, self.emails_sent_status())
