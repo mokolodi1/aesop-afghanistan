@@ -54,7 +54,7 @@ class DatabaseConnector:
 
 
     @staticmethod
-    def get_database_link(self):
+    def get_database_link():
         """
         For use on the off chance that another class needs to refer to this spreadsheet
         """
