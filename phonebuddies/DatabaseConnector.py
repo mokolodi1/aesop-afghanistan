@@ -76,7 +76,7 @@ class DatabaseConnector:
             reject_pair = False
 
             for email in pair:
-                if email not in buddy_map.keys():
+                if email.lower() not in buddy_map.keys():  # Convert to lowercase before comparison
                     ResultTracker.add_issue("No data in database for email in pair '%s': '%s'" % (str(pair), email))
                     reject_pair = True
             
@@ -111,7 +111,11 @@ class DatabaseConnector:
         buddy_email_map = {}
 
         for buddy in self.get_all_buddies():
-            buddy_email_map[buddy.email] = buddy
+            buddy_email_map[buddy.email.lower()] = buddy  # Converts buddy.email to lower before adding to map
+
+        # this is original, which is case-sensitive
+        # for buddy in self.get_all_buddies():
+        #    buddy_email_map[buddy.email] = buddy
 
         return buddy_email_map
     
