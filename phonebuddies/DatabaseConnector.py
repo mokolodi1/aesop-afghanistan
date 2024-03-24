@@ -160,7 +160,14 @@ class DatabaseConnector:
         intro = _find_labeled_row_text("Intro")
         topic = _find_labeled_row_text("Topic")
         return EmailInfo(intro, topic)
-    
+
+    def is_email_in_database(self, email):
+        # Get the map of all buddies with their emails as keys
+        buddy_map = self.get_all_buddies_map()
+
+        # Check if the email exists in the buddy_map, considering it case-insensitively
+        return email.lower() in buddy_map
+
     def lock_database():
         # TODO
         # Implement lock and unlock functionality: https://github.com/mokolodi1/aesop-afghanistan/issues/12
