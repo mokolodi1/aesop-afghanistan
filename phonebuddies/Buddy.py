@@ -22,6 +22,9 @@ class Buddy:
             # If a cell is blank but has cells to the right of it that are not blank, the value will be ""
             if new_value != "":
                 value = new_value
+                # If a cell is an email, then convert email to lowercase
+                if attribute_name == "email":
+                    value = value.lower()
 
         if value is None:
             if required:
