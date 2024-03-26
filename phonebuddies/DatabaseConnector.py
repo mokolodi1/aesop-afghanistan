@@ -40,7 +40,7 @@ class DatabaseConnector:
             spreadsheetId=self._data_spreadsheet_id, range=cells_description).execute()
         
         return result.get('values', [])
-    
+
 
     def _set_cell(self, sheet_name, sheet_location, new_value):
         logging.debug('Setting "%s"!%s to %s' % (sheet_name, sheet_location, new_value))
@@ -66,8 +66,8 @@ class DatabaseConnector:
     def get_buddy_email_pairs(self):
         rows = self._get_cells("'Matched'!A2:B500")
 
-        # Grab all rows where the length was greater than 2
-        pairs = [r[0:2] for r in rows if len(r) >= 2]
+        # Convert each email in each pair to lowercase as pairs are constructed
+        pairs = [[email.lower() for email in r[0:2]] for r in rows if len(r) >= 2]
 
         # Validate that all the buddy pairs have a valid buddy, skip those with issues
         valid_pairs = []
@@ -76,14 +76,14 @@ class DatabaseConnector:
             reject_pair = False
 
             for email in pair:
-                if email.lower() not in buddy_map.keys():  # Convert to lowercase before comparison
+                if email not in buddy_map.keys():
                     ResultTracker.add_issue("No data in database for email in pair '%s': '%s'" % (str(pair), email))
                     reject_pair = True
             
             if not reject_pair:
                 valid_pairs.append(pair)
 
-        return pairs
+        return valid_pairs
 
 
     @cache
