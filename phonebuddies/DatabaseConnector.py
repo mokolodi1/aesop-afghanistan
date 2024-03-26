@@ -111,11 +111,7 @@ class DatabaseConnector:
         buddy_email_map = {}
 
         for buddy in self.get_all_buddies():
-            buddy_email_map[buddy.email.lower()] = buddy  # Converts buddy.email to lower before adding to map
-
-        # this is original, which is case-sensitive
-        # for buddy in self.get_all_buddies():
-        #    buddy_email_map[buddy.email] = buddy
+            buddy_email_map[buddy.email] = buddy
 
         return buddy_email_map
     
@@ -161,12 +157,6 @@ class DatabaseConnector:
         topic = _find_labeled_row_text("Topic")
         return EmailInfo(intro, topic)
 
-    def is_email_in_database(self, email):
-        # Get the map of all buddies with their emails as keys
-        buddy_map = self.get_all_buddies_map()
-
-        # Check if the email exists in the buddy_map, considering it case-insensitively
-        return email.lower() in buddy_map
 
     def lock_database():
         # TODO

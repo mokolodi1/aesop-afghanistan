@@ -18,6 +18,7 @@ class Buddy:
         value = None
         if len(self._raw_row_info) >= row_index + 1:
             new_value = self._raw_row_info[row_index]
+
             # If a cell is blank but has cells to the right of it that are not blank, the value will be ""
             if new_value != "":
                 value = new_value
