@@ -4,9 +4,12 @@ from phonebuddies.Buddy import Buddy
 from phonebuddies.DatabaseConnector import DatabaseConnector
 from phonebuddies.EmailInfo import EmailInfo
 
-  jinja2 and os are used to make a table in _buddies_intro_table
- rom jinja2 import Environment, PackageLoader
-
+#  jinja2 is used to make a table in _buddies_intro_table
+from jinja2 import Environment, PackageLoader, select_autoescape
+env = Environment(
+    loader=PackageLoader("phonebuddies"),
+    autoescape=select_autoescape()
+)
 class EmailDraft:
 
     def __init__(self, to, subject, contents):
@@ -27,7 +30,26 @@ class EmailDraft:
     def _buddies_intro_table(first_buddy, second_buddy):
         env = Environment(loader=PackageLoader('phonebuddies', 'templates'))
         template = env.get_template('buddies_intro_table.html')
-        return template.render(first_buddy=first_buddy, second_buddy=second_buddy)
+        return template.render(
+            first_buddy={
+                'pseudonym': first_buddy.pseudonym,
+                'buddy_type': first_buddy.buddy_type,
+                'email': first_buddy.email,
+                'phone': first_buddy.phone,
+                'location': first_buddy.location,
+                'time_zone': first_buddy.time_zone,
+                'user_message': first_buddy.user_message
+            },
+            second_buddy={
+                'pseudonym': second_buddy.pseudonym,
+                'buddy_type': second_buddy.buddy_type,
+                'email': second_buddy.email,
+                'phone': second_buddy.phone,
+                'location': second_buddy.location,
+                'time_zone': second_buddy.time_zone,
+                'user_message': second_buddy.user_message
+            }
+        )
 
     '''The function above is supposed to make a table with seven rows and two columns. Make all the text
     in the top row bold. Use bold font for all the text in the in the left column. Leave

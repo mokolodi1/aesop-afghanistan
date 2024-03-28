@@ -1,42 +1,37 @@
 <table>
-     <tr>
-         <th></th>
-         <th><b>Buddy 1</b></th>
-         <th><b>Buddy 2</b></th>
-     </tr>
-     <tr>
-         <td><b>Pseudonym</b></td>
-         <td>{{ first_buddy.pseudonym }}</td>
-         <td>{{ second_buddy.pseudonym }}</td>
-     </tr>
-     <tr>
-         <td><b>Email</b></td>
-         <td>{{ first_buddy.buddy_type }}</td>
-         <td>{{ second_buddy.buddy_type }}</td>
-     </tr>
-     <tr>
-         <td><b>Phone</b></td>
-         <td>{{ first_buddy.email }}</td>
-         <td>{{ second_buddy.email }}</td>
-     </tr>
-     <tr>
-         <td><b>Location</b></td>
-         <td>{{ first_buddy.phone }}</td>
-         <td>{{ second_buddy.phone }}</td>
-     </tr>
-     <tr>
-         <td><b>Time zone</b></td>
-         <td>{{ first_buddy.location }}</td>
-         <td>{{ second_buddy.location }}</td>
-     </tr>
-     <tr>
-         <td><b>Introduction</b></td>
-         <td>{{ first_buddy.time_zone }}</td>
-         <td>{{ second_buddy.time_zone }}</td>
-     </tr>
-     <tr>
-         <td></td>
-         <td>{{ first_buddy.user_message }}</td>
-         <td>{{ second_buddy.user_message }}</td>
-     </tr>
- </table>
+    <tr>
+        <th></th>
+        <th><b>{{ first_buddy.pseudonym }}</b></th>
+        <th><b>{{ second_buddy.pseudonym }}</b></th>
+    </tr>
+    <tr>
+        <td>Buddy Type</td>
+        <td>{{ first_buddy.buddy_type }}</td>
+        <td>{{ second_buddy.buddy_type }}</td>
+    </tr>
+    <tr>
+        <td><b>Email</b></td>
+        <td>{{ first_buddy.email }}</td>
+        <td>{{ second_buddy.email }}</td>
+    </tr>
+    <tr>
+        <td><b>Phone</b></td>
+        <td>{{ first_buddy.phone }}</td>
+        <td>{{ second_buddy.phone }}</td>
+    </tr>
+    <tr>
+        <td><b>Location</b></td>
+        <td>{{ first_buddy.location }}</td>
+        <td>{{ second_buddy.location }}</td>
+    </tr>
+    <tr>
+        <td><b>Time zone</b></td>
+        <td>{{ first_buddy.time_zone }}</td>
+        <td>{{ second_buddy.time_zone }}</td>
+    </tr>
+    <tr>
+        <td><b>Introduction</b></td>
+        <td>{{ first_buddy.user_message }}</td>
+        <td>{{ second_buddy.user_message }}</td>
+    </tr>
+</table>
