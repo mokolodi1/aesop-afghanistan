@@ -71,7 +71,7 @@ class EmailSender:
                 message['To'] = ", ".join(draft.to)
             message['From'] = draft.coming_from
             message['Subject'] = draft.subject
-            message.set_content(draft.contents)
+            message.set_content(draft.contents, subtype="html")
 
             # encoded message
             create_message = {

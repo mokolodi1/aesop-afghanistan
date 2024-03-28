@@ -25,9 +25,12 @@ class EmailDraft:
     def __str__(self) -> str:
         return 'EmailDraft(to=%s; from=%s; subject="%s"; contents_length=%d)' % (self.to, self.coming_from, self.subject, len(self.contents))
 
-    ''' Static method to generate an HTML table with info for a buddy pair'''
     @staticmethod
     def _buddies_intro_table(first_buddy, second_buddy):
+        """
+        Static method to generate an HTML table with info for a buddy pair
+        """
+
         env = Environment(loader=PackageLoader('phonebuddies', 'templates'))
         template = env.get_template('buddies_intro_table.html')
         return template.render(
@@ -51,17 +54,7 @@ class EmailDraft:
             }
         )
 
-    '''The function above is supposed to make a table with seven rows and two columns. Make all the text
-    in the top row bold. Use bold font for all the text in the in the left column. Leave
-    top cell in the left column empty. Put string literals in the next six cells: 
-    Pseudonym, Email, Phone, Location, Time zone, Introduction. The middle column has data 
-    about the first buddy. Cells, from top to bottom, contain: first_buddy.pseudonym, 
-    first_buddy.buddy_type, first_buddy.email, first_buddy.phone, first_buddy.location, 
-    first_buddy.time_zone, and first_buddy.user_message. For the right column, 
-    cells, from top to bottom, contain: second_buddy.pseudonym, 
-    second_buddy.buddy_type, second_buddy.email, second_buddy.phone, second_buddy.location, 
-    second_buddy.time_zone, and second_buddy.user_message.
-    '''
+    
 
     def draft_buddies_email(email_info: EmailInfo, first_buddy: Buddy, second_buddy: Buddy):
         to = [first_buddy.email, second_buddy.email]
@@ -70,29 +63,21 @@ class EmailDraft:
 
         name_and_name = "%s and %s" % pseudonyms
         table_html = EmailDraft._buddies_intro_table(first_buddy, second_buddy)
-        email_text = f"""Hello {name_and_name},
-
-{email_info.introduction}
-
-{name_and_name}, you are AESOP phone buddies this week. Please find each of your contact information below.
-
-
-{table_html}
-
-
-'''these were replaced by the _buddies_intro_table
-{first_buddy.contact_text()}
-{second_buddy.contact_text()}
-'''
-
-You can update your buddy information by submitting this form, which will overwrite any previous info:
-https://forms.gle/c8UZ6BXSxGmkw5GN7
-
-{email_info.topic}
-
-Best,
-
-Your friendly AESOP Admin"""
+        email_text = f"""<p>Hello {name_and_name},</p>
+            <p>{email_info.introduction}</p>
+            <br>
+            {table_html}
+            <br>
+            <p>{name_and_name}, you are AESOP phone buddies this week. Please find each of your contact information below.</p>
+            <p>
+                You can update your buddy information by submitting this form, which will overwrite any previous info.
+                Note that you'll have to fill out all the fields including those that already exist if this is your second time submitting it. 
+                <a href="https://forms.gle/c8UZ6BXSxGmkw5GN7">https://forms.gle/c8UZ6BXSxGmkw5GN7</a>
+            </p>
+            <p>{email_info.topic}</p>
+            <p>Best,</p>
+            <p>Your friendly AESOP Admin</p>
+            """
         
         return EmailDraft(to, subject, email_text)
 
