@@ -1,5 +1,5 @@
 import re
-
+import phonenumbers
 class PhoneNumberParser:
     @staticmethod
     def parse_to_valid_whatsapp(phone_number):
@@ -28,5 +28,7 @@ class PhoneNumberParser:
                 # Construct the full international format with leading zeros retained
                 return f'+{dialing_code}{city_code}{local_number}'.strip()  # Strip any whitespace
         
-        proper_format = '+' + digits_only
-        return proper_format
+        ready_for_phonenumbers_module = '+' + digits_only
+        parsed_number = phonenumbers.parse(ready_for_phonenumbers_module, 
+None)
+        return phonenumbers.format_number(parsed_number, phonenumbers.PhoneNumberFormat.E164) 
