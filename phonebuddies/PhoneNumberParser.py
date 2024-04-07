@@ -4,64 +4,112 @@ from phonenumbers.phonenumberutil import NumberParseException
 
 class PhoneNumberParser:
 
+    # TODO: cache this stuff
+    @staticmethod
+    def parse_and_format(number):
+        """
+        Parses with phonenumbers and returns the formatted result.
+
+        Takes numbers with or without a + at the beginning (required at the beginning for phonenumbers.parse)
+        """
+        # Add a plus sign if there's not one at the beginning
+        if number[0] != "+":
+            number = "+" + number
+
+        parsed_number = phonenumbers.parse(number, None)
+        print("Correctly parsed!")
+        return phonenumbers.format_number(parsed_number, phonenumbers.PhoneNumberFormat.E164)
+
+
+    @staticmethod
+    def can_parse_and_format(number):
+        """
+        Returns True or False of whether or not parse_and_format will throw an exception
+        """
+
+        try: 
+            PhoneNumberParser.parse_and_format(number)
+            return True
+        except NumberParseException as e:
+            return False
+        
+    
+    # @staticmethod
+    # def matches_type_or_is_none(buddy_type, match_against):
+    #     """
+    #     Allows comparison of buddy type whether or not that info is passed in.
+        
+    #     If the buddy_type is None, assume it matches the comparison.
+    #     Otherwise actually check them against one another.
+    #     """
+    #     if buddy_type is None:
+    #         return True
+
+    #     return buddy_type == match_against
+
+
+
     # Called by parse_to_valid_whatsapp when it doesn't work at
     # first. parse_to_valid_whatsapp has already removed any
     # non-digit characters.
     @staticmethod
-    def start_parsing_by_hand(difficult_string, buddy_type, iteration=1):
-        country = 'default'
+    def start_parsing_by_hand(difficult_string, buddy_type=None):
         print ('started parsing by hand')
 
+        # Remove 00 if the number starts with that (will be replaced by + in parse_and_format)
         if difficult_string.startswith('00'):
             difficult_string = difficult_string[2:]
         
-        # Special cases for Afghan numbers without country codes
-        if len(difficult_string) == 9:
-            if difficult_string.startswith('760') or difficult.string.startswith('740'):
-                difficult_string = '93' + difficult_string
-                country = 'Afghanistan'
-        # Assume Afghan buddies have Afghan country codes
-        if buddy_type == 'Afghan':
-            if not difficult_string.startswith('93'):
-                difficult_string = '93' + difficult_string
-                country = 'Afghanistan'
+        # For each of these different special cases, we'll make sure that several different criteria match before
+        # attempting to return a re-parsed phone number with assumptions baked in.
+        # Start with the most specific checks and end with the least specific checks in order to provide the best balance of
+        # accuracy and success in finding a reasonable valid number.
 
-        
-        if buddy_type == 'English' and len(difficult_string) == 10:
+        # Special cases for Afghan numbers without country codes
+        # if country_code_is_missing(number) and [TODO: length is correct for Afghan number w/o country code]
+            # fix the string and send it off to be parsed
+        if len(difficult_string) == 9:
+            if difficult_string.startswith('760') or difficult_string.string.startswith('740'):
+                checking = '93' + difficult_string
+                if PhoneNumberParser.can_parse_and_format(checking):
+                    return PhoneNumberParser.parse_and_format(checking)
+
+
+        if len(difficult_string) == 10:
             if not difficult_string.startswith(('1', '44', '93')):
                 difficult_string = 1 + difficult_string
 
-        difficult_string = '+' + difficult_string
-        print ('parse by hand result is ' + difficult_string)
+                return PhoneNumberParser.parse_and_format(difficult_string)
 
-        return PhoneNumberParser.parse_to_valid_whatsapp(difficult_string, buddy_type, iteration)
+
+        # Assume Afghan buddies have Afghan country codes
+        if buddy_type == "Afghan" and not difficult_string.startswith('93'):
+            checking = '93' + difficult_string
+            return PhoneNumberParser.parse_and_format(checking)
+
+        
+        # Least specific
+
+        return 'Failed, even after attempt to parse by hand'
+
 
     @staticmethod
-    def parse_to_valid_whatsapp(unparsed_number, buddy_type, iteration=0):
+    def parse_to_valid_whatsapp(unparsed_number, buddy_type=None):
         
         # Use phonenumbers package on raw input if possible
-        try: 
-            parsed_number = phonenumbers.parse(unparsed_number, None)
-            print('I parsed!')
-            return phonenumbers.format_number(parsed_number, phonenumbers.PhoneNumberFormat.E164)
-        except NumberParseException as e:
-            
-            # Prevent infinite loops
-            if iteration > 1:
-                return 'Failed, even after attempt to parse by hand'
-            
-            print(unparsed_number, 'failed first parse')
-            digits_only = re.sub(r'[\s\D]', '', unparsed_number)
+        if PhoneNumberParser.can_parse_and_format(unparsed_number):
+            return PhoneNumberParser.parse_and_format(unparsed_number)
+        
+        print(unparsed_number, 'failed first parse')
+        # Remove all characters that are not a digit (including removing whitespace)
+        digits_only = re.sub(r'[\s\D]', '', unparsed_number)
+        if PhoneNumberParser.can_parse_and_format(digits_only):
+            print('Parsed after removing non-digit chars')
+            return PhoneNumberParser.parse_and_format(digits_only)
 
-            try:
-                parsed_number = phonenumbers.parse(digits_only, None)
-                print('Parsed after removing non-digit chars')
-                return phonenumbers.format_number(parsed_number, phonenumbers.PhoneNumberFormat.E164)
-            
-            except NumberParseException as e:
-                print(e)
-                print(digits_only + 'Couldnt parse after removing non-digit chars')
-                return PhoneNumberParser.start_parsing_by_hand(digits_only, buddy_type, iteration=iteration + 1)
+        print(digits_only + 'Couldnt parse after removing non-digit chars')
+        return PhoneNumberParser.start_parsing_by_hand(digits_only, buddy_type)
+
 
 print(PhoneNumberParser.parse_to_valid_whatsapp('+89020000000', 'None'))
 
