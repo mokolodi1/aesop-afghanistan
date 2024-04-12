@@ -10,11 +10,25 @@ class PhoneNumberParser:
         # Add a plus sign if there's not one at the beginning
         if number[0] != "+":
             number = "+" + number
-        print('prepended plus sign to ' + number)
-        parsed_number = phonenumbers.parse(number, None)
-        print("Correctly parsed!")
-        return phonenumbers.format_number(parsed_number, phonenumbers.PhoneNumberFormat.E164)
-
+            print('prepended plus sign to ' + number)
+        print ('length of number is' + str(len(number)))
+        
+        # Afghan numbers with country codes
+        if len(number) == 13 and number.startswith('+93'):
+            print('length = 13 Afghan country code case')
+            return (number)
+        
+        # Afghan numbers without country codes
+        elif len(number) == 10 and number.startswith(('+740','+760')):
+            print('length = 10 Afghan no country code case')
+            return ('+93' + number[1:])
+        
+        else:
+            print('else case for non-Afghan numbers')
+            parsed_number = phonenumbers.parse(number, None)
+            print("Correctly parsed this number:", '\n' + number)
+            return phonenumbers.format_number(parsed_number, phonenumbers.PhoneNumberFormat.E164)
+    
     @staticmethod
     def can_parse_and_format(number):
         """
@@ -34,8 +48,19 @@ class PhoneNumberParser:
             number = number[2:]
             print('removed leading zeros')
 
+        if len(number) == 12 and number.startswith ('92'):
+            print('parsing by hand length 12 Pakistan case')
+            if PhoneNumberParser.can_parse_and_format(number):
+                return PhoneNumberParser.parse_and_format(number)
+
+        if len(number) == 11 and number.startswith('93'):
+            print('parsing by hand length 11 Afghan case')
+            if PhoneNumberParser.can_parse_and_format(number):
+                return PhoneNumberParser.parse_and_format(number)
+
         # First check for Afghan numbers without area codes
         if len(number) == 9 and number.startswith(('760', '740')):
+                print('parsing by hand length 9 Afghan case')
                 checking = '93' + number
                 print('prepended 93 since starts with 760 or 740')
                 if PhoneNumberParser.can_parse_and_format(checking):
@@ -57,12 +82,16 @@ class PhoneNumberParser:
                 if PhoneNumberParser.can_parse_and_format(checking):
                     return PhoneNumberParser.parse_and_format(checking)
 
+        print('default parsing by hand case')
         return 'Failed, even after attempt to parse by hand'
 
     @staticmethod
     def parse_to_valid_whatsapp(number, buddy_type=None):
         number = re.sub(r'[\s\D]', '', number)
         print(number, 'was obtained after removing whitespace and non-digit chars')
+
+        if len(number) == 10 and number [0] != 1:
+            number = '1' + number
         
         if PhoneNumberParser.can_parse_and_format(number):
             print(number, ' parsed by phonenumber.parse')
@@ -73,13 +102,12 @@ class PhoneNumberParser:
             return PhoneNumberParser.start_parsing_by_hand(number, buddy_type)
 
 # Call the function with the provided input
-print(PhoneNumberParser.parse_to_valid_whatsapp('617-000-0000 (USA code)'))
+print(PhoneNumberParser.parse_to_valid_whatsapp('00923070000000 whatsapp number '))
+print('+923070000000')
 
 # Case where phonenumbers.parse says a phone number is already parsed
 # but it actually needs an area code
 # num = phonenumbers.parse ('+760000000', 'None')
 # print (phonenumbers.format_number(num, phonenumbers.PhoneNumberFormat.E164))
 
-# Case where phonenumbers.parses a phone number wrong
-num = phonenumbers.parse ('+617-000-0000')
-print (phonenumbers.format_number(num, phonenumbers.PhoneNumberFormat.E164))
+
