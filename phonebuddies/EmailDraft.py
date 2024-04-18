@@ -4,12 +4,7 @@ from phonebuddies.Buddy import Buddy
 from phonebuddies.DatabaseConnector import DatabaseConnector
 from phonebuddies.EmailInfo import EmailInfo
 
-#  jinja2 is used to make a table in _buddies_intro_table
-from jinja2 import Environment, PackageLoader, select_autoescape
-env = Environment(
-    loader=PackageLoader("phonebuddies"),
-    autoescape=select_autoescape()
-)
+
 class EmailDraft:
 
     def __init__(self, to, subject, contents):
@@ -31,29 +26,46 @@ class EmailDraft:
         Static method to generate an HTML table with info for a buddy pair
         """
 
-        env = Environment(loader=PackageLoader('phonebuddies', 'templates'))
-        template = env.get_template('buddies_intro_table.html')
-        return template.render(
-            first_buddy={
-                'pseudonym': first_buddy.pseudonym,
-                'buddy_type': first_buddy.buddy_type,
-                'email': first_buddy.email,
-                'phone': first_buddy.phone,
-                'location': first_buddy.location,
-                'time_zone': first_buddy.time_zone,
-                'user_message': first_buddy.user_message
-            },
-            second_buddy={
-                'pseudonym': second_buddy.pseudonym,
-                'buddy_type': second_buddy.buddy_type,
-                'email': second_buddy.email,
-                'phone': second_buddy.phone,
-                'location': second_buddy.location,
-                'time_zone': second_buddy.time_zone,
-                'user_message': second_buddy.user_message
-            }
-        )
+        return f"""
+            <table style="width: 100%; border-collapse: collapse;">
+                <tr>
+                    <th style="border: 1px solid #cccccc; padding: 8px; text-align: left;"></th>
+                    <th style="border: 1px solid #cccccc; padding: 8px; text-align: left;"><b>{ first_buddy.pseudonym }</b></th>
+                    <th style="border: 1px solid #cccccc; padding: 8px; text-align: left;"><b>{ second_buddy.pseudonym }</b></th>
+                </tr>
+                <tr>
+                    <td style="border: 1px solid #cccccc; padding: 8px;"><b>Buddy Type</b></td>
+                    <td style="border: 1px solid #cccccc; padding: 8px;">{ first_buddy.buddy_type }</td>
+                    <td style="border: 1px solid #cccccc; padding: 8px;">{ second_buddy.buddy_type }</td>
+                </tr>
+                <tr>
+                    <td style="border: 1px solid #cccccc; padding: 8px;"><b>Email</b></td>
+                    <td style="border: 1px solid #cccccc; padding: 8px;">{ first_buddy.email }</td>
+                    <td style="border: 1px solid #cccccc; padding: 8px;">{ second_buddy.email }</td>
+                </tr>
+                <tr>
+                    <td style="border: 1px solid #cccccc; padding: 8px;"><b>Phone</b></td>
+                    <td style="border: 1px solid #cccccc; padding: 8px;">{ first_buddy.phone }</td>
+                    <td style="border: 1px solid #cccccc; padding: 8px;">{ second_buddy.phone }</td>
+                </tr>
+                <tr>
+                    <td style="border: 1px solid #cccccc; padding: 8px;"><b>Location</b></td>
+                    <td style="border: 1px solid #cccccc; padding: 8px;">{ first_buddy.location }</td>
+                    <td style="border: 1px solid #cccccc; padding: 8px;">{ second_buddy.location }</td>
+                </tr>
+                <tr>
+                    <td style="border: 1px solid #cccccc; padding: 8px;"><b>Time zone</b></td>
+                    <td style="border: 1px solid #cccccc; padding: 8px;">{ first_buddy.time_zone }</td>
+                    <td style="border: 1px solid #cccccc; padding: 8px;">{ second_buddy.time_zone }</td>
+                </tr>
+                <tr>
+                    <td style="border: 1px solid #cccccc; padding: 8px;"><b>Introduction</b></td>
+                    <td style="border: 1px solid #cccccc; padding: 8px;">{ first_buddy.user_message }</td>
+                    <td style="border: 1px solid #cccccc; padding: 8px;">{ second_buddy.user_message }</td>
+                </tr>
+            </table>
 
+            """
     
 
     def draft_buddies_email(email_info: EmailInfo, first_buddy: Buddy, second_buddy: Buddy):
@@ -62,21 +74,30 @@ class EmailDraft:
         subject = "AESOP Phone buddy introduction: %s and %s" % pseudonyms
 
         name_and_name = "%s and %s" % pseudonyms
+
+        # Keep the newlines in the email introduction
+        introduction = email_info.introduction.replace("\n", "<br>")
+
         table_html = EmailDraft._buddies_intro_table(first_buddy, second_buddy)
-        email_text = f"""<p>Hello {name_and_name},</p>
-            <p>{email_info.introduction}</p>
-            <br>
-            {table_html}
-            <br>
-            <p>{name_and_name}, you are AESOP phone buddies this week. Please find each of your contact information below.</p>
-            <p>
-                You can update your buddy information by submitting this form, which will overwrite any previous info.
-                Note that you'll have to fill out all the fields including those that already exist if this is your second time submitting it. 
-                <a href="https://forms.gle/c8UZ6BXSxGmkw5GN7">https://forms.gle/c8UZ6BXSxGmkw5GN7</a>
-            </p>
-            <p>{email_info.topic}</p>
-            <p>Best,</p>
-            <p>Your friendly AESOP Admin</p>
+
+        email_text = f"""
+            <body>
+                <p>Hello {name_and_name},</p>
+                <p>{introduction}</p>
+                <br>
+                <p>{name_and_name}, you are AESOP phone buddies this week. Please find each of your contact information below.</p>
+                <br>
+                {table_html}
+                <br>
+                <p>
+                    You can update your buddy information by submitting this form, which will overwrite any previous info.
+                    Note that you'll have to fill out all the fields including those that already exist if this is your second time submitting it. 
+                    <a href="https://forms.gle/c8UZ6BXSxGmkw5GN7">https://forms.gle/c8UZ6BXSxGmkw5GN7</a>
+                </p>
+                <p>{email_info.topic}</p>
+                <p>Best,</p>
+                <p>Your friendly AESOP Admin</p>
+            </body>
             """
         
         return EmailDraft(to, subject, email_text)
@@ -86,7 +107,7 @@ class EmailDraft:
 
 Don't forget to fill out the Process sheet for the AESOP phone buddies!
 
-{DatabaseConnector.get_database_link}
+{DatabaseConnector.get_database_link()}
 
 Best,
 
@@ -100,7 +121,7 @@ Teo
 
 This is a courtesy email given that you are an admin and did not have a buddy this week.
 
-Any errors have been documented on the error tab here: {DatabaseConnector.get_database_link}
+Any errors have been documented on the error tab here: {DatabaseConnector.get_database_link()}
 
 Best,
 
