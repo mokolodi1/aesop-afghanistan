@@ -3,3 +3,4 @@
 token.json
 secrets/*
 __pycache__
+.vscode
