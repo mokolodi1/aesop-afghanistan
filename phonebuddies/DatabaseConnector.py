@@ -40,7 +40,7 @@ class DatabaseConnector:
             spreadsheetId=self._data_spreadsheet_id, range=cells_description).execute()
         
         return result.get('values', [])
-    
+
 
     def _set_cell(self, sheet_name, sheet_location, new_value):
         logging.debug('Setting "%s"!%s to %s' % (sheet_name, sheet_location, new_value))
@@ -54,7 +54,7 @@ class DatabaseConnector:
 
 
     @staticmethod
-    def get_database_link(self):
+    def get_database_link():
         """
         For use on the off chance that another class needs to refer to this spreadsheet
         """
@@ -66,8 +66,8 @@ class DatabaseConnector:
     def get_buddy_email_pairs(self):
         rows = self._get_cells("'Matched'!A2:B500")
 
-        # Grab all rows where the length was greater than 2
-        pairs = [r[0:2] for r in rows if len(r) >= 2]
+        # Convert each email in each pair to lowercase as pairs are constructed
+        pairs = [[email.lower() for email in r[0:2]] for r in rows if len(r) >= 2]
 
         # Validate that all the buddy pairs have a valid buddy, skip those with issues
         valid_pairs = []
@@ -83,7 +83,7 @@ class DatabaseConnector:
             if not reject_pair:
                 valid_pairs.append(pair)
 
-        return pairs
+        return valid_pairs
 
 
     @cache
@@ -156,7 +156,8 @@ class DatabaseConnector:
         intro = _find_labeled_row_text("Intro")
         topic = _find_labeled_row_text("Topic")
         return EmailInfo(intro, topic)
-    
+
+
     def lock_database():
         # TODO
         # Implement lock and unlock functionality: https://github.com/mokolodi1/aesop-afghanistan/issues/12

@@ -27,7 +27,7 @@ class Buddy:
                 # If a cell is an email, then convert email to lowercase
                 if attribute_name == "email":
                     value = value.lower()
-                        
+
         if value is None:
             if required:
                 raise Exception("ERROR: missing %s data for buddy: %s" % (attribute_name, self._raw_row_info))

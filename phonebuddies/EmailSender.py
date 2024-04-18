@@ -71,7 +71,11 @@ class EmailSender:
                 message['To'] = ", ".join(draft.to)
             message['From'] = draft.coming_from
             message['Subject'] = draft.subject
-            message.set_content(draft.contents, subtype="html")
+
+            if "<body>" in draft.contents:
+                message.set_content(draft.contents, subtype="html")
+            else:
+                message.set_content(draft.contents)
 
             # encoded message
             create_message = {
