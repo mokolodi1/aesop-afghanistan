@@ -7,7 +7,6 @@ from phonebuddies.EmailInfo import EmailInfo
 
 class EmailDraft:
 
-
     def __init__(self, to, subject, contents):
         # TODO: for development purposes, allow us to change the coming_from email via a file in secrets/
         # NOTE: likely break this into EmailDrafter and EmailDraft
@@ -18,12 +17,9 @@ class EmailDraft:
         self.subject = subject
         self.contents = contents
 
-
     def __str__(self) -> str:
         return 'EmailDraft(to=%s; from=%s; subject="%s"; contents_length=%d)' % (self.to, self.coming_from, self.subject, len(self.contents))
 
-
-    # Generates an HTML table for emails
     @staticmethod
     def _buddies_intro_table(first_buddy, second_buddy):
         """
@@ -70,12 +66,13 @@ class EmailDraft:
             </table>
 
             """
-
+    
 
     def draft_buddies_email(email_info: EmailInfo, first_buddy: Buddy, second_buddy: Buddy):
         to = [first_buddy.email, second_buddy.email]
         pseudonyms = (first_buddy.pseudonym, second_buddy.pseudonym)
         subject = "AESOP Phone buddy introduction: %s and %s" % pseudonyms
+
         name_and_name = "%s and %s" % pseudonyms
 
         # Keep the newlines in the email introduction
@@ -83,7 +80,6 @@ class EmailDraft:
 
         table_html = EmailDraft._buddies_intro_table(first_buddy, second_buddy)
 
-        # email_text is HTML so table_html will render in an email
         email_text = f"""
             <body>
                 <p>Hello {name_and_name},</p>
@@ -103,7 +99,7 @@ class EmailDraft:
                 <p>Your friendly AESOP Admin</p>
             </body>
             """
-
+        
         return EmailDraft(to, subject, email_text)
 
     def draft_overdue_process_admin_reminder(email):
@@ -119,7 +115,6 @@ Teo
 """
 
         return EmailDraft(email, "ACTION NEEDED: AESOP Phone Buddy Reminder", message)
-
 
     def draft_admins_without_buddy_emails(email):
             message = f"""The AESOP phone buddy emails were sent out.
