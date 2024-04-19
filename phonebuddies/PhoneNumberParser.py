@@ -63,8 +63,8 @@ class PhoneNumberParser:
         # Remove whitespace and non-digit characters
         number = re.sub(r'[\s\D]', '', original_number_text)
 
-        # Remove two leading zeros if present
-        number = re.sub(r'^00', '', number)
+        # Remove any leading zeros if present
+        number = re.sub(r'^0*', '', number)
 
         # Prepended with 93 if it starts with 760 or 740 - looks Afghan
         # Assumption: we won't have English volunteers with an Afghan WhatsApp

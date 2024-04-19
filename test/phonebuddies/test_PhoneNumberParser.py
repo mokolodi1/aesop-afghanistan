@@ -152,16 +152,16 @@ class TestPhoneNumberParser(unittest.TestCase):
         self.assertEqual(PhoneNumberParser.parse_to_valid_whatsapp('617-000-0000 (USA code)', "English"), '+16170000000')
 
     def test_no_country_740000000(self):
-        self.assertEqual(PhoneNumberParser.parse_to_valid_whatsapp('740000000'), '+93740000000')
-        self.assertEqual(PhoneNumberParser.parse_to_valid_whatsapp('740000000', "Afghan"), '+93740000000')
+        self.assertEqual(PhoneNumberParser.parse_to_valid_whatsapp('0740000000'), '+93740000000')
+        self.assertEqual(PhoneNumberParser.parse_to_valid_whatsapp('0740000000', "Afghan"), '+93740000000')
 
     def test_no_country_93760000000(self):
         self.assertEqual(PhoneNumberParser.parse_to_valid_whatsapp('93760000000'), '+93760000000')
         self.assertEqual(PhoneNumberParser.parse_to_valid_whatsapp('93760000000', "Afghan"), '+93760000000')
 
     def test_no_country_760000000(self):
-        self.assertEqual(PhoneNumberParser.parse_to_valid_whatsapp('760000000'), '+93760000000')
-        self.assertEqual(PhoneNumberParser.parse_to_valid_whatsapp('760000000', "Afghan"), '+93760000000')
+        self.assertEqual(PhoneNumberParser.parse_to_valid_whatsapp('0760000000'), '+93760000000')
+        self.assertEqual(PhoneNumberParser.parse_to_valid_whatsapp('0760000000', "Afghan"), '+93760000000')
 
     def test_us_1s_207_s000d0000(self):
         self.assertEqual(PhoneNumberParser.parse_to_valid_whatsapp('1 (207) 000-0000'), '+12070000000')
