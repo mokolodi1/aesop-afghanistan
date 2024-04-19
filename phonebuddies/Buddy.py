@@ -11,7 +11,11 @@ class Buddy:
         self._parse_row_attribute("location", 3, required=False)
         self._parse_row_attribute("time_zone", 4, required=False)
         self._parse_row_attribute("user_message", 5, required=False)
-        self.whatsapp_phone = PhoneNumberParser.parse_to_valid_whatsapp(self.phone, self.buddy_type)
+
+        if self.phone == "None provided":
+            self.whatsapp_phone = None
+        else:
+            self.whatsapp_phone = PhoneNumberParser.parse_to_valid_whatsapp(self.phone, self.buddy_type)
 
     def __str__(self):
         return "%s (full name: %s): %s" % (self.pseudonym, self.full_name, self.email)

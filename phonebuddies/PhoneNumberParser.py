@@ -60,11 +60,14 @@ class PhoneNumberParser:
 
     @staticmethod
     def parse_to_valid_whatsapp(original_number_text, buddy_type=None):
+        if original_number_text is None:
+            return None
+
         # Remove whitespace and non-digit characters
-        number = re.sub(r'[\s\D]', '', original_number_text)
+        only_numbers = re.sub(r'[\s\D]', '', original_number_text)
 
         # Remove any leading zeros if present
-        number = re.sub(r'^0*', '', number)
+        number = re.sub(r'^0+', '', only_numbers)
 
         # Prepended with 93 if it starts with 760 or 740 - looks Afghan
         # Assumption: we won't have English volunteers with an Afghan WhatsApp
@@ -72,7 +75,7 @@ class PhoneNumberParser:
             checking = '93' + number
             if PhoneNumberParser.can_parse_and_format(checking):
                 return PhoneNumberParser.parse_and_format(checking)
-            
+
         # Americans tend to not put in their country code,
         # and so far we haven't encountered any user-entered numbers that are 10-digits
         # and missing a + at the beginning.
@@ -81,28 +84,28 @@ class PhoneNumberParser:
             if PhoneNumberParser.can_parse_and_format(checking):
                 return PhoneNumberParser.parse_and_format(checking)
 
-        # Try and see if we can parse the number without any changes
-        if PhoneNumberParser.can_parse_and_format(number):
-            return PhoneNumberParser.parse_and_format(number)
-
         # If Afghan-esque and type is Afghan, try with 93
         if len(number) == 9 and buddy_type == "Afghan" and not number.startswith('93'):
                 checking = '93' + number
                 if PhoneNumberParser.can_parse_and_format(checking):
                     return PhoneNumberParser.parse_and_format(checking)
 
-        ResultTracker.add_issue("Failed to parse number to valid WhatsApp: %s" % number)
+        # Try and see if we can parse the number without any changes
+        if PhoneNumberParser.can_parse_and_format(number):
+            return PhoneNumberParser.parse_and_format(number)
+
+        ResultTracker.add_issue("Failed to parse number to valid WhatsApp: %s" % original_number_text)
 
         return None
 
 
     @staticmethod
     def _prep_phone_for_similar_comparison(number):
-        # Remove two leading zeros if present
-        number = re.sub(r'^00', '', number)
-
         # Remove non-number characters
         number = re.sub(r'[\s\D]', '', number)
+
+        # Remove any leading zeros if present
+        number = re.sub(r'^0+', '', number)
 
         return number
 
@@ -112,4 +115,7 @@ class PhoneNumberParser:
         """
         Return a boolean of whether the first and second numbers are similar enough
         """
+        if first is None or second is None:
+            return False
+
         return PhoneNumberParser._prep_phone_for_similar_comparison(first) == PhoneNumberParser._prep_phone_for_similar_comparison(second)

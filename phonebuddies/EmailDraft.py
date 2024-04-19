@@ -28,8 +28,8 @@ class EmailDraft:
         phone_description = f"""<a href="{buddy.link_to_whatsapp()}">{buddy.whatsapp_phone}</a>"""
 
         # Display the original unparsed phone number in case we've changed it substantially
-        if not PhoneNumberParser.numbers_are_similar:
-            phone_description += f" (As entered by {buddy.pseudonym}: {buddy.phone})"
+        if not PhoneNumberParser.numbers_are_similar(buddy.phone, buddy.whatsapp_phone):
+            phone_description += f" (Originally entered as: {buddy.pseudonym}: {buddy.phone})"
 
         return phone_description
 
