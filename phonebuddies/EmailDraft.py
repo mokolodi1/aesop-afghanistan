@@ -25,6 +25,9 @@ class EmailDraft:
 
 
     def _display_buddy_phone_number(buddy):
+        if buddy.whatsapp_phone is None:
+            return buddy.phone
+
         phone_description = f"""<a href="{buddy.link_to_whatsapp()}">{buddy.whatsapp_phone}</a>"""
 
         # Display the original unparsed phone number in case we've changed it substantially

@@ -51,7 +51,6 @@ class Buddy:
 
     def contact_text(self):
         return f"""Pseudonym: {self.pseudonym}
-
 Buddy type: {self.buddy_type}
 Email: {self.email}
 Phone: {self.phone} {self.link_to_whatsapp()}

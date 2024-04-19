@@ -79,12 +79,12 @@ class TestPhoneNumberParser(unittest.TestCase):
         self.assertEqual(PhoneNumberParser.parse_to_valid_whatsapp('+923200000000', "Afghan"), '+923200000000')
 
     def test_parse_to_whatsapp_me_9_p93_0_700000000(self):
-        self.assertEqual(PhoneNumberParser.parse_to_valid_whatsapp('+93(0)700000000'), '+930700000000')
-        self.assertEqual(PhoneNumberParser.parse_to_valid_whatsapp('+93(0)700000000', "Afghan"), '+930700000000')
+        self.assertEqual(PhoneNumberParser.parse_to_valid_whatsapp('+93(0)700000000'), '+93700000000')
+        self.assertEqual(PhoneNumberParser.parse_to_valid_whatsapp('+93(0)700000000', "Afghan"), '+93700000000')
 
     def test_parse_to_whatsapp_me_9_p930740000000(self):
-        self.assertEqual(PhoneNumberParser.parse_to_valid_whatsapp('+930740000000'), '+930740000000')
-        self.assertEqual(PhoneNumberParser.parse_to_valid_whatsapp('+930740000000', "Afghan"), '+930740000000')
+        self.assertEqual(PhoneNumberParser.parse_to_valid_whatsapp('+930740000000'), '+93740000000')
+        self.assertEqual(PhoneNumberParser.parse_to_valid_whatsapp('+930740000000', "Afghan"), '+93740000000')
 
     def test_parse_to_whatsapp_me_9_93720000000(self):
         self.assertEqual(PhoneNumberParser.parse_to_valid_whatsapp('93720000000'), '+93720000000')

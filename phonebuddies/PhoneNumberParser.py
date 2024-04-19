@@ -17,30 +17,9 @@ class PhoneNumberParser:
 
 
     @staticmethod
-    def add_plus_sign(number):
+    def parse_and_format(number):
         if not number.startswith('+'):
             number = '+' + number
-        return number
-
-
-    @staticmethod
-    def format_afghan_number(number):
-        if len(number) == 13 and number.startswith('+93'):
-            return number
-        # elif len(number) == 10 and number.startswith(('+740', '+760')):
-        #     return '+93' + number[1:]
-        
-        return None
-
-
-    @staticmethod
-    def parse_and_format(number):
-        number = PhoneNumberParser.add_plus_sign(number)
-
-        # If it's Afghan, it needs to be formatted a specific way
-        afghan_number = PhoneNumberParser.format_afghan_number(number)
-        if afghan_number:
-            return afghan_number
 
         parsed_number = phonenumbers.parse(number, None)
         return phonenumbers.format_number(parsed_number, phonenumbers.PhoneNumberFormat.E164)
