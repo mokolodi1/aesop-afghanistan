@@ -32,7 +32,7 @@ class EmailDraft:
 
         # Display the original unparsed phone number in case we've changed it substantially
         if not PhoneNumberParser.numbers_are_similar(buddy.phone, buddy.whatsapp_phone):
-            phone_description += f" (Originally entered as: {buddy.pseudonym}: {buddy.phone})"
+            phone_description += f" (Originally entered as: {buddy.phone})"
 
         return phone_description
 
