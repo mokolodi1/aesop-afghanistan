@@ -3,9 +3,11 @@ import itertools
 from phonebuddies.Buddy import Buddy
 from phonebuddies.DatabaseConnector import DatabaseConnector
 from phonebuddies.EmailInfo import EmailInfo
+from phonebuddies.PhoneNumberParser import PhoneNumberParser
 
 
 class EmailDraft:
+
 
     def __init__(self, to, subject, contents):
         # TODO: for development purposes, allow us to change the coming_from email via a file in secrets/
@@ -17,8 +19,20 @@ class EmailDraft:
         self.subject = subject
         self.contents = contents
 
+
     def __str__(self) -> str:
         return 'EmailDraft(to=%s; from=%s; subject="%s"; contents_length=%d)' % (self.to, self.coming_from, self.subject, len(self.contents))
+
+
+    def _display_buddy_phone_number(buddy):
+        phone_description = f"""<a href="{buddy.link_to_whatsapp()}">{buddy.whatsapp_phone}</a>"""
+
+        # Display the original unparsed phone number in case we've changed it substantially
+        if not PhoneNumberParser.numbers_are_similar:
+            phone_description += f" (As entered by {buddy.pseudonym}: {buddy.phone})"
+
+        return phone_description
+
 
     @staticmethod
     def _buddies_intro_table(first_buddy, second_buddy):
@@ -45,8 +59,8 @@ class EmailDraft:
                 </tr>
                 <tr>
                     <td style="border: 1px solid #cccccc; padding: 8px;"><b>Phone</b></td>
-                    <td style="border: 1px solid #cccccc; padding: 8px;">{ first_buddy.phone }</td>
-                    <td style="border: 1px solid #cccccc; padding: 8px;">{ second_buddy.phone }</td>
+                    <td style="border: 1px solid #cccccc; padding: 8px;">{ EmailDraft._display_buddy_phone_number(first_buddy) }</td>
+                    <td style="border: 1px solid #cccccc; padding: 8px;">{ EmailDraft._display_buddy_phone_number(second_buddy) }</td>
                 </tr>
                 <tr>
                     <td style="border: 1px solid #cccccc; padding: 8px;"><b>Location</b></td>

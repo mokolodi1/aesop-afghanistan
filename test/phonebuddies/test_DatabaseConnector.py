@@ -1,3 +1,4 @@
+import logging
 import unittest
 from unittest.mock import patch, MagicMock
 
@@ -22,6 +23,9 @@ class TestDatabaseConnector(unittest.TestCase):
             [ "email1@gmail.com", "email2@gmail.com" ],
             [ "email1@gmail.com", "email3@gmail.com" ],
         ]
+
+        # Hide warning logs when running these tests
+        logging.getLogger().setLevel(logging.ERROR)
 
 
     def _mocked_get_cells(self, cells_description):

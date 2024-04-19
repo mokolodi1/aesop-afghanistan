@@ -40,14 +40,17 @@ class Buddy:
         if value is None:  
             raise Exception("ERROR: missing %s data for buddy: %s" % (attribute_name, self._raw_row_info))      
 
+
+    def link_to_whatsapp(self):
+        return f"https://wa.me/{self.whatsapp_phone}?text=Whatsapp"
+
+
     def contact_text(self):
-        #encode whatsapp link
-        whatsapp_link = f"https://wa.me/{self.whatsapp_phone}?text=Whatsapp"
         return f"""Pseudonym: {self.pseudonym}
 
 Buddy type: {self.buddy_type}
 Email: {self.email}
-Phone: {self.phone} {whatsapp_link}
+Phone: {self.phone} {self.link_to_whatsapp()}
 Location: {self.location}
 Time zone: {self.time_zone}
 Introduction: {self.user_message}"""
