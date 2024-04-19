@@ -38,12 +38,12 @@ class ResultTracker:
 
     @staticmethod
     def add_issue(description, save_traceback=False):
-        logging.warn("Issue found: %s", description)
+        logging.warning("Issue found: %s", description)
 
         traceback_message = None
         if save_traceback is not None:
             traceback_message = traceback.format_exc()
-            print(traceback_message)
+            logging.warning(traceback_message)
 
         ResultTracker.get_instance()._issues.append(ResultTracker.Issue(description, traceback_message))
 

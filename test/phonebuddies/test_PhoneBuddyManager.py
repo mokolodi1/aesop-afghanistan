@@ -1,5 +1,6 @@
 from datetime import datetime
 import itertools
+import logging
 from parameterized import parameterized
 import unittest
 from unittest.mock import patch, MagicMock
@@ -14,6 +15,9 @@ class TestPhoneBuddyManager(unittest.TestCase):
 
 
     def setUp(self):
+        # Hide warning logs when running these tests
+        logging.getLogger().setLevel(logging.ERROR)
+
         self.mock_buddy_map = {
             "email1@gmail.com": Buddy(["email1@gmail.com", "Pseudonym1", "Phone1", "City1", "Timezone1", "User Message1", "Full Name1", "English"]),
             "email2@gmail.com": Buddy(["email2@gmail.com", "Pseudonym2", "Phone2", "City2", "Timezone2", "User Message2", "Full Name2", "Afghan"]),
