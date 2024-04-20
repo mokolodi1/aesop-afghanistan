@@ -94,7 +94,8 @@ class PhoneBuddyManager:
             self._email_sender.send_email(draft)
 
 
-    def admin_buddy_pairs(self):
+    @staticmethod
+    def admin_buddy_pairs():
         """
         Generate a list of buddy pairs from the admin emails
         """

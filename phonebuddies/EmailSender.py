@@ -1,6 +1,7 @@
 import base64
 from email.message import EmailMessage
 import logging
+import sys
 import time
 
 from phonebuddies.EmailDraft import EmailDraft
@@ -84,7 +85,7 @@ class EmailSender:
 
             to_send = self.service.users().messages().send(userId="me", body=create_message)
 
-            if self._really_send_emails:
+            if self._really_send_emails and 'unittest' not in sys.modules:
                 to_send.execute()
                 logging.info("Email sent: %s" % draft)
             else:
