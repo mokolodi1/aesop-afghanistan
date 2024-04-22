@@ -46,7 +46,7 @@ class Buddy:
 
 
     def link_to_whatsapp(self):
-        return f"https://wa.me/{self.whatsapp_phone}?text=Whatsapp"
+        return f"Link_to_Whatsapp https://wa.me/{self.whatsapp_phone}"
 
 
     def contact_text(self):
