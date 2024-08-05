@@ -33,6 +33,8 @@ class TestPhoneBuddyManager(unittest.TestCase):
 
         self.today_process_date = datetime.now().strftime("%A, %B %d, %Y")
 
+        ResultTracker.reset_for_testing()
+
 
     @staticmethod
     def nth_draft_sent(email_sender_instance, n):
@@ -142,6 +144,35 @@ class TestPhoneBuddyManager(unittest.TestCase):
         # Verify that emails were sent to the two admins and that the result is correct
         self.assertEqual(email_sender_instance.send_email.call_count, 2)
         self.assertEqual(ResultTracker.get_result(), "Admins reminded")
+
+
+    @patch('phonebuddies.PhoneBuddyManager.EmailSender')
+    @patch('phonebuddies.PhoneBuddyManager.DatabaseConnector')
+    def test_send_buddy_emails_even_with_missing_data(self, mock_db_connector, mock_email_sender):
+        db_instance = mock_db_connector.get_instance.return_value
+        db_instance.get_all_buddies_map.return_value = self.mock_buddy_map
+        db_instance.get_email_info.return_value = self.mock_email_info
+
+        broken_buddies_to_email = [
+            ["email1@gmail.com", "email2@gmail.com"],
+            ["email1@gmail.com", "email3@gmail.com"],
+            ["email1@gmail.com", "doesntexist@gmail.com"]
+        ]
+
+        email_sender_instance = mock_email_sender.get_instance.return_value
+
+        # Set up the object and perform the test
+        manager = PhoneBuddyManager(really_send_emails=False, is_robot=True)
+        manager.send_buddy_emails(broken_buddies_to_email)
+
+        # Verify called the correct number of times (skipped one because of a problem)
+        self.assertEqual(email_sender_instance.send_email.call_count, len(broken_buddies_to_email) - 1)
+
+        # Verify the problem list exists
+        issues = ResultTracker.get_issues()
+        self.assertEqual(len(issues), 1)
+        expected_message = "Buddies ['email1@gmail.com', 'doesntexist@gmail.com'] could not be emailed"
+        self.assertEqual(issues[0].description[:len(expected_message)], expected_message)
 
 
 if __name__ == '__main__':

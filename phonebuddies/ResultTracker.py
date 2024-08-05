@@ -78,3 +78,10 @@ class ResultTracker:
     @staticmethod
     def get_result():
         return ResultTracker.get_instance()._result_description
+
+    @staticmethod
+    def reset_for_testing():
+        """
+        NOTE: Only for use during testing!
+        """
+        ResultTracker._instance = None

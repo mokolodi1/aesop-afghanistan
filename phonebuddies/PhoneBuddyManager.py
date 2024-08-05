@@ -74,8 +74,15 @@ class PhoneBuddyManager:
         # Actually go send the emails
         first_buddy_pair = True
         for buddy_pair in buddy_pairs:
-            first_buddy = buddy_map[buddy_pair[0]]
-            second_buddy = buddy_map[buddy_pair[1]]
+            # If some of the data doesn't exist for whatever reason, don't fail completely
+            try:
+                first_buddy = buddy_map[buddy_pair[0]]
+                second_buddy = buddy_map[buddy_pair[1]]
+            except KeyError as e:
+                ResultTracker.add_issue("Buddies %s could not be emailed because of missing database details for at least one buddy - skipping." \
+                                        % str(buddy_pair), True)
+                continue
+
             draft = EmailDraft.draft_buddies_email(email_info, first_buddy, second_buddy)
 
             if first_buddy_pair:
