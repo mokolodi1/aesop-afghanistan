@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AESOP Afghanistan - Login</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+
+    .container {
+      background: white;
+      border-radius: 12px;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+      padding: 40px;
+      max-width: 400px;
+      width: 100%;
+    }
+
+    h1 {
+      color: #333;
+      margin-bottom: 10px;
+      font-size: 28px;
+    }
+
+    .subtitle {
+      color: #666;
+      margin-bottom: 30px;
+      font-size: 14px;
+    }
+
+    .form-group {
+      margin-bottom: 20px;
+    }
+
+    label {
+      display: block;
+      margin-bottom: 8px;
+      color: #333;
+      font-weight: 500;
+      font-size: 14px;
+    }
+
+    input[type="email"] {
+      width: 100%;
+      padding: 12px 16px;
+      border: 2px solid #e0e0e0;
+      border-radius: 8px;
+      font-size: 16px;
+      transition: border-color 0.3s;
+    }
+
+    input[type="email"]:focus {
+      outline: none;
+      border-color: #667eea;
+    }
+
+    button {
+      width: 100%;
+      padding: 14px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+
+    button:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+    }
+
+    button:active {
+      transform: translateY(0);
+    }
+
+    button:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    .message {
+      margin-top: 20px;
+      padding: 12px;
+      border-radius: 8px;
+      font-size: 14px;
+      display: none;
+    }
+
+    .message.success {
+      background: #d4edda;
+      color: #155724;
+      border: 1px solid #c3e6cb;
+      display: block;
+    }
+
+    .message.error {
+      background: #f8d7da;
+      color: #721c24;
+      border: 1px solid #f5c6cb;
+      display: block;
+    }
+
+    .loading {
+      display: none;
+      text-align: center;
+      margin-top: 10px;
+      color: #666;
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>AESOP Afghanistan</h1>
+    <p class="subtitle">Enter your email to receive a magic link</p>
+    
+    <form id="emailForm">
+      <div class="form-group">
+        <label for="email">Email Address</label>
+        <input 
+          type="email" 
+          id="email" 
+          name="email" 
+          required 
+          autocomplete="email"
+          placeholder="your.email@example.com"
+        >
+      </div>
+      
+      <button type="submit" id="submitBtn">Send Magic Link</button>
+      
+      <div class="loading" id="loading">Sending magic link...</div>
+      <div class="message" id="message"></div>
+    </form>
+  </div>
+
+  <script>
+    const form = document.getElementById('emailForm');
+    const submitBtn = document.getElementById('submitBtn');
+    const loading = document.getElementById('loading');
+    const message = document.getElementById('message');
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      
+      const email = document.getElementById('email').value.trim();
+      const emailInput = document.getElementById('email');
+      
+      // Basic client-side validation
+      if (!email || email.length > 254 || !email.includes('@')) {
+        message.className = 'message error';
+        message.textContent = 'Please enter a valid email address.';
+        message.style.display = 'block';
+        return;
+      }
+
+      // Reset UI
+      message.className = 'message';
+      message.style.display = 'none';
+      loading.style.display = 'block';
+      submitBtn.disabled = true;
+      emailInput.disabled = true;
+
+      try {
+        const response = await fetch('/api/request-magic-link', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ email: email.toLowerCase() }),
+        });
+
+        const data = await response.json();
+        loading.style.display = 'none';
+
+        if (response.ok) {
+          message.className = 'message success';
+          // Use textContent to prevent XSS
+          message.textContent = data.message || 'Magic link sent! Check your email.';
+          message.style.display = 'block';
+          form.reset();
+        } else {
+          message.className = 'message error';
+          // Use textContent to prevent XSS
+          message.textContent = data.error || 'An error occurred. Please try again.';
+          message.style.display = 'block';
+        }
+      } catch (error) {
+        loading.style.display = 'none';
+        message.className = 'message error';
+        message.textContent = 'Network error. Please check your connection and try again.';
+        message.style.display = 'block';
+      } finally {
+        submitBtn.disabled = false;
+        emailInput.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>

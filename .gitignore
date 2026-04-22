@@ -2,5 +2,7 @@
 .idea
 token.json
 secrets/*
+config/secrets.json
 __pycache__
 .vscode
+node_modules

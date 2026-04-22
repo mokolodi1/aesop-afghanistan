@@ -1,197 +1,199 @@
 # AESOP Afghanistan
 
-This repo contains various scripts used to arrange phone buddies and manage the organization.
+This repo contains various scripts used to manage the AESOP Afghanistan organization.
 
-[For more information about AESOP Afghanistan and the phone buddy script specifically, please refer to our website (linked).](https://aesopafghanistan.org/about)
+[For more information about AESOP Afghanistan, please refer to our website: aesopafghanistan.org](https://aesopafghanistan.org/about)
 
-# To prospective employers of Teo (and others!)
+## Deployment
 
-Hi! This project is under active development. We are currently working on fixing bugs and refactoring to allow for future development.
+This application is automatically deployed to Fly.io via GitHub Actions when changes are pushed to the `main` or `master` branch.
 
-Our long-term goal (within the next 6 months to a year) is to have a system that can be administered by a group of Afghan volunteers instead of Seth and Teo.
+### Initial Setup
 
-## Future projects
+1. **Install Fly.io CLI** (if not already installed):
+   ```bash
+   curl -L https://fly.io/install.sh | sh
+   ```
 
-- Fixing bugs (see project issues for specifics)
-- Adding integration and unit tests
-- Moving to a more robust deployment than an EC2 box with Cron (not pretty, but it's worked for over 6 months with zero issues)
+2. **Login to Fly.io**:
+   ```bash
+   flyctl auth login
+   ```
 
-# Scripts
+3. **Create the Fly.io app** (if it doesn't exist):
+   ```bash
+   flyctl launch --no-deploy
+   ```
+   This will use the existing `fly.toml` configuration.
 
-## Email phone buddies script
+4. **Get your Fly.io API token**:
+   - Go to https://fly.io/user/personal_access_tokens
+   - Create a new token
+   - Copy the token
 
-This script emails phone buddy pairs information about each other to allow them to connect.
+5. **Add the token to GitHub Secrets**:
+   - Go to your GitHub repository
+   - Navigate to Settings → Secrets and variables → Actions
+   - Click "New repository secret"
+   - Name: `FLY_API_TOKEN`
+   - Value: Your Fly.io API token
+   - Click "Add secret"
 
-### What the phone buddy script does
+6. **Configure Application Secrets in Fly.io**:
+   After your first deployment, set the required secrets:
+   ```bash
+   flyctl secrets set GOOGLE_SHEET_ID=your-sheet-id
+   flyctl secrets set GOOGLE_CLIENT_EMAIL=your-service-account@project.iam.gserviceaccount.com
+   flyctl secrets set GOOGLE_PRIVATE_KEY="$(cat path/to/private-key.pem)"
+   flyctl secrets set EMAIL_PROVIDER=smtp
+   flyctl secrets set SMTP_HOST=smtp.example.com
+   flyctl secrets set SMTP_USER=your-email@example.com
+   flyctl secrets set SMTP_PASSWORD=your-password
+   flyctl secrets set EMAIL_FROM=noreply@aesopafghanistan.org
+   ```
+   See the Configuration section below for all available environment variables.
 
-Every 24 hours at midnight or 1 am California/Pacific Time (depending on daylight savings), the following script runs:
-```
-python email_phone_buddies.py --send-emails --robot
-```
+### Manual Deployment
 
-Coming soon: we'd like to run the script every 30 minutes instead of every 24 hours in order for it to report whether there would be any issues (like data being incorrectly filled out, etc.)
-
-It does the following:
-1. Coming soon: validates the database and that the list of buddies looks good. If there are any issues, report those to the admins if it's been more than 30 minutes since the issue occurred.
-1. Checks whether there's a date in the Process sheet that meets the following criteria:
-    1. Has a date that's in the past (assumes it's sorted)
-    1. Has all the prerequisite rows filled out with `y` or `yes` (case insensitive)
-1. Checks whether it should send to the admin group or real email list depending on whether the beta column has a `y` or `yes` (case insensitive)
-1. Sends the phone buddy list to the appropriate list (admins or phone buddies)
-1. Saves the output
-    1. Fills in the corresponding cell in the Process sheet with an update on the outcome (Yes or Error). This means that Seth (or anyone else) can easily see if something went wrong with the script that Teo needs to check on or if the script didn't run at all.
-    1. Coming soon: Writes a row to the `Script Output` sheet if it did anything (sent emails, validated things, etc.)
-
-In practice, this means that the admin list (Seth, Teo, and others if we deem appropriate) will receive an email one day before the "real" email list is sent out, and it'll mark the Admin email sent column as Yes in the spreadsheet. We'll review this and make changes if there are any issues (spelling mistakes, etc.).
-
-Given that the Process sheet has dates on Monday, the beta emails will be sent on Sunday night (technically early Monday morning), and the real emails on Monday night. It also means that if the prerequisite cells aren't filled out on the spreadsheet, it'll skip sending the emails for that night, and everything will be pushed to the next day (beta email will be sent first, then real email).
-
-### Installation on production server
-
-The following steps are used to set up a fresh EC2 server. Don't use this section if you're a new contributor!
-
-```
-# On laptop - move over PEM file and secrets folder and ssh into server
-IP=0.0.0.0 # get this from Teo prior to executing these steps (look on Discord)
-scp -r -i /path/to/phone_buddy_key_pair.pem /path/to/secrets ec2-user@$IP:/home/ec2-user/aesop-afghanistan
-ssh -i /path/to/phone_buddy_key_pair.pem ec2-user@$IP
-
-# On server - install updates, tools, and download code
-sudo yum update -y && sudo yum install git tmux docker emacs-nox cronie -y
-tmux
-sudo systemctl enable crond
-sudo systemctl start crond
-sudo systemctl start docker
-sudo usermod -aG docker ec2-user
-
-# Reconnect to the server to allow the changes to take affect
-
-# Install code and Teo's dotfiles
-cd ~
-git clone https://github.com/mokolodi1/aesop-afghanistan
-git clone https://github.com/mokolodi1/dotfiles
-cd dotfiles
-./install.sh
-
-# Note: might want to restart tmux in order to pull latest configuration file
-```
-
-#### Set up Cron
-
-Set up `cron` as follows with `crontab -e`:
-
-```
-0 9 * * * { echo "[$(date +\%Y-\%m-\%d\ \%H:\%M:\%S)] Starting job"; /usr/bin/docker run -it --rm -v /home/ec2-user/aesop-afghanistan:/app aesop-phone-buddy-script python phonebuddies/email_phone_buddies.py --send-emails --robot; echo "[$(date +\%Y-\%m-\%d\ \%H:\%M:\%S)] Job completed"; } >> /home/ec2-user/aesop-afghanistan/cron_logs.txt 2>&1
-```
-
-### Manual use - production
-
-If the `tmux` session is not set up as you're used to, check out this cheat sheet: https://tmuxcheatsheet.com/
-
-Example of use:
-```
-laptop$ IP=0.0.0.0                         # get this and the .pem file from Teo prior to executing these steps
-laptop$ ssh -i /path/to/phone_buddy_key_pair.pem ec2-user@$IP
-server$ tmux a                             # attach to running tmux session
-server$ cd ~/aesop-afghanistan/
-server$ rm token.json                      # if the token file has expired
-server$ /usr/bin/docker run -it --rm -v /home/ec2-user/aesop-afghanistan:/app aesop-phone-buddy-script
-```
-
-If you get a scary-looking file permissions error, run the following:
-```
-chmod 400 /path/to/phone_buddy_key_pair.pem
-```
-
-# Contributing
-
-As of January 2024, we're having weekly meetings to check in on development and move this project along. If you're interested in helping out, send Teo a WhatsApp at +33 6 17 50 71 28.
-
-## Watch this first
-
-This video walks you through setting up from scratch: https://www.loom.com/share/94f6a709d71843abbad769c87861cd80
-
-## How to set up your local device for development work
-
-### 0. Get access to the spreadsheet
-
-Teo will add you to the spreadsheet and appropriate documents. Bug him if he doesn't reach out and let you know where to look!
-
-### 1. Clone this git repo locally
-```
-git clone https://github.com/mokolodi1/aesop-afghanistan
-cd aesop-afghanistan
-```
-
-### 2. Install Docker
-
-Ensure that Docker is installed on your local machine. If you don't have Docker installed, you can follow the installation instructions for your specific operating system on the official Docker website: [Docker Installation Guide](https://docs.docker.com/get-docker/).
-
-
-You can get yourself into an environment where you can test the script using the following commands. 
-```sh
-docker build -t aesop-phone-buddy-script . && docker run -it --rm -v "$(pwd)":/app aesop-phone-buddy-script
-```
-
-You will be dropped into a Docker shell session where you can run commands in Python on the code that's on your filesystem.
-
-### 3. Set up secrets locally
-
-You'll need to set up several files locally in order to successfully run the script. Ask another team member to provide these files for you.
-
-In the `secrets` folder, you'll need:
-- `credentials.json`: Google Auth credentials file (can be downloaded from Teo's Google account [here](https://console.cloud.google.com/apis/credentials?project=aesop-afghanistan)).
-- `admin_emails.txt`: A list of emails to be notified of issues/errors by the script. (Looks like: `email1@example.com,email2@example.com`)
-- `spreadsheet_id.txt`: Contains the Google Sheets document ID. (Looks like `1LM8lzRMn9L5uwTWyes6tGfYiIiBFUxWIzQDFrbceDTA`.)
-
-### 4. Run the test suite
-
-This can be run in interactive mode in Docker to discover all the tests and run them:
-
-```
-python -m unittest discover
-```
-
-### 5. Manual testing
-
-Some examples of what you can run when running in intefactive mode in Docker:
-```
-# Test the script without sending any emails
-python phonebuddies/email_phone_buddies.py
-
-# Test the script without the user prompts (this is how it will run on the server)
-python phonebuddies/email_phone_buddies.py --robot
-
-# Actually send emails (use with caution!)
-python phonebuddies/email_phone_buddies.py --send-emails
-```
-
-### 6. Create a new branch 
-
-You can create a new branch for your contributions. For example:
-
+To deploy manually:
 ```bash
-git checkout -b feature/new-feature
+flyctl deploy
 ```
 
-### 7. Make Changes
+### Local Development
 
-Make the necessary changes to the codebase, documentation, or other project files.
-
-### 8. Commit Changes
-
+Run the server locally:
 ```bash
-git commit -m "Your commit message here."
+npm install
+npm start
 ```
 
-### 9. Push Changes
+The server will be available at `http://localhost:3000`
 
-You can push your branch to your forked repository on GitHub:
+## Configuration
 
-```bash
-git push origin feature/new-feature
+### Setting Up Secrets
+
+This application requires configuration for Google Sheets and email services. You can configure these in two ways:
+
+#### Option 1: Using `config/secrets.json` (Recommended for local development)
+
+1. Copy the example file:
+   ```bash
+   cp config/secrets.example.json config/secrets.json
+   ```
+
+2. Edit `config/secrets.json` with your credentials (see sections below)
+
+#### Option 2: Using Environment Variables (Recommended for production/Fly.io)
+
+Set the following environment variables in Fly.io:
+- `GOOGLE_SHEET_ID` - Your Google Sheet ID
+- `GOOGLE_CLIENT_EMAIL` - Service account email
+- `GOOGLE_PRIVATE_KEY` - Service account private key
+- `GOOGLE_SHEET_INDEX` - Sheet index (default: 0)
+- `GOOGLE_EMAIL_COLUMN` - Column name or index containing emails
+- `EMAIL_PROVIDER` - Email provider: `smtp`, `sendgrid`, or `gmail`
+- `EMAIL_FROM` - From email address
+- `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD` - SMTP settings
+- `SENDGRID_API_KEY` - If using SendGrid
+- `GMAIL_USER`, `GMAIL_APP_PASSWORD` - If using Gmail
+- `BASE_URL` - Base URL for magic links (e.g., `https://aesop-afghanistan.fly.dev`)
+
+### Google Sheets Setup
+
+1. **Create a Google Cloud Project**:
+   - Go to https://console.cloud.google.com/
+   - Create a new project or select an existing one
+
+2. **Enable Google Sheets API**:
+   - Navigate to "APIs & Services" → "Library"
+   - Search for "Google Sheets API" and enable it
+
+3. **Create a Service Account**:
+   - Go to "APIs & Services" → "Credentials"
+   - Click "Create Credentials" → "Service Account"
+   - Give it a name and create it
+   - Click on the service account → "Keys" tab → "Add Key" → "Create new key" → JSON
+   - Download the JSON file
+
+4. **Get Your Sheet ID**:
+   - Open your Google Sheet
+   - The Sheet ID is in the URL: `https://docs.google.com/spreadsheets/d/SHEET_ID_HERE/edit`
+
+5. **Share the Sheet**:
+   - Open your Google Sheet
+   - Click "Share" and add the service account email (from the JSON file) with "Viewer" permissions
+
+6. **Configure in secrets.json**:
+   ```json
+   {
+     "googleSheets": {
+       "sheetId": "your-sheet-id-here",
+       "clientEmail": "service-account@project-id.iam.gserviceaccount.com",
+       "privateKey": "-----BEGIN PRIVATE KEY-----\\n...\\n-----END PRIVATE KEY-----",
+       "sheetIndex": 0,
+       "emailColumn": 0
+     }
+   }
+   ```
+   - Copy the `private_key` from the downloaded JSON (keep the `\n` characters)
+   - `sheetIndex`: Which sheet tab to use (0 = first sheet)
+   - `emailColumn`: Column name (string) or index (number) containing email addresses
+
+### Email Setup
+
+Choose one of the following email providers:
+
+#### SMTP (Generic)
+```json
+{
+  "email": {
+    "provider": "smtp",
+    "from": "noreply@aesopafghanistan.org",
+    "smtp": {
+      "host": "smtp.example.com",
+      "port": 587,
+      "secure": false,
+      "user": "your-email@example.com",
+      "password": "your-password"
+    }
+  }
+}
 ```
 
-### 10. Submit a Pull Request
+#### SendGrid
+```json
+{
+  "email": {
+    "provider": "sendgrid",
+    "from": "noreply@aesopafghanistan.org",
+    "sendgrid": {
+      "apiKey": "SG.your-api-key-here"
+    }
+  }
+}
+```
 
-After making changes and ensuring that the tests pass, open a pull request from your branch to the main repository's `main`  branch. You can provide the description of your changes and reference any related issues or pull requests.
+#### Gmail
+```json
+{
+  "email": {
+    "provider": "gmail",
+    "from": "your-email@gmail.com",
+    "gmail": {
+      "user": "your-email@gmail.com",
+      "appPassword": "your-app-specific-password"
+    }
+  }
+}
+```
+
+**Note**: For Gmail, you'll need to generate an [App Password](https://support.google.com/accounts/answer/185833) instead of your regular password.
+
+## Application Features
+
+- **Magic Link Authentication**: Users enter their email and receive a secure magic link
+- **Google Sheets Integration**: Email verification against a Google Sheet
+- **Email Sending**: Automated magic link emails via SMTP, SendGrid, or Gmail
+- **Secure Token Generation**: Cryptographically secure magic links with 15-minute expiration
