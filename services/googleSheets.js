@@ -1,6 +1,6 @@
-const { GoogleSpreadsheet } = require('google-spreadsheet');
-const { JWT } = require('google-auth-library');
-const config = require('../config/secrets');
+const { GoogleSpreadsheet } = require("google-spreadsheet");
+const { GoogleAuth } = require("google-auth-library");
+const config = require("../config/secrets");
 
 let doc = null;
 
@@ -12,20 +12,17 @@ async function initGoogleSheets() {
     return doc;
   }
 
-  if (!config.googleSheets.sheetId || !config.googleSheets.clientEmail || !config.googleSheets.privateKey) {
-    throw new Error('Google Sheets configuration is missing. Please check your secrets.json file.');
+  if (!config.googleSheets.sheetId) {
+    throw new Error("Google Sheets sheet ID is missing.");
   }
 
-  // Create JWT auth client
-  const serviceAccountAuth = new JWT({
-    email: config.googleSheets.clientEmail,
-    key: config.googleSheets.privateKey.replace(/\\n/g, '\n'),
-    scopes: ['https://www.googleapis.com/auth/spreadsheets.readonly'],
+  const auth = new GoogleAuth({
+    scopes: ["https://www.googleapis.com/auth/spreadsheets.readonly"],
   });
 
-  // Initialize the sheet
-  doc = new GoogleSpreadsheet(config.googleSheets.sheetId, serviceAccountAuth);
-  await doc.loadInfo();
+  const authClient = await auth.getClient();
+
+  doc = new GoogleSpreadsheet(config.googleSheets.sheetId, authClient);
 
   return doc;
 }
@@ -38,39 +35,40 @@ async function initGoogleSheets() {
 async function checkEmailInSheet(email) {
   try {
     const sheet = await initGoogleSheets();
-    
+
     // Validate sheet index is a number
-    const sheetIndex = typeof config.googleSheets.sheetIndex === 'number' 
-      ? config.googleSheets.sheetIndex 
-      : 0;
-    
+    const sheetIndex =
+      typeof config.googleSheets.sheetIndex === "number"
+        ? config.googleSheets.sheetIndex
+        : 0;
+
     // Validate sheet index is within bounds
     if (sheetIndex < 0 || sheetIndex >= sheet.sheetCount) {
-      throw new Error('Invalid sheet index');
+      throw new Error("Invalid sheet index");
     }
-    
+
     const worksheet = sheet.sheetsByIndex[sheetIndex];
-    
+
     // Load all rows
     const rows = await worksheet.getRows();
-    
+
     // Determine which column contains emails
     const emailColumn = config.googleSheets.emailColumn || 0;
-    
+
     // Check if email exists (email should already be lowercased and trimmed)
     const emailLower = email.toLowerCase().trim();
-    
+
     for (const row of rows) {
       let rowEmail;
-      
+
       try {
-        if (typeof emailColumn === 'number') {
+        if (typeof emailColumn === "number") {
           // Validate column index is within bounds
           if (emailColumn < 0 || emailColumn >= worksheet.headerValues.length) {
             continue; // Skip invalid column index
           }
           rowEmail = row.get(worksheet.headerValues[emailColumn]);
-        } else if (typeof emailColumn === 'string') {
+        } else if (typeof emailColumn === "string") {
           // Column name - validate it exists
           if (!worksheet.headerValues.includes(emailColumn)) {
             continue; // Skip if column doesn't exist
@@ -79,9 +77,13 @@ async function checkEmailInSheet(email) {
         } else {
           continue; // Invalid column specification
         }
-        
+
         // Safe comparison (both should be sanitized)
-        if (rowEmail && typeof rowEmail === 'string' && rowEmail.toLowerCase().trim() === emailLower) {
+        if (
+          rowEmail &&
+          typeof rowEmail === "string" &&
+          rowEmail.toLowerCase().trim() === emailLower
+        ) {
           return true;
         }
       } catch (rowError) {
@@ -89,11 +91,11 @@ async function checkEmailInSheet(email) {
         continue;
       }
     }
-    
+
     return false;
   } catch (error) {
     // Don't expose internal structure in error messages
-    console.error('Error checking email in Google Sheet:', error.message);
+    console.error("Error checking email in Google Sheet:", error.message);
     throw error;
   }
 }
@@ -109,28 +111,28 @@ async function getUserData(email) {
     const sheetIndex = config.googleSheets.sheetIndex || 0;
     const worksheet = sheet.sheetsByIndex[sheetIndex];
     const rows = await worksheet.getRows();
-    
+
     const emailColumn = config.googleSheets.emailColumn || 0;
     const emailLower = email.toLowerCase().trim();
-    
+
     for (const row of rows) {
       let rowEmail;
-      
-      if (typeof emailColumn === 'number') {
+
+      if (typeof emailColumn === "number") {
         rowEmail = row.get(worksheet.headerValues[emailColumn]);
       } else {
         rowEmail = row.get(emailColumn);
       }
-      
+
       if (rowEmail && rowEmail.toLowerCase().trim() === emailLower) {
         // Return all row data as object
         return row.toObject();
       }
     }
-    
+
     return null;
   } catch (error) {
-    console.error('Error getting user data from Google Sheet:', error);
+    console.error("Error getting user data from Google Sheet:", error);
     throw error;
   }
 }
@@ -138,5 +140,5 @@ async function getUserData(email) {
 module.exports = {
   checkEmailInSheet,
   getUserData,
-  initGoogleSheets
+  initGoogleSheets,
 };
