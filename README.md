@@ -96,13 +96,16 @@ Set the following environment variables in Fly.io:
 
 - `GOOGLE_SHEET_ID` - Your Google Sheet ID
 - `GOOGLE_APPLICATION_CREDENTIALS` - Optional path to an Application Default Credentials or Workload Identity Federation config file
-- `GOOGLE_SHEET_INDEX` - Sheet index (default: 0)
+- `GOOGLE_SHEET_NAME` - Sheet name (default: `People`)
+- `GOOGLE_ID_COLUMN` - ID column (default: `B`)
 - `GOOGLE_EMAIL_COLUMN` - Column name or index containing emails
-- `EMAIL_PROVIDER` - Email provider: `smtp`, `sendgrid`, or `gmail`
+- `EMAIL_PROVIDER` - Email provider: `smtp`, `sendgrid`, `gmail`, or `gmailServiceAccount`
 - `EMAIL_FROM` - From email address
 - `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD` - SMTP settings
 - `SENDGRID_API_KEY` - If using SendGrid
 - `GMAIL_USER`, `GMAIL_APP_PASSWORD` - If using Gmail
+- `GMAIL_SA_DELEGATED_USER` - Workspace mailbox to impersonate (e.g. `auth@yourdomain.com`)
+- `GMAIL_SA_CREDENTIALS_JSON` - Entire service account JSON as a single JSON string
 - `BASE_URL` - Base URL for magic links (e.g., `https://aesop-afghanistan.fly.dev`)
 
 ### Google Sheets Setup
@@ -145,8 +148,9 @@ Set the following environment variables in Fly.io:
    {
    "googleSheets": {
    "sheetId": "your-sheet-id-here",
-   "sheetIndex": 0,
-   "emailColumn": 0
+   "sheetName": "People",
+   "idColumn": "B",
+   "emailColumn": "D"
    }
    }
 
@@ -202,6 +206,29 @@ Choose one of the following email providers:
 ```
 
 **Note**: For Gmail, you'll need to generate an [App Password](https://support.google.com/accounts/answer/185833) instead of your regular password.
+
+#### Gmail Service Account (Workspace + Domain-Wide Delegation)
+
+```json
+{
+  "email": {
+    "provider": "gmailServiceAccount",
+    "from": "auth@yourdomain.com",
+    "gmailServiceAccount": {
+      "delegatedUser": "auth@yourdomain.com",
+      "credentials": {
+        "type": "service_account",
+        "project_id": "your-project-id",
+        "private_key_id": "your-private-key-id",
+        "private_key": "-----BEGIN PRIVATE KEY-----\nYOUR_PRIVATE_KEY\n-----END PRIVATE KEY-----\n",
+        "client_email": "your-service-account@your-project-id.iam.gserviceaccount.com",
+        "client_id": "your-client-id",
+        "token_uri": "https://oauth2.googleapis.com/token"
+      }
+    }
+  }
+}
+```
 
 ## Application Features
 

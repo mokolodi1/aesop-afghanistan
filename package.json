@@ -4,8 +4,11 @@
   "description": "AESOP Afghanistan organization management scripts",
   "main": "server.js",
   "scripts": {
+    "build:client": "esbuild src/client/app.jsx --bundle --minify --outfile=public/app.js",
+    "build": "npm run build:client",
     "start": "node server.js",
-    "dev": "node server.js"
+    "dev": "npm run build:client && node server.js",
+    "dev:client": "esbuild src/client/app.jsx --bundle --outfile=public/app.js --watch"
   },
   "engines": {
     "node": ">=18.0.0"
@@ -15,7 +18,12 @@
     "google-spreadsheet": "^4.1.0",
     "google-auth-library": "^9.0.0",
     "nodemailer": "^6.9.7",
-    "helmet": "^7.1.0"
+    "helmet": "^7.1.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.11"
   },
   "keywords": [],
   "author": "",

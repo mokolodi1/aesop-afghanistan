@@ -29,8 +29,10 @@ function loadSecrets() {
   secrets = {
     googleSheets: {
       sheetId: process.env.GOOGLE_SHEET_ID || "",
-      sheetIndex: parseInt(process.env.GOOGLE_SHEET_INDEX || "0", 10),
-      emailColumn: process.env.GOOGLE_EMAIL_COLUMN || 0,
+      sheetName: process.env.GOOGLE_SHEET_NAME || "People",
+      idColumn: process.env.GOOGLE_ID_COLUMN || "B",
+      nameColumn: process.env.GOOGLE_NAME_COLUMN || "C",
+      emailColumn: process.env.GOOGLE_EMAIL_COLUMN || "D",
     },
     email: {
       provider: process.env.EMAIL_PROVIDER || "smtp",
@@ -48,6 +50,22 @@ function loadSecrets() {
       gmail: {
         user: process.env.GMAIL_USER || "",
         appPassword: process.env.GMAIL_APP_PASSWORD || "",
+      },
+      gmailServiceAccount: {
+        delegatedUser: process.env.GMAIL_SA_DELEGATED_USER || "",
+        credentials: (() => {
+          const raw = process.env.GMAIL_SA_CREDENTIALS_JSON || "";
+          if (!raw) {
+            return null;
+          }
+
+          try {
+            return JSON.parse(raw);
+          } catch (error) {
+            console.error("Invalid GMAIL_SA_CREDENTIALS_JSON: must be valid JSON");
+            return null;
+          }
+        })(),
       },
     },
   };

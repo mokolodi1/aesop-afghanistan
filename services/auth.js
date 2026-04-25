@@ -1,24 +1,24 @@
-const { checkEmailInSheet } = require('./googleSheets');
+const { findEmailById } = require('./googleSheets');
 const { generateAndStoreMagicLink, sendMagicLinkEmail } = require('./magicLink');
-const { sanitizeEmail } = require('../utils/validation');
+const { sanitizeEmail, sanitizeIdentifier } = require('../utils/validation');
+const { formatErrorForLog } = require('../utils/errorLogging');
 
 /**
- * Check if email exists in Google Sheet and send magic link if it does
- * @param {string} email - Email address to check (should be pre-validated)
- * @returns {Promise<{success: boolean, emailFound: boolean}>}
+ * Look up user by ID in Google Sheet and send magic link if found
+ * @param {string} userId - User ID to check (should be pre-validated)
+ * @returns {Promise<{success: boolean, userFound: boolean}>}
  */
-async function checkEmailAndSendMagicLink(email) {
+async function checkIdAndSendMagicLink(userId) {
   try {
-    // Ensure email is sanitized (should already be done, but double-check)
-    const sanitizedEmail = sanitizeEmail(email);
+    const sanitizedId = sanitizeIdentifier(userId);
+    const foundEmail = await findEmailById(sanitizedId);
     
-    // Check if email exists in Google Sheet
-    const emailFound = await checkEmailInSheet(sanitizedEmail);
-    
-    if (!emailFound) {
-      // Email not found, but we don't reveal this to prevent enumeration
-      return { success: true, emailFound: false };
+    if (!foundEmail) {
+      // User not found, but we don't reveal this to prevent enumeration
+      return { success: true, userFound: false };
     }
+
+    const sanitizedEmail = sanitizeEmail(foundEmail);
 
     // Generate and store magic link
     const magicLinkData = await generateAndStoreMagicLink(sanitizedEmail);
@@ -26,14 +26,13 @@ async function checkEmailAndSendMagicLink(email) {
     // Send magic link email
     await sendMagicLinkEmail(sanitizedEmail, magicLinkData.token);
     
-    return { success: true, emailFound: true };
+    return { success: true, userFound: true };
   } catch (error) {
-    // Don't expose email in error logs
-    console.error('Error in checkEmailAndSendMagicLink:', error.message);
+    console.error('Error in checkIdAndSendMagicLink:', formatErrorForLog(error));
     throw error;
   }
 }
 
 module.exports = {
-  checkEmailAndSendMagicLink
+  checkIdAndSendMagicLink
 };

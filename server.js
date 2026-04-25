@@ -1,10 +1,12 @@
 const express = require('express');
 const path = require('path');
-const { checkEmailAndSendMagicLink } = require('./services/auth');
+const { checkIdAndSendMagicLink } = require('./services/auth');
 const { verifyMagicLink } = require('./services/magicLink');
-const { isValidEmail, sanitizeEmail, isValidToken } = require('./utils/validation');
+const { findNameByEmail } = require('./services/googleSheets');
+const { sanitizeEmail, isValidToken, sanitizeIdentifier } = require('./utils/validation');
 const { createRateLimiter } = require('./middleware/rateLimiter');
 const { securityHeaders } = require('./middleware/security');
+const { formatErrorForLog } = require('./utils/errorLogging');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -39,31 +41,45 @@ const magicLinkRateLimiter = createRateLimiter({ windowMs: 15 * 60 * 1000, max: 
 // Request magic link
 app.post('/api/request-magic-link', magicLinkRateLimiter, async (req, res) => {
   try {
-    let { email } = req.body;
+    let { userId } = req.body;
     
-    // Validate email exists
-    if (!email || typeof email !== 'string') {
-      return res.status(400).json({ error: 'Email is required' });
+    // Validate ID exists
+    if (!userId || typeof userId !== 'string') {
+      console.warn('Invalid student ID request: missing or non-string ID', {
+        ip: req.ip,
+        route: req.originalUrl
+      });
+      return res.status(400).json({ error: 'ID is required' });
     }
 
-    // Sanitize email to prevent header injection
-    email = sanitizeEmail(email);
-
-    // Validate email format
-    if (!isValidEmail(email)) {
-      return res.status(400).json({ error: 'Invalid email format' });
+    // Sanitize and validate ID format
+    userId = sanitizeIdentifier(userId);
+    if (!userId) {
+      console.warn('Invalid student ID request: failed ID sanitization', {
+        ip: req.ip,
+        route: req.originalUrl
+      });
+      return res.status(400).json({ error: 'Invalid ID format' });
     }
 
-    const result = await checkEmailAndSendMagicLink(email);
+    const result = await checkIdAndSendMagicLink(userId);
+    if (!result?.userFound) {
+      // Keep generic response for user enumeration prevention, but log internal signal.
+      console.warn('Invalid student ID request: ID not found', {
+        ip: req.ip,
+        route: req.originalUrl,
+        userId
+      });
+    }
     
-    // Always return success to prevent email enumeration
+    // Always return success to prevent user enumeration
     res.json({ 
       success: true, 
-      message: 'If your email is registered, you will receive a magic link shortly.' 
+      message: 'If your submitted student ID is valid, a magic link has been sent to your registered email.' 
     });
   } catch (error) {
     // Log error but don't expose details to client
-    console.error('Error requesting magic link:', error.message);
+    console.error('Error requesting magic link:', formatErrorForLog(error));
     res.status(500).json({ error: 'An error occurred. Please try again later.' });
   }
 });
@@ -91,11 +107,13 @@ app.post('/api/verify-magic-link', verifyRateLimiter, async (req, res) => {
     if (result.valid) {
       // Sanitize email before returning
       const sanitizedEmail = sanitizeEmail(result.email);
+      const studentName = await findNameByEmail(sanitizedEmail);
       
       // TODO: Set session/cookie and redirect to edit page
       res.json({ 
         success: true, 
         email: sanitizedEmail,
+        name: studentName || '',
         message: 'Magic link verified successfully' 
       });
     } else {
@@ -103,7 +121,7 @@ app.post('/api/verify-magic-link', verifyRateLimiter, async (req, res) => {
     }
   } catch (error) {
     // Log error but don't expose details to client
-    console.error('Error verifying magic link:', error.message);
+    console.error('Error verifying magic link:', formatErrorForLog(error));
     res.status(500).json({ error: 'An error occurred verifying the link.' });
   }
 });

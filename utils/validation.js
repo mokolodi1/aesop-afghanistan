@@ -70,9 +70,27 @@ function sanitizeString(str) {
     .replace(/on\w+=/gi, ''); // Remove event handlers
 }
 
+/**
+ * Sanitize user identifier used for sheet lookups
+ * @param {string} value - Identifier to sanitize
+ * @returns {string}
+ */
+function sanitizeIdentifier(value) {
+  if (!value || typeof value !== 'string') {
+    return '';
+  }
+
+  return value
+    .replace(/[\r\n]/g, '')
+    .replace(/[\x00-\x1F\x7F]/g, '')
+    .trim()
+    .slice(0, 100);
+}
+
 module.exports = {
   isValidEmail,
   sanitizeEmail,
   isValidToken,
-  sanitizeString
+  sanitizeString,
+  sanitizeIdentifier
 };
