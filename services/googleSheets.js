@@ -5,7 +5,7 @@ const { formatGoogleApiError } = require("../utils/errorLogging");
 
 let doc = null;
 let initPromise = null;
-const SHEETS_READ_SCOPE = "https://www.googleapis.com/auth/spreadsheets.readonly";
+const SHEETS_SCOPE = "https://www.googleapis.com/auth/spreadsheets";
 
 /**
  * Build an auth client for Google Sheets.
@@ -21,12 +21,12 @@ async function buildSheetsAuthClient() {
     return new JWT({
       email: serviceAccountCredentials.client_email,
       key: serviceAccountCredentials.private_key,
-      scopes: [SHEETS_READ_SCOPE],
+      scopes: [SHEETS_SCOPE],
     });
   }
 
   const auth = new GoogleAuth({
-    scopes: [SHEETS_READ_SCOPE],
+    scopes: [SHEETS_SCOPE],
   });
 
   return auth.getClient();
@@ -92,11 +92,28 @@ function resolveColumnIndex(columnRef) {
 }
 
 /**
- * Find user email by user ID in configured sheet/columns.
- * @param {string} userId - User ID to lookup (pre-sanitized)
- * @returns {Promise<string|null>} Email if found, otherwise null
+ * Value for USER_ENTERED so Google Sheets stores the cell as plain text (matches manual 'text entries).
+ * @param {unknown} value
+ * @returns {string}
  */
-async function findEmailById(userId) {
+function googleSheetPlainText(value) {
+  if (value === null || value === undefined) {
+    return "";
+  }
+  const s = String(value).replace(/\r?\n/g, " ").trim();
+  if (s === "") {
+    return "";
+  }
+  const escaped = s.replace(/'/g, "''");
+  return `'${escaped}`;
+}
+
+/**
+ * Find name and email for the row where the id column matches userId.
+ * @param {string} userId - User ID to lookup (pre-sanitized)
+ * @returns {Promise<{ name: string, email: string, id: string, phone: string }|null>}
+ */
+async function findProfileById(userId) {
   try {
     const sheet = await initGoogleSheets();
     const sheetName = config.googleSheets.sheetName || "People";
@@ -105,10 +122,21 @@ async function findEmailById(userId) {
       throw new Error(`Sheet "${sheetName}" not found.`);
     }
 
-    // Load rows from configured sheet.
     const rows = await worksheet.getRows();
     const idColumnIndex = resolveColumnIndex(config.googleSheets.idColumn || "B");
+    const nameColumnIndex = resolveColumnIndex(config.googleSheets.nameColumn || "C");
     const emailColumnIndex = resolveColumnIndex(config.googleSheets.emailColumn || "D");
+    let phoneColumnIndex = null;
+    const pc = config.googleSheets.phoneColumn;
+    if (pc === "") {
+      phoneColumnIndex = null;
+    } else {
+      try {
+        phoneColumnIndex = resolveColumnIndex(pc != null ? String(pc).trim() : "E");
+      } catch {
+        phoneColumnIndex = null;
+      }
+    }
     const normalizedId = userId.trim().toLowerCase();
 
     for (const row of rows) {
@@ -119,10 +147,16 @@ async function findEmailById(userId) {
           continue;
         }
 
-        const rowEmail = String(rowData[emailColumnIndex] || "").trim().toLowerCase();
-        return rowEmail || null;
+        const phoneRaw =
+          phoneColumnIndex !== null ? String(rowData[phoneColumnIndex] ?? "").trim() : "";
+
+        return {
+          name: String(rowData[nameColumnIndex] || "").trim(),
+          email: String(rowData[emailColumnIndex] || "").trim(),
+          id: String(rowData[idColumnIndex] || "").trim(),
+          phone: phoneRaw,
+        };
       } catch (rowError) {
-        // Skip malformed rows
         continue;
       }
     }
@@ -130,18 +164,30 @@ async function findEmailById(userId) {
     return null;
   } catch (error) {
     const formattedError = formatGoogleApiError(error);
-    console.error("Error finding email by ID in Google Sheet:", formattedError);
+    console.error("Error finding profile by ID in Google Sheet:", formattedError);
     throw new Error(formattedError, { cause: error });
   }
 }
 
 /**
- * Find user display name by email in configured sheet.
- * Defaults to People!C:C when no explicit config is set.
- * @param {string} email - Email to lookup (pre-sanitized)
- * @returns {Promise<string|null>} Name if found, otherwise null
+ * Find user email by user ID in configured sheet/columns.
+ * @param {string} userId - User ID to lookup (pre-sanitized)
+ * @returns {Promise<string|null>} Email if found, otherwise null
  */
-async function findNameByEmail(email) {
+async function findEmailById(userId) {
+  const profile = await findProfileById(userId);
+  if (!profile?.email) {
+    return null;
+  }
+  return profile.email.toLowerCase().trim() || null;
+}
+
+/**
+ * Find name and email (per configured columns) for a user row matching email.
+ * @param {string} email - Email to lookup (pre-sanitized)
+ * @returns {Promise<{ name: string, email: string, id: string, phone: string }|null>}
+ */
+async function findProfileByEmail(email) {
   try {
     const sheet = await initGoogleSheets();
     const sheetName = config.googleSheets.sheetName || "People";
@@ -151,8 +197,20 @@ async function findNameByEmail(email) {
     }
 
     const rows = await worksheet.getRows();
+    const idColumnIndex = resolveColumnIndex(config.googleSheets.idColumn || "B");
     const emailColumnIndex = resolveColumnIndex(config.googleSheets.emailColumn || "D");
     const nameColumnIndex = resolveColumnIndex(config.googleSheets.nameColumn || "C");
+    let phoneColumnIndex = null;
+    const pc = config.googleSheets.phoneColumn;
+    if (pc === "") {
+      phoneColumnIndex = null;
+    } else {
+      try {
+        phoneColumnIndex = resolveColumnIndex(pc != null ? String(pc).trim() : "E");
+      } catch {
+        phoneColumnIndex = null;
+      }
+    }
     const emailLower = email.toLowerCase().trim();
 
     for (const row of rows) {
@@ -160,17 +218,151 @@ async function findNameByEmail(email) {
       const rowEmail = String(rowData[emailColumnIndex] || "").trim().toLowerCase();
 
       if (rowEmail === emailLower) {
-        const rowName = String(rowData[nameColumnIndex] || "").trim();
-        return rowName || null;
+        const phoneRaw =
+          phoneColumnIndex !== null ? String(rowData[phoneColumnIndex] ?? "").trim() : "";
+        return {
+          name: String(rowData[nameColumnIndex] || "").trim(),
+          email: String(rowData[emailColumnIndex] || "").trim(),
+          id: String(rowData[idColumnIndex] || "").trim(),
+          phone: phoneRaw,
+        };
       }
     }
 
     return null;
   } catch (error) {
     const formattedError = formatGoogleApiError(error);
-    console.error("Error finding name by email in Google Sheet:", formattedError);
+    console.error("Error finding profile by email in Google Sheet:", formattedError);
     throw new Error(formattedError, { cause: error });
   }
+}
+
+/**
+ * Find user display name by email in configured sheet.
+ * @param {string} email - Email to lookup (pre-sanitized)
+ * @returns {Promise<string|null>} Name if found, otherwise null
+ */
+async function findNameByEmail(email) {
+  const profile = await findProfileByEmail(email);
+  if (!profile) {
+    return null;
+  }
+  return profile.name || null;
+}
+
+/**
+ * Parse a cell value as a time for "most recent" comparison (ms since epoch).
+ * @param {unknown} raw
+ * @returns {number}
+ */
+function parseSheetTimestamp(raw) {
+  if (raw == null || raw === "") {
+    return -Infinity;
+  }
+  if (raw instanceof Date) {
+    const t = raw.getTime();
+    return Number.isNaN(t) ? -Infinity : t;
+  }
+  if (typeof raw === "number" && Number.isFinite(raw)) {
+    if (raw > 1e12) {
+      return raw;
+    }
+    if (raw > 20000 && raw < 120000) {
+      return (raw - 25569) * 86400 * 1000;
+    }
+  }
+  const parsed = Date.parse(String(raw).trim());
+  if (!Number.isNaN(parsed)) {
+    return parsed;
+  }
+  return -Infinity;
+}
+
+/**
+ * In the "Ding changes" tab, find rows for userId in the id column, pick the row
+ * with the latest timestamp, and return the ding number from that row.
+ * @param {string} userId - Student ID (pre-sanitized, same as People lookup)
+ * @returns {Promise<string|null>}
+ */
+async function findLatestDingNumberById(userId) {
+  try {
+    const sheet = await initGoogleSheets();
+    const dingSheetName = config.googleSheets.dingChangesSheetName || "Ding changes";
+    const worksheet = sheet.sheetsByTitle[dingSheetName];
+    if (!worksheet) {
+      return null;
+    }
+
+    const rows = await worksheet.getRows();
+    const idColumnIndex = resolveColumnIndex(config.googleSheets.dingIdColumn || "A");
+    const tsColumnIndex = resolveColumnIndex(config.googleSheets.dingTimestampColumn || "B");
+    const dingColumnIndex = resolveColumnIndex(config.googleSheets.dingNumberColumn || "C");
+    const normalizedId = userId.trim().toLowerCase();
+
+    let bestTs = -Infinity;
+    let bestDing = null;
+    let fallbackDing = null;
+
+    for (const row of rows) {
+      const rowData = Array.isArray(row._rawData) ? row._rawData : [];
+      const rowId = String(rowData[idColumnIndex] || "").trim().toLowerCase();
+      if (rowId !== normalizedId) {
+        continue;
+      }
+
+      const rawDing = rowData[dingColumnIndex];
+      const dingStr = rawDing == null ? "" : String(rawDing).trim();
+      if (dingStr) {
+        fallbackDing = dingStr;
+      }
+
+      const ts = parseSheetTimestamp(rowData[tsColumnIndex]);
+      if (ts === -Infinity) {
+        continue;
+      }
+      if (ts >= bestTs) {
+        bestTs = ts;
+        bestDing = dingStr || null;
+      }
+    }
+
+    if (bestTs > -Infinity) {
+      return bestDing || null;
+    }
+    return fallbackDing || null;
+  } catch (error) {
+    const formattedError = formatGoogleApiError(error);
+    console.error("Error looking up latest ding number:", formattedError);
+    return null;
+  }
+}
+
+/**
+ * Append a row to the Ding changes tab: A=id, B=timestamp, C=ding#, D=name, E=note, F=phone.
+ * ID, ding number, name, note, phone use Sheets text literals (leading ') so numbers stay text.
+ * Requires a header row on that sheet and spreadsheet scope for writes.
+ * @param {{ userId: string, timestamp: string, newDingNumber: string, displayName: string, portalNote: string, phone: string }} row
+ * @returns {Promise<void>}
+ */
+async function appendDingChangeRow(row) {
+  const sheet = await initGoogleSheets();
+  const dingSheetName = config.googleSheets.dingChangesSheetName || "Ding changes";
+  const worksheet = sheet.sheetsByTitle[dingSheetName];
+  if (!worksheet) {
+    throw new Error(`Sheet "${dingSheetName}" not found.`);
+  }
+
+  const phone = typeof row.phone === "string" ? row.phone : "";
+
+  const values = [
+    googleSheetPlainText(row.userId),
+    row.timestamp,
+    googleSheetPlainText(row.newDingNumber),
+    googleSheetPlainText(row.displayName),
+    googleSheetPlainText(row.portalNote),
+    googleSheetPlainText(phone),
+  ];
+  await worksheet.addRow(values, { insert: true, raw: false });
 }
 
 /**
@@ -211,8 +403,12 @@ async function getUserData(email) {
 }
 
 module.exports = {
+  appendDingChangeRow,
   findEmailById,
+  findLatestDingNumberById,
   findNameByEmail,
+  findProfileByEmail,
+  findProfileById,
   getUserData,
   initGoogleSheets,
 };

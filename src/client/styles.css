@@ -180,7 +180,131 @@ button:disabled {
 }
 
 .portal-content h2 {
-  margin: 0;
+  margin: 0 0 16px 0;
   font-size: 30px;
   font-weight: 600;
+}
+
+.portal-email {
+  margin: 12px 0 0;
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+.portal-email-label {
+  display: block;
+  color: #666;
+  font-size: 14px;
+  font-weight: 500;
+  margin-bottom: 4px;
+}
+
+.portal-email-value {
+  color: #1a1a1a;
+  word-break: break-all;
+}
+
+.portal-ding {
+  margin: 20px 0 0 0;
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+.portal-ding-label {
+  display: block;
+  color: #666;
+  font-size: 14px;
+  font-weight: 500;
+  margin-bottom: 4px;
+}
+
+.portal-ding-value {
+  color: #1a1a1a;
+  font-size: 18px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+
+.portal-ding-section {
+  margin-top: 8px;
+  max-width: 400px;
+}
+
+.portal-ding-button {
+  display: inline-block;
+  width: auto;
+  min-width: 0;
+  margin-top: 12px;
+  padding: 10px 18px;
+  font-size: 15px;
+  background: #fff;
+  color: #5a4fcf;
+  border: 2px solid #8b7fd9;
+  border-radius: 8px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: none;
+}
+
+.portal-ding-button:hover:not(:disabled) {
+  background: #f3f0ff;
+}
+
+.portal-ding-form {
+  margin-top: 20px;
+  padding: 20px;
+  background: #f8f7fc;
+  border-radius: 10px;
+  border: 1px solid #e8e4f2;
+}
+
+.portal-ding-form .form-group {
+  margin-bottom: 16px;
+}
+
+.portal-ding-form input[type='text'] {
+  max-width: 100%;
+}
+
+.portal-ding-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.portal-ding-save {
+  width: auto;
+  min-width: 120px;
+  padding: 10px 20px;
+  font-size: 15px;
+}
+
+.portal-ding-cancel {
+  width: auto;
+  min-width: 0;
+  padding: 10px 18px;
+  font-size: 15px;
+  background: #fff;
+  color: #555;
+  border: 2px solid #d0d0d0;
+  box-shadow: none;
+}
+
+.portal-ding-cancel:hover:not(:disabled) {
+  background: #f5f5f5;
+}
+
+.portal-ding-form-status {
+  margin-top: 12px;
+  font-size: 14px;
+}
+
+.portal-ding-form-status.success {
+  color: #155724;
+}
+
+.portal-ding-form-status.error {
+  color: #721c24;
 }

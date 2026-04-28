@@ -3,7 +3,7 @@ const { sendEmail } = require('./email');
 const config = require('../config/secrets');
 
 // In-memory store for magic links (in production, use Redis or database)
-// Format: { token: { email, expiresAt, used } }
+// Format: { token: { email, userId, expiresAt, used } }
 const magicLinkStore = new Map();
 
 // Magic link expiration time (15 minutes)
@@ -20,14 +20,16 @@ function generateToken() {
 /**
  * Generate and store a magic link for an email
  * @param {string} email - Email address
+ * @param {string} [userId] - Student ID (sanitized) used to look up the row; shown on the portal after verify
  * @returns {Promise<{token: string, expiresAt: Date}>}
  */
-async function generateAndStoreMagicLink(email) {
+async function generateAndStoreMagicLink(email, userId) {
   const token = generateToken();
   const expiresAt = new Date(Date.now() + MAGIC_LINK_EXPIRY_MS);
   
   magicLinkStore.set(token, {
     email,
+    userId: userId && typeof userId === "string" ? userId : undefined,
     expiresAt,
     used: false,
     createdAt: new Date()
@@ -44,7 +46,7 @@ async function generateAndStoreMagicLink(email) {
 /**
  * Verify a magic link token
  * @param {string} token - Magic link token (should be pre-validated)
- * @returns {Promise<{valid: boolean, email?: string}>}
+ * @returns {Promise<{valid: boolean, email?: string, userId?: string}>}
  */
 async function verifyMagicLink(token) {
   // Additional validation (should already be done, but double-check)
@@ -73,7 +75,11 @@ async function verifyMagicLink(token) {
   // Mark as used
   linkData.used = true;
 
-  return { valid: true, email: linkData.email };
+  return {
+    valid: true,
+    email: linkData.email,
+    userId: linkData.userId,
+  };
 }
 
 /**

@@ -87,10 +87,45 @@ function sanitizeIdentifier(value) {
     .slice(0, 100);
 }
 
+/**
+ * Sanitize ding number for sheet storage (alphanumeric and common safe chars)
+ * @param {string} value
+ * @returns {string}
+ */
+function sanitizeDingNumberInput(value) {
+  if (!value || typeof value !== 'string') {
+    return '';
+  }
+  return value
+    .replace(/[\r\n]/g, '')
+    .replace(/[\x00-\x1F\x7F]/g, '')
+    .trim()
+    .slice(0, 80);
+}
+
+/**
+ * Name line for the Ding changes sheet (column D)
+ * @param {string} value
+ * @returns {string}
+ */
+function sanitizePortalDisplayName(value) {
+  if (!value || typeof value !== 'string') {
+    return '';
+  }
+  return value
+    .replace(/[\r\n]/g, '')
+    .replace(/[\x00-\x1F\x7F]/g, '')
+    .replace(/[<>]/g, '')
+    .trim()
+    .slice(0, 200);
+}
+
 module.exports = {
   isValidEmail,
   sanitizeEmail,
   isValidToken,
   sanitizeString,
-  sanitizeIdentifier
+  sanitizeIdentifier,
+  sanitizeDingNumberInput,
+  sanitizePortalDisplayName
 };

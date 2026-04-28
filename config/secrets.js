@@ -32,7 +32,11 @@ function loadSecrets() {
       sheetName: process.env.GOOGLE_SHEET_NAME || "People",
       idColumn: process.env.GOOGLE_ID_COLUMN || "B",
       nameColumn: process.env.GOOGLE_NAME_COLUMN || "C",
-      emailColumn: process.env.GOOGLE_EMAIL_COLUMN || "D",
+      phoneColumn: process.env.GOOGLE_PHONE_COLUMN || "E",
+      dingChangesSheetName: process.env.GOOGLE_DING_CHANGES_SHEET_NAME || "Ding changes",
+      dingIdColumn: process.env.GOOGLE_DING_ID_COLUMN || "A",
+      dingTimestampColumn: process.env.GOOGLE_DING_TIMESTAMP_COLUMN || "B",
+      dingNumberColumn: process.env.GOOGLE_DING_NUMBER_COLUMN || "C",
     },
     email: {
       provider: process.env.EMAIL_PROVIDER || "smtp",

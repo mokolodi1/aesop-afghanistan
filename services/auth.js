@@ -21,7 +21,7 @@ async function checkIdAndSendMagicLink(userId) {
     const sanitizedEmail = sanitizeEmail(foundEmail);
 
     // Generate and store magic link
-    const magicLinkData = await generateAndStoreMagicLink(sanitizedEmail);
+    const magicLinkData = await generateAndStoreMagicLink(sanitizedEmail, sanitizedId);
     
     // Send magic link email
     await sendMagicLinkEmail(sanitizedEmail, magicLinkData.token);

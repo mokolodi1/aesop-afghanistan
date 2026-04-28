@@ -68,8 +68,30 @@ function formatGmailAuthError(error, delegatedUser) {
   return `${base} hint=gmail-service-account-delegation: verify delegatedUser="${delegatedUser || "missing"}" exists in your Workspace domain, Gmail is enabled for that user, and Admin Console Domain-Wide Delegation includes scope https://www.googleapis.com/auth/gmail.send for this service account client ID.`;
 }
 
+/**
+ * @param {import('axios').AxiosError} error
+ * @returns {boolean}
+ */
+function isGoogleSheetsForbidden(error) {
+  return error?.response?.status === 403;
+}
+
+/**
+ * @param {import('axios').AxiosError} error
+ * @returns {string}
+ */
+function formatGoogleSheetsWriteErrorForLog(error) {
+  const base = formatGoogleApiError(error);
+  if (isGoogleSheetsForbidden(error)) {
+    return `${base} hint=sheets-write-403: share the spreadsheet with the service account (client_email in credentials) with role Editor, not Viewer; in Google Cloud enable "Google Sheets API" for the project; verify the app uses scope https://www.googleapis.com/auth/spreadsheets.`;
+  }
+  return base;
+}
+
 module.exports = {
   formatGoogleApiError,
   formatErrorForLog,
   formatGmailAuthError,
+  formatGoogleSheetsWriteErrorForLog,
+  isGoogleSheetsForbidden,
 };
