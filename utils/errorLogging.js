@@ -38,6 +38,27 @@ function formatGoogleApiError(error) {
   return `Google API error [status=${status} ${statusText}] [code=${code}] [reason=${reason}] ${apiMessage} | payload=${payload}${invalidGrantHint}`;
 }
 
+/**
+ * Use detailed Google HTTP formatting when the error looks like an API response;
+ * otherwise preserve the original message (e.g. missing config before any request).
+ * @param {unknown} error
+ * @returns {string}
+ */
+function formatGoogleSheetsOperationError(error) {
+  if (!error || typeof error !== "object") {
+    return String(error ?? "Unknown error");
+  }
+  const e = /** @type {{ response?: { status?: number; data?: unknown }; message?: string }} */ (error);
+  const hasResponse =
+    e.response != null &&
+    (e.response.status != null ||
+      (e.response.data != null && typeof e.response.data === "object"));
+  if (hasResponse) {
+    return formatGoogleApiError(error);
+  }
+  return e.message || String(error);
+}
+
 function formatErrorForLog(error) {
   if (!error) {
     return "Unknown error";
@@ -81,7 +102,7 @@ function isGoogleSheetsForbidden(error) {
  * @returns {string}
  */
 function formatGoogleSheetsWriteErrorForLog(error) {
-  const base = formatGoogleApiError(error);
+  const base = formatGoogleSheetsOperationError(error);
   if (isGoogleSheetsForbidden(error)) {
     return `${base} hint=sheets-write-403: share the spreadsheet with the service account (client_email in credentials) with role Editor, not Viewer; in Google Cloud enable "Google Sheets API" for the project; verify the app uses scope https://www.googleapis.com/auth/spreadsheets.`;
   }
@@ -90,6 +111,7 @@ function formatGoogleSheetsWriteErrorForLog(error) {
 
 module.exports = {
   formatGoogleApiError,
+  formatGoogleSheetsOperationError,
   formatErrorForLog,
   formatGmailAuthError,
   formatGoogleSheetsWriteErrorForLog,

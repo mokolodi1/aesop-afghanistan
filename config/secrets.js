@@ -4,6 +4,43 @@ const path = require("path");
 let secrets = null;
 
 /**
+ * Merge Google Sheets settings from optional secrets.json section with process.env.
+ * Environment variables win when set (non-empty after trim), matching Fly.io / README.
+ * @param {Record<string, unknown>|undefined} fileSection
+ */
+function buildGoogleSheetsConfig(fileSection) {
+  const f = fileSection && typeof fileSection === "object" ? fileSection : {};
+  const envOr = (envKey, fileKey, fallback) => {
+    const fromEnv = process.env[envKey];
+    if (fromEnv != null && String(fromEnv).trim() !== "") {
+      return String(fromEnv).trim();
+    }
+    const fromFile = f[fileKey];
+    if (fromFile != null && String(fromFile).trim() !== "") {
+      return String(fromFile).trim();
+    }
+    return fallback;
+  };
+
+  return {
+    sheetId: envOr("GOOGLE_SHEET_ID", "sheetId", ""),
+    sheetName: envOr("GOOGLE_SHEET_NAME", "sheetName", "People"),
+    idColumn: envOr("GOOGLE_ID_COLUMN", "idColumn", "B"),
+    nameColumn: envOr("GOOGLE_NAME_COLUMN", "nameColumn", "C"),
+    emailColumn: envOr("GOOGLE_EMAIL_COLUMN", "emailColumn", "D"),
+    phoneColumn: envOr("GOOGLE_PHONE_COLUMN", "phoneColumn", "E"),
+    dingChangesSheetName: envOr(
+      "GOOGLE_DING_CHANGES_SHEET_NAME",
+      "dingChangesSheetName",
+      "Ding changes"
+    ),
+    dingIdColumn: envOr("GOOGLE_DING_ID_COLUMN", "dingIdColumn", "A"),
+    dingTimestampColumn: envOr("GOOGLE_DING_TIMESTAMP_COLUMN", "dingTimestampColumn", "B"),
+    dingNumberColumn: envOr("GOOGLE_DING_NUMBER_COLUMN", "dingNumberColumn", "C"),
+  };
+}
+
+/**
  * Load secrets from secrets.json file
  * Falls back to environment variables if file doesn't exist
  */
@@ -19,6 +56,7 @@ function loadSecrets() {
     try {
       const fileContent = fs.readFileSync(secretsPath, "utf8");
       secrets = JSON.parse(fileContent);
+      secrets.googleSheets = buildGoogleSheetsConfig(secrets.googleSheets);
       return secrets;
     } catch (error) {
       console.error("Error reading secrets.json:", error);
@@ -27,17 +65,7 @@ function loadSecrets() {
 
   // Fall back to environment variables
   secrets = {
-    googleSheets: {
-      sheetId: process.env.GOOGLE_SHEET_ID || "",
-      sheetName: process.env.GOOGLE_SHEET_NAME || "People",
-      idColumn: process.env.GOOGLE_ID_COLUMN || "B",
-      nameColumn: process.env.GOOGLE_NAME_COLUMN || "C",
-      phoneColumn: process.env.GOOGLE_PHONE_COLUMN || "E",
-      dingChangesSheetName: process.env.GOOGLE_DING_CHANGES_SHEET_NAME || "Ding changes",
-      dingIdColumn: process.env.GOOGLE_DING_ID_COLUMN || "A",
-      dingTimestampColumn: process.env.GOOGLE_DING_TIMESTAMP_COLUMN || "B",
-      dingNumberColumn: process.env.GOOGLE_DING_NUMBER_COLUMN || "C",
-    },
+    googleSheets: buildGoogleSheetsConfig(undefined),
     email: {
       provider: process.env.EMAIL_PROVIDER || "smtp",
       from: process.env.EMAIL_FROM || "noreply@aesopafghanistan.org",

@@ -1,7 +1,7 @@
 const { GoogleSpreadsheet } = require("google-spreadsheet");
 const { GoogleAuth, JWT } = require("google-auth-library");
 const config = require("../config/secrets");
-const { formatGoogleApiError } = require("../utils/errorLogging");
+const { formatGoogleSheetsOperationError } = require("../utils/errorLogging");
 
 let doc = null;
 let initPromise = null;
@@ -163,7 +163,7 @@ async function findProfileById(userId) {
 
     return null;
   } catch (error) {
-    const formattedError = formatGoogleApiError(error);
+    const formattedError = formatGoogleSheetsOperationError(error);
     console.error("Error finding profile by ID in Google Sheet:", formattedError);
     throw new Error(formattedError, { cause: error });
   }
@@ -231,7 +231,7 @@ async function findProfileByEmail(email) {
 
     return null;
   } catch (error) {
-    const formattedError = formatGoogleApiError(error);
+    const formattedError = formatGoogleSheetsOperationError(error);
     console.error("Error finding profile by email in Google Sheet:", formattedError);
     throw new Error(formattedError, { cause: error });
   }
@@ -331,7 +331,7 @@ async function findLatestDingNumberById(userId) {
     }
     return fallbackDing || null;
   } catch (error) {
-    const formattedError = formatGoogleApiError(error);
+    const formattedError = formatGoogleSheetsOperationError(error);
     console.error("Error looking up latest ding number:", formattedError);
     return null;
   }
@@ -396,7 +396,7 @@ async function getUserData(email) {
 
     return null;
   } catch (error) {
-    const formattedError = formatGoogleApiError(error);
+    const formattedError = formatGoogleSheetsOperationError(error);
     console.error("Error getting user data from Google Sheet:", formattedError);
     throw new Error(formattedError, { cause: error });
   }
