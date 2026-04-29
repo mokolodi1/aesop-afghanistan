@@ -44,16 +44,11 @@ This application is automatically deployed to Fly.io via GitHub Actions when cha
    - Click "Add secret"
 
 6. **Configure Application Secrets in Fly.io**:
-   After your first deployment, set the required secrets:
+   After your first deployment, create `config/secrets.json` locally (see [Configuration](#configuration); it is gitignored). Push it to Fly as **`SECRETS_JSON`** by running from the repository root:
    ```bash
-   flyctl secrets set GOOGLE_SHEET_ID=your-sheet-id
-   flyctl secrets set EMAIL_PROVIDER=smtp
-   flyctl secrets set SMTP_HOST=smtp.example.com
-   flyctl secrets set SMTP_USER=your-email@example.com
-   flyctl secrets set SMTP_PASSWORD=your-password
-   flyctl secrets set EMAIL_FROM=noreply@aesopafghanistan.org
+   bash scripts/update_secrets.sh
    ```
-   See the Configuration section below for all available environment variables.
+   That script uploads the contents of `config/secrets.json` to the `aesop-afghanistan` app. You must be logged in (`flyctl auth login`). Alternatively, set discrete variables (see Configuration); those apply only when `SECRETS_JSON` is unset.
 
 ### Manual Deployment
 
@@ -78,7 +73,7 @@ The server will be available at `http://localhost:3000`
 
 ### Setting Up Secrets
 
-This application requires configuration for Google Sheets and email services. You can configure these in two ways:
+This application requires configuration for Google Sheets and email services. Resolution order is **`SECRETS_JSON`** (environment) → **`config/secrets.json`** → discrete environment variables only.
 
 #### Option 1: Using `config/secrets.json` (Recommended for local development)
 
@@ -90,9 +85,23 @@ This application requires configuration for Google Sheets and email services. Yo
 
 2. Edit `config/secrets.json` with your credentials (see sections below)
 
-#### Option 2: Using Environment Variables (Recommended for production/Fly.io)
+#### Option 2: `SECRETS_JSON` on Fly.io (Recommended for production)
 
-Set the following environment variables in Fly.io:
+Production uses one Fly secret whose value is the full JSON config (same structure as `secrets.example.json`):
+
+- `SECRETS_JSON` - Full config object as a JSON string
+
+After any change to local `config/secrets.json`, sync it to Fly from the repo root:
+
+```bash
+bash scripts/update_secrets.sh
+```
+
+After load, `googleSheets` is merged with non-empty `GOOGLE_*` environment variables so you can override the sheet ID without editing the blob.
+
+#### Option 3: Discrete environment variables only
+
+If `SECRETS_JSON` is unset and `config/secrets.json` is absent (typical minimal containers), use:
 
 - `GOOGLE_SHEET_ID` - Your Google Sheet ID
 - `GOOGLE_APPLICATION_CREDENTIALS` - Optional path to an Application Default Credentials or Workload Identity Federation config file
