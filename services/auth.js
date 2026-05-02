@@ -14,7 +14,6 @@ async function checkIdAndSendMagicLink(userId) {
     const foundEmail = await findEmailById(sanitizedId);
     
     if (!foundEmail) {
-      // User not found, but we don't reveal this to prevent enumeration
       return { success: true, userFound: false };
     }
 

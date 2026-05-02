@@ -99,10 +99,20 @@ function cleanupExpiredTokens() {
  * @param {string} email - Recipient email
  * @param {string} token - Magic link token
  */
+function magicLinkSiteOrigin() {
+  const raw = (
+    process.env.PORTAL_BASE_URL ||
+    process.env.BASE_URL ||
+    'http://localhost:3000'
+  ).trim();
+  return raw.replace(/\/+$/, '');
+}
+
 async function sendMagicLinkEmail(email, token) {
-  const baseUrl = process.env.BASE_URL || 'http://localhost:3000';
-  // Use landing page that will POST the token securely
-  const magicLink = `${baseUrl}/verify.html?token=${token}`;
+  // Verify flow must run on the same browser origin where students use the portal (sessionStorage).
+  // Set PORTAL_BASE_URL=https://portal.example.org when the app lives on multiple hosts.
+  const origin = magicLinkSiteOrigin();
+  const magicLink = `${origin}/verify.html?token=${token}`;
   
   const emailSubject = 'Your AESOP Afghanistan Magic Link';
   const emailHtml = `

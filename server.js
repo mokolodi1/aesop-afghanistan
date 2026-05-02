@@ -1,13 +1,42 @@
 const express = require('express');
 const path = require('path');
+const config = require('./config/secrets');
 const { checkIdAndSendMagicLink } = require('./services/auth');
 const { verifyMagicLink } = require('./services/magicLink');
-const { findProfileByEmail, findProfileById, findLatestDingNumberById, appendDingChangeRow } = require('./services/googleSheets');
-const { sanitizeEmail, isValidToken, sanitizeIdentifier, sanitizeDingNumberInput, sanitizePortalDisplayName } = require('./utils/validation');
+const { findProfileByEmail, findProfileById, findLatestDingNumberById, appendDingChangeRow, syncPastDingNumbersToPeople, getPortalDingChangeHistory } = require('./services/googleSheets');
+const {
+  sanitizeEmail,
+  isValidEmail,
+  isValidToken,
+  sanitizeIdentifier,
+  sanitizeDingNumberInput,
+  sanitizePortalDisplayName,
+  normalizeAfghanistanPhoneDigits,
+  isValidAfghanistanPhoneNumber,
+  getAfghanistanPhoneFormatMessage,
+  DING_CONFIRM_REQUIRED_MESSAGE,
+  DING_CONFIRM_MISMATCH_MESSAGE,
+  sanitizePortalDingHelpPhone,
+  sanitizePortalDingHelpNote,
+  PORTAL_DING_HELP_NEED_DETAIL_MESSAGE,
+} = require('./utils/validation');
 const { createRateLimiter } = require('./middleware/rateLimiter');
 const { securityHeaders } = require('./middleware/security');
 const { formatDingChangeTimestamp } = require('./utils/dingSheetTime');
+const { sendDingNumberUpdatedEmail, sendPortalDingHelpRequestEmail } = require('./services/email');
 const { formatErrorForLog, formatGoogleSheetsWriteErrorForLog, isGoogleSheetsForbidden } = require('./utils/errorLogging');
+
+function resolvePortalContactEmail() {
+  const explicit = config.portalContactEmail && String(config.portalContactEmail).trim();
+  if (explicit && isValidEmail(explicit)) {
+    return sanitizeEmail(explicit);
+  }
+  const from = config.email?.from;
+  if (from && isValidEmail(from)) {
+    return sanitizeEmail(from);
+  }
+  return '';
+}
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -21,6 +50,47 @@ app.use(securityHeaders());
 // Middleware
 app.use(express.json({ limit: '10kb' })); // Limit JSON payload size
 app.use(express.urlencoded({ extended: true, limit: '10kb' }));
+
+/** Hostname the client asked for (Fly and many CDNs set X-Forwarded-Host). */
+function getInboundHostname(req) {
+  const forwarded = (req.get('x-forwarded-host') || '').split(',')[0].trim();
+  const raw = forwarded || req.get('host') || '';
+  return raw.split(':')[0].toLowerCase();
+}
+
+/**
+ * Portal SPA: host portal.* (or PORTAL_EXTRA_HOSTS) serves portal.html for /, /profile, /faq.
+ * Set PORTAL_SPA_FALLBACK=1 locally so /profile and /faq load portal.html without a portal subdomain.
+ */
+function isPortalRequestHost(req) {
+  const host = getInboundHostname(req);
+  const extras = process.env.PORTAL_EXTRA_HOSTS;
+  if (extras && typeof extras === 'string') {
+    const allowed = extras
+      .split(',')
+      .map((h) => h.trim().toLowerCase())
+      .filter(Boolean);
+    if (allowed.includes(host)) {
+      return true;
+    }
+  }
+  return host.startsWith('portal.');
+}
+
+app.use((req, res, next) => {
+  if (req.method !== 'GET') {
+    return next();
+  }
+  const deep = process.env.PORTAL_SPA_FALLBACK === '1';
+  if (isPortalRequestHost(req) && req.path === '/') {
+    return res.sendFile(path.join(__dirname, 'public', 'portal.html'));
+  }
+  if ((req.path === '/profile' || req.path === '/faq') && (isPortalRequestHost(req) || deep)) {
+    return res.sendFile(path.join(__dirname, 'public', 'portal.html'));
+  }
+  next();
+});
+
 app.use(express.static('public'));
 
 // Routes
@@ -65,18 +135,20 @@ app.post('/api/request-magic-link', magicLinkRateLimiter, async (req, res) => {
 
     const result = await checkIdAndSendMagicLink(userId);
     if (!result?.userFound) {
-      // Keep generic response for user enumeration prevention, but log internal signal.
       console.warn('Invalid student ID request: ID not found', {
         ip: req.ip,
         route: req.originalUrl,
         userId
       });
+      return res.json({
+        success: false,
+        message: 'Your ID is invalid. Please enter a correct ID.'
+      });
     }
-    
-    // Always return success to prevent user enumeration
-    res.json({ 
-      success: true, 
-      message: 'If your submitted student ID is valid, a magic link has been sent to your registered email.' 
+
+    res.json({
+      success: true,
+      message: 'Your ID is valid. A magic link has been sent to your registered email.'
     });
   } catch (error) {
     // Log error but don't expose details to client
@@ -158,9 +230,13 @@ app.post('/api/verify-magic-link', verifyRateLimiter, async (req, res) => {
 // Rate limiter for updating ding number from the portal
 const dingUpdateRateLimiter = createRateLimiter({ windowMs: 15 * 60 * 1000, max: 20 });
 
+const portalDingHelpRateLimiter = createRateLimiter({ windowMs: 15 * 60 * 1000, max: 8 });
+
+const portalDingHistoryRateLimiter = createRateLimiter({ windowMs: 15 * 60 * 1000, max: 40 });
+
 app.post('/api/update-ding-number', dingUpdateRateLimiter, async (req, res) => {
   try {
-    let { userId, email, newDingNumber, displayName } = req.body;
+    let { userId, email, newDingNumber, confirmNewDingNumber, displayName } = req.body;
 
     if (!userId || typeof userId !== 'string' || !email || typeof email !== 'string') {
       return res.status(400).json({ error: 'ID and email are required.' });
@@ -172,9 +248,24 @@ app.post('/api/update-ding-number', dingUpdateRateLimiter, async (req, res) => {
       return res.status(400).json({ error: 'Invalid ID or email.' });
     }
 
-    const ding = sanitizeDingNumberInput(typeof newDingNumber === 'string' ? newDingNumber : '');
-    if (!ding) {
+    const dingRaw = sanitizeDingNumberInput(typeof newDingNumber === 'string' ? newDingNumber : '');
+    const confirmRaw = sanitizeDingNumberInput(typeof confirmNewDingNumber === 'string' ? confirmNewDingNumber : '');
+    if (!dingRaw) {
       return res.status(400).json({ error: 'Please enter a new ding number.' });
+    }
+    if (!confirmRaw) {
+      return res.status(400).json({ error: DING_CONFIRM_REQUIRED_MESSAGE });
+    }
+    if (!isValidAfghanistanPhoneNumber(dingRaw)) {
+      return res.status(400).json({ error: getAfghanistanPhoneFormatMessage(dingRaw) });
+    }
+    if (!isValidAfghanistanPhoneNumber(confirmRaw)) {
+      return res.status(400).json({ error: getAfghanistanPhoneFormatMessage(confirmRaw) });
+    }
+    const ding = normalizeAfghanistanPhoneDigits(dingRaw);
+    const confirmDing = normalizeAfghanistanPhoneDigits(confirmRaw);
+    if (ding !== confirmDing) {
+      return res.status(400).json({ error: DING_CONFIRM_MISMATCH_MESSAGE });
     }
 
     const profile = await findProfileById(userId);
@@ -199,16 +290,35 @@ app.post('/api/update-ding-number', dingUpdateRateLimiter, async (req, res) => {
 
     await appendDingChangeRow({
       userId: idForSheet,
-      timestamp,
+      timestampAt: when,
       newDingNumber: ding,
       displayName: nameForRow,
       portalNote,
       phone: typeof profile.phone === 'string' ? profile.phone.trim() : '',
     });
 
+    try {
+      await syncPastDingNumbersToPeople(idForSheet);
+    } catch (syncErr) {
+      console.warn(
+        'Ding change logged but People “past Ding” column was not updated:',
+        formatErrorForLog(syncErr),
+      );
+    }
+
     const latest = await findLatestDingNumberById(userId);
     const displayDing =
       latest != null && String(latest).trim() !== '' ? String(latest).trim() : ding;
+
+    try {
+      await sendDingNumberUpdatedEmail({
+        to: emailSan,
+        displayName: profile.name || nameForRow,
+        newDingNumber: displayDing,
+      });
+    } catch (emailErr) {
+      console.warn('Ding number saved but notification email failed:', formatErrorForLog(emailErr));
+    }
 
     res.json({
       success: true,
@@ -225,6 +335,103 @@ app.post('/api/update-ding-number', dingUpdateRateLimiter, async (req, res) => {
     }
     console.error('Error updating ding number:', formatErrorForLog(error));
     res.status(500).json({ error: 'Could not save your ding number. Please try again later.' });
+  }
+});
+
+app.post('/api/portal-request-ding-help', portalDingHelpRateLimiter, async (req, res) => {
+  try {
+    let { userId, email, displayName, requestedPhone, note } = req.body;
+
+    if (!userId || typeof userId !== 'string' || !email || typeof email !== 'string') {
+      return res.status(400).json({ error: 'ID and email are required.' });
+    }
+
+    userId = sanitizeIdentifier(userId);
+    const emailSan = sanitizeEmail(email);
+    if (!userId || !emailSan) {
+      return res.status(400).json({ error: 'Invalid ID or email.' });
+    }
+
+    const phoneSan = sanitizePortalDingHelpPhone(typeof requestedPhone === 'string' ? requestedPhone : '');
+    const noteSan = sanitizePortalDingHelpNote(typeof note === 'string' ? note : '');
+
+    if (!phoneSan && !noteSan) {
+      return res.status(400).json({ error: PORTAL_DING_HELP_NEED_DETAIL_MESSAGE });
+    }
+
+    const profile = await findProfileById(userId);
+    if (!profile) {
+      return res.status(403).json({ error: 'Unable to send request. Please sign in again from the magic link.' });
+    }
+
+    if (sanitizeEmail(profile.email) !== emailSan) {
+      return res.status(403).json({ error: 'Unable to send request. Please sign in again from the magic link.' });
+    }
+
+    const adminTo = resolvePortalContactEmail();
+    if (!adminTo) {
+      console.error('Portal Ding help: no valid portalContactEmail or email.from in configuration.');
+      return res.status(503).json({
+        error: 'Contact requests are not configured yet. Please email the organization through aesopafghanistan.org.',
+      });
+    }
+
+    const studentLabel =
+      sanitizePortalDisplayName(typeof displayName === 'string' ? displayName : '') ||
+      sanitizePortalDisplayName(profile.name) ||
+      profile.name ||
+      '';
+
+    const latestDing = await findLatestDingNumberById(userId);
+    const dingDisplay =
+      latestDing != null && String(latestDing).trim() !== '' ? String(latestDing).trim() : '';
+
+    await sendPortalDingHelpRequestEmail({
+      to: adminTo,
+      studentDisplayName: studentLabel,
+      studentUserId: userId,
+      studentEmail: emailSan,
+      phoneOnFile: typeof profile.phone === 'string' ? profile.phone.trim() : '',
+      currentDingDisplay: dingDisplay,
+      requestedPhone: phoneSan,
+      note: noteSan,
+    });
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error sending portal Ding help request:', formatErrorForLog(error));
+    res.status(500).json({ error: 'Could not send your request. Please try again later.' });
+  }
+});
+
+app.post('/api/portal-ding-history', portalDingHistoryRateLimiter, async (req, res) => {
+  try {
+    let { userId, email } = req.body;
+
+    if (!userId || typeof userId !== 'string' || !email || typeof email !== 'string') {
+      return res.status(400).json({ error: 'ID and email are required.' });
+    }
+
+    userId = sanitizeIdentifier(userId);
+    const emailSan = sanitizeEmail(email);
+    if (!userId || !emailSan) {
+      return res.status(400).json({ error: 'Invalid ID or email.' });
+    }
+
+    const profile = await findProfileById(userId);
+    if (!profile) {
+      return res.status(403).json({ error: 'Unable to load history. Please sign in again from the magic link.' });
+    }
+
+    if (sanitizeEmail(profile.email) !== emailSan) {
+      return res.status(403).json({ error: 'Unable to load history. Please sign in again from the magic link.' });
+    }
+
+    const entries = await getPortalDingChangeHistory(userId);
+    res.json({ success: true, entries });
+  } catch (error) {
+    console.error('Error loading portal Ding history:', formatErrorForLog(error));
+    res.status(500).json({ error: 'Could not load Ding history. Please try again later.' });
   }
 });
 

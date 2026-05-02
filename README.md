@@ -115,7 +115,18 @@ If `SECRETS_JSON` is unset and `config/secrets.json` is absent (typical minimal 
 - `GMAIL_USER`, `GMAIL_APP_PASSWORD` - If using Gmail
 - `GMAIL_SA_DELEGATED_USER` - Workspace mailbox to impersonate (e.g. `auth@yourdomain.com`)
 - `GMAIL_SA_CREDENTIALS_JSON` - Entire service account JSON as a single JSON string
-- `BASE_URL` - Base URL for magic links (e.g., `https://aesop-afghanistan.fly.dev`)
+- `BASE_URL` - Default base URL for magic links when `PORTAL_BASE_URL` is unset (e.g., `https://aesop-afghanistan.fly.dev` or your apex domain).
+- `PORTAL_BASE_URL` - **Recommended for `portal.*` deployments.** Full origin where students should open magic links (no trailing slash), e.g. `https://portal.aesopafghanistan.org`. The app stores the signed-in student only in **sessionStorage**, which does **not** carry between different hosts (apex vs `portal.` vs `fly.dev`). If this is unset, magic links use `BASE_URL`; verifying on one host and browsing another looks “broken” (empty Ding tools).
+- `PORTAL_EXTRA_HOSTS` - Optional comma-separated hostnames that should receive the portal SPA for `/`, `/profile`, and `/faq` (for hosts that do not start with `portal.`).
+- `PORTAL_SPA_FALLBACK` - Set to `1` locally so `/profile` and `/faq` serve `portal.html` without a `portal.` hostname.
+
+### Student portal (magic links)
+
+1. Point **`portal.yourdomain`** at the same Fly app as the main site.
+2. Set **`PORTAL_BASE_URL`** to that portal origin in Fly secrets so emailed links use **`https://portal…/verify.html`**. Students stay on one origin from verify through Ding updates.
+3. If magic links must stay on the apex domain, keep using **`BASE_URL`** there and use **`/portal.html`** on that same host only—do not expect a session on **`portal.*`** until you add cross-host sessions (cookies/JWT), which this app does not implement yet.
+
+Magic-link tokens are stored **in memory** on each server instance. If Fly runs **more than one machine**, verifications can fail intermittently; keep **one machine** or replace the store with shared storage (for example Redis).
 
 ### Google Sheets Setup
 

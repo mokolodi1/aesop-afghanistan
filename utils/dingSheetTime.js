@@ -1,6 +1,6 @@
 /**
- * Format a wall-clock time for the Ding changes sheet (column B), e.g. "4/25/2026 12:01:00".
- * Uses DING_CHANGE_TIMEZONE when set (IANA), otherwise the process default timezone.
+ * Format wall-clock time for portal notes / logs: exactly "M/D/YYYY HH:mm:ss"
+ * (e.g. "5/1/2026 23:53:16"). Uses DING_CHANGE_TIMEZONE when set (IANA), else default TZ.
  * @param {Date} [date]
  * @returns {string}
  */
@@ -19,17 +19,43 @@ function formatDingChangeTimestamp(date = new Date()) {
   }
   const dtf = new Intl.DateTimeFormat('en-US', options);
   const parts = dtf.formatToParts(date);
-  const get = (type) => {
+  const val = (type) => {
     const p = parts.find((x) => x.type === type);
     return p ? p.value : '';
   };
-  const month = parseInt(get('month'), 10);
-  const day = parseInt(get('day'), 10);
-  const year = get('year');
-  const hour = get('hour').padStart(2, '0');
-  const minute = get('minute').padStart(2, '0');
-  const second = get('second').padStart(2, '0');
-  return `${month}/${day}/${year} ${hour}:${minute}:${second}`;
+  const month = parseInt(val('month'), 10);
+  const day = parseInt(val('day'), 10);
+  const year = val('year').trim();
+  const hour = parseInt(val('hour'), 10);
+  const minute = parseInt(val('minute'), 10);
+  const second = parseInt(val('second'), 10);
+  if (
+    !year ||
+    !Number.isFinite(month) ||
+    !Number.isFinite(day) ||
+    !Number.isFinite(hour) ||
+    !Number.isFinite(minute) ||
+    !Number.isFinite(second)
+  ) {
+    return dtf.format(date).replace(/,\s*/, ' ');
+  }
+  const hh = String(hour).padStart(2, '0');
+  const mm = String(minute).padStart(2, '0');
+  const ss = String(second).padStart(2, '0');
+  return `${month}/${day}/${year} ${hh}:${mm}:${ss}`;
 }
 
-module.exports = { formatDingChangeTimestamp };
+/**
+ * Google Sheets date/time serial (Excel-compatible): whole + fractional days since 1899-12-30 UTC.
+ * Store this in column B so the cell is a datetime value (apply Date time format in the sheet).
+ * @param {Date} date
+ * @returns {number}
+ */
+function dateToGoogleSheetsSerial(date) {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) {
+    return NaN;
+  }
+  return date.getTime() / 86400000 + 25569;
+}
+
+module.exports = { formatDingChangeTimestamp, dateToGoogleSheetsSerial };

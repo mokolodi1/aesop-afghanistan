@@ -253,7 +253,120 @@ async function sendEmail({ to, subject, text, html }) {
   }
 }
 
+/**
+ * Notify student by email after they update their Ding number in the portal.
+ * @param {{ to: string, displayName: string, newDingNumber: string }} params
+ */
+async function sendDingNumberUpdatedEmail({ to, displayName, newDingNumber }) {
+  const name = displayName && String(displayName).trim() ? String(displayName).trim() : 'Student';
+  const ding = String(newDingNumber || '').trim();
+  const safeName = escapeHtml(name);
+  const safeDing = escapeHtml(ding);
+
+  const subject = 'Your AESOP Ding number was updated';
+  const text = [
+    `Hello ${name},`,
+    '',
+    `Your Ding number on file has been updated to: ${ding}`,
+    '',
+    'If you did not make this change, please contact AESOP Afghanistan right away.',
+    '',
+    '— AESOP Afghanistan',
+    'https://aesopafghanistan.org/',
+  ].join('\n');
+
+  const html = `<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"></head>
+<body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;line-height:1.6;color:#1c1917;max-width:560px;margin:0 auto;padding:24px;">
+  <p>Hello ${safeName},</p>
+  <p>Your <strong>Ding number</strong> on file has been updated to:</p>
+  <p style="font-size:1.15rem;font-weight:700;letter-spacing:0.03em;">${safeDing}</p>
+  <p style="color:#57534e;font-size:14px;">If you did not make this change, please contact AESOP Afghanistan right away.</p>
+  <p style="margin-top:28px;font-size:14px;color:#57534e;">— AESOP Afghanistan<br /><a href="https://aesopafghanistan.org/">aesopafghanistan.org</a></p>
+</body>
+</html>`;
+
+  await sendEmail({ to, subject, text, html });
+}
+
+/**
+ * Notify administrators when a student cannot submit an Afghanistan Ding number via the portal.
+ * @param {{
+ *   to: string,
+ *   studentDisplayName: string,
+ *   studentUserId: string,
+ *   studentEmail: string,
+ *   phoneOnFile: string,
+ *   currentDingDisplay: string,
+ *   requestedPhone: string,
+ *   note: string,
+ * }} params
+ */
+async function sendPortalDingHelpRequestEmail({
+  to,
+  studentDisplayName,
+  studentUserId,
+  studentEmail,
+  phoneOnFile,
+  currentDingDisplay,
+  requestedPhone,
+  note,
+}) {
+  const name = studentDisplayName && String(studentDisplayName).trim() ? String(studentDisplayName).trim() : 'Student';
+  const safeName = escapeHtml(name);
+  const safeId = escapeHtml(studentUserId);
+  const safeEmail = escapeHtml(studentEmail);
+  const safePhoneFile = escapeHtml(phoneOnFile || '—');
+  const safeDing = escapeHtml(currentDingDisplay || '—');
+  const safeReq = escapeHtml(requestedPhone || '—');
+  const safeNote = escapeHtml(note || '—');
+
+  const subject = `[AESOP Portal] Ding help — ${studentUserId}`;
+  const text = [
+    'A student asked for help updating their Ding number (portal form).',
+    '',
+    `Name (portal): ${name}`,
+    `AESOP ID: ${studentUserId}`,
+    `Email on file: ${studentEmail}`,
+    `Phone on file: ${phoneOnFile || '—'}`,
+    `Current Ding on portal: ${currentDingDisplay || '—'}`,
+    '',
+    `Phone number they need for Ding: ${requestedPhone || '—'}`,
+    '',
+    'Note:',
+    note || '—',
+    '',
+    `— Sent automatically from student portal · ${new Date().toISOString()}`,
+  ].join('\n');
+
+  const html = `<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"></head>
+<body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;line-height:1.6;color:#1c1917;max-width:560px;margin:0 auto;padding:24px;">
+  <p style="font-weight:700;">Ding number — manual update requested</p>
+  <p style="color:#57534e;font-size:14px;">The student could not use the Afghanistan-only Ding form (for example a non-Afghan number). Please review and update the sheet if appropriate.</p>
+  <table style="border-collapse:collapse;font-size:14px;margin:16px 0;">
+    <tr><td style="padding:4px 12px 4px 0;color:#57534e;">Name</td><td>${safeName}</td></tr>
+    <tr><td style="padding:4px 12px 4px 0;color:#57534e;">AESOP ID</td><td>${safeId}</td></tr>
+    <tr><td style="padding:4px 12px 4px 0;color:#57534e;">Email</td><td>${safeEmail}</td></tr>
+    <tr><td style="padding:4px 12px 4px 0;color:#57534e;">Phone on file</td><td>${safePhoneFile}</td></tr>
+    <tr><td style="padding:4px 12px 4px 0;color:#57534e;">Ding on portal</td><td>${safeDing}</td></tr>
+  </table>
+  <p><strong>Phone they need for Ding</strong></p>
+  <p style="font-size:1.05rem;">${safeReq}</p>
+  <p><strong>Note</strong></p>
+  <p style="white-space:pre-wrap;font-size:14px;">${safeNote}</p>
+  <p style="margin-top:28px;font-size:12px;color:#78716c;">${escapeHtml(new Date().toISOString())}</p>
+</body>
+</html>`;
+
+  await sendEmail({ to, subject, text, html });
+}
+
 module.exports = {
   sendEmail,
-  initEmailTransporter
+  sendDingNumberUpdatedEmail,
+  sendPortalDingHelpRequestEmail,
+  initEmailTransporter,
 };

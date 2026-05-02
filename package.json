@@ -8,7 +8,8 @@
     "build": "npm run build:client",
     "start": "node server.js",
     "dev": "npm run build:client && node server.js",
-    "dev:client": "esbuild src/client/app.jsx --bundle --outfile=public/app.js --watch"
+    "dev:client": "esbuild src/client/app.jsx --bundle --outfile=public/app.js --watch",
+    "sync:past-ding-columns": "node scripts/sync-all-past-ding-columns.js"
   },
   "engines": {
     "node": ">=18.0.0"

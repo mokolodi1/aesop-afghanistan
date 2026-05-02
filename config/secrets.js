@@ -37,6 +37,12 @@ function buildGoogleSheetsConfig(fileSection) {
     dingIdColumn: envOr("GOOGLE_DING_ID_COLUMN", "dingIdColumn", "A"),
     dingTimestampColumn: envOr("GOOGLE_DING_TIMESTAMP_COLUMN", "dingTimestampColumn", "B"),
     dingNumberColumn: envOr("GOOGLE_DING_NUMBER_COLUMN", "dingNumberColumn", "C"),
+    /** People sheet column for auto-filled unique Ding history from Ding changes (empty or OFF disables sync). */
+    peoplePastDingColumn: envOr(
+      "GOOGLE_PEOPLE_PAST_DING_COLUMN",
+      "peoplePastDingColumn",
+      "V"
+    ),
   };
 }
 
@@ -78,6 +84,24 @@ function buildEmailFromEnv() {
 }
 
 /**
+ * Optional inbox for portal “contact us” Ding help requests. `PORTAL_CONTACT_EMAIL` overrides file value.
+ * @param {Record<string, unknown>} target
+ */
+function mergePortalContactEmail(target) {
+  if (!target || typeof target !== "object") {
+    return;
+  }
+  const fromEnv = process.env.PORTAL_CONTACT_EMAIL;
+  if (fromEnv != null && String(fromEnv).trim() !== "") {
+    target.portalContactEmail = String(fromEnv).trim();
+    return;
+  }
+  const fromFile = target.portalContactEmail;
+  target.portalContactEmail =
+    fromFile != null && String(fromFile).trim() !== "" ? String(fromFile).trim() : "";
+}
+
+/**
  * Fly.io (and similar): entire secrets object as one JSON string.
  * Discrete env vars (e.g. GOOGLE_SHEET_ID) still override googleSheets via buildGoogleSheetsConfig.
  * @returns {Record<string, unknown>|null}
@@ -94,6 +118,7 @@ function loadSecretsFromSecretsJsonEnv() {
       return null;
     }
     parsed.googleSheets = buildGoogleSheetsConfig(parsed.googleSheets);
+    mergePortalContactEmail(parsed);
     return parsed;
   } catch (error) {
     console.error("Invalid SECRETS_JSON:", error);
@@ -122,6 +147,7 @@ function loadSecrets() {
       const fileContent = fs.readFileSync(secretsPath, "utf8");
       secrets = JSON.parse(fileContent);
       secrets.googleSheets = buildGoogleSheetsConfig(secrets.googleSheets);
+      mergePortalContactEmail(secrets);
       return secrets;
     } catch (error) {
       console.error("Error reading secrets.json:", error);
@@ -131,7 +157,9 @@ function loadSecrets() {
   secrets = {
     googleSheets: buildGoogleSheetsConfig(undefined),
     email: buildEmailFromEnv(),
+    portalContactEmail: "",
   };
+  mergePortalContactEmail(secrets);
 
   return secrets;
 }

@@ -120,6 +120,220 @@ function sanitizePortalDisplayName(value) {
     .slice(0, 200);
 }
 
+/**
+ * Strip to digits only (no validation).
+ * @param {string} value
+ * @returns {string}
+ */
+function digitsOnly(value) {
+  if (!value || typeof value !== 'string') {
+    return '';
+  }
+  return value.replace(/\D/g, '');
+}
+
+/**
+ * Normalize user input to Afghan MSISDN digits: `93` + 9-digit national number (11 digits total).
+ * Rejects too-short or too-long digit strings (no silent truncation).
+ * Accepts +93, 0093, optional separators, 9-digit mobiles starting with 7, or leading 0 domestic (07…).
+ * @param {string} value
+ * @returns {string} Normalized string or '' if not parseable as Afghan international format
+ */
+function normalizeAfghanistanPhoneDigits(value) {
+  let d = digitsOnly(value);
+  if (!d) {
+    return '';
+  }
+  if (d.startsWith('0093')) {
+    d = '93' + d.slice(4);
+  }
+  if (d.startsWith('93')) {
+    if (d.length === 11) {
+      return d;
+    }
+    return '';
+  }
+  if (d.length === 9 && d.startsWith('7')) {
+    return `93${d}`;
+  }
+  if (d.length === 10 && d.startsWith('07')) {
+    return `93${d.slice(1)}`;
+  }
+  return '';
+}
+
+/**
+ * True if value is a plausible Afghanistan national number in international form (after normalization).
+ * Requires leading 93 and exactly 9 further digits. Allows mobile (NSN starting with 7) or geographic (NSN starting with 2–6).
+ * @param {string} value - Raw or normalized input
+ * @returns {boolean}
+ */
+function isValidAfghanistanPhoneNumber(value) {
+  const normalized = normalizeAfghanistanPhoneDigits(value);
+  if (!/^93\d{9}$/.test(normalized)) {
+    return false;
+  }
+  const nsn = normalized.slice(2);
+  if (/^7\d{8}$/.test(nsn)) {
+    return true;
+  }
+  if (/^[2-6]\d{8}$/.test(nsn)) {
+    return true;
+  }
+  return false;
+}
+
+/** Shown next to the Ding / phone field so users know the expected shape. */
+const AFGHAN_PHONE_FORMAT_HINT =
+  'Afghanistan numbers only: country code 93 and exactly 9 digits after it (11 digits in total). Too few or too many digits are not accepted. Examples: 93701234567, +93 70 123 4567, or 0701234567.';
+
+/** Wrong digits/prefix at a plausible length (hint explains accepted shapes). */
+const INVALID_AFGHAN_PHONE_MESSAGE = 'That number is not in the right format.';
+
+const AFGHAN_PHONE_TOO_SHORT_MESSAGE =
+  'That number is too short. Use country code 93 and 9 digits after it (11 digits in total), or 07 followed by 9 digits, or 9 digits starting with 7.';
+
+const AFGHAN_PHONE_TOO_LONG_MESSAGE =
+  'That number is too long. Use country code 93 and exactly 9 digits after it (11 digits in total), or 07 followed by exactly 9 digits, or exactly 9 digits starting with 7.';
+
+/**
+ * When invalid, detect obvious length mismatch for the prefix the user typed.
+ * @param {string} value
+ * @returns {'short' | 'long' | null}
+ */
+function classifyAfghanPhoneLengthIssue(value) {
+  let d = digitsOnly(value);
+  if (!d) {
+    return null;
+  }
+  if (d.startsWith('0093')) {
+    d = `93${d.slice(4)}`;
+  }
+  if (d.startsWith('93')) {
+    if (d.length < 11) {
+      return 'short';
+    }
+    if (d.length > 11) {
+      return 'long';
+    }
+    return null;
+  }
+  if (d.startsWith('07')) {
+    if (d.length < 10) {
+      return 'short';
+    }
+    if (d.length > 10) {
+      return 'long';
+    }
+    return null;
+  }
+  if (d.startsWith('7')) {
+    if (d.length < 9) {
+      return 'short';
+    }
+    if (d.length > 9) {
+      return 'long';
+    }
+    return null;
+  }
+  if (d.length > 11) {
+    return 'long';
+  }
+  if (d.length > 0 && d.length < 9) {
+    return 'short';
+  }
+  return null;
+}
+
+/**
+ * User-facing error for an invalid Afghanistan phone (short / long / generic).
+ * @param {string} value
+ * @returns {string}
+ */
+function getAfghanistanPhoneFormatMessage(value) {
+  if (isValidAfghanistanPhoneNumber(value)) {
+    return '';
+  }
+  switch (classifyAfghanPhoneLengthIssue(value)) {
+    case 'short':
+      return AFGHAN_PHONE_TOO_SHORT_MESSAGE;
+    case 'long':
+      return AFGHAN_PHONE_TOO_LONG_MESSAGE;
+    default:
+      return INVALID_AFGHAN_PHONE_MESSAGE;
+  }
+}
+
+function isAfghanPhoneFormatErrorMessage(msg) {
+  return (
+    msg === INVALID_AFGHAN_PHONE_MESSAGE ||
+    msg === AFGHAN_PHONE_TOO_SHORT_MESSAGE ||
+    msg === AFGHAN_PHONE_TOO_LONG_MESSAGE
+  );
+}
+
+/** Second field empty on submit */
+const DING_CONFIRM_REQUIRED_MESSAGE = 'Type your Ding number again to confirm.';
+
+/** Primary and confirm fields disagree after normalization */
+const DING_CONFIRM_MISMATCH_MESSAGE =
+  'The two numbers do not match. Enter the same number in both fields.';
+
+/** Max digits while typing (covers 0093 + 9-digit NSN). International form is always 11 digits after normalization. */
+const AFGHAN_PHONE_MAX_INPUT_DIGITS = 13;
+
+/**
+ * Keep only characters allowed when typing an international phone (+ digits, spaces, common separators).
+ * Stops accepting digits after AFGHAN_PHONE_MAX_INPUT_DIGITS so numbers cannot be typed too long.
+ * @param {string} value
+ * @returns {string}
+ */
+function filterDingPhoneInputChars(value) {
+  if (!value || typeof value !== 'string') {
+    return '';
+  }
+  let out = '';
+  let digitCount = 0;
+  for (const ch of value) {
+    if (/\d/.test(ch)) {
+      if (digitCount >= AFGHAN_PHONE_MAX_INPUT_DIGITS) {
+        continue;
+      }
+      digitCount += 1;
+      out += ch;
+    } else if (/[+()\s.\-]/.test(ch)) {
+      out += ch;
+    }
+  }
+  return out.slice(0, 48);
+}
+
+/** Portal “contact us” Ding help: allowed phone-ish characters only */
+function sanitizePortalDingHelpPhone(value) {
+  if (!value || typeof value !== 'string') {
+    return '';
+  }
+  return value.replace(/[^\d+()\s.\-]/g, '').slice(0, 96).trim();
+}
+
+/** Portal help note: strip control chars, cap length */
+function sanitizePortalDingHelpNote(value) {
+  if (!value || typeof value !== 'string') {
+    return '';
+  }
+  let out = '';
+  for (const ch of value.slice(0, 2000)) {
+    const code = ch.charCodeAt(0);
+    if (ch === '\n' || (code >= 32 && code !== 127)) {
+      out += ch;
+    }
+  }
+  return out.trim();
+}
+
+const PORTAL_DING_HELP_NEED_DETAIL_MESSAGE =
+  'Enter the phone number you need for Ding, or add a short note so we can help.';
+
 module.exports = {
   isValidEmail,
   sanitizeEmail,
@@ -127,5 +341,19 @@ module.exports = {
   sanitizeString,
   sanitizeIdentifier,
   sanitizeDingNumberInput,
-  sanitizePortalDisplayName
+  sanitizePortalDisplayName,
+  normalizeAfghanistanPhoneDigits,
+  isValidAfghanistanPhoneNumber,
+  AFGHAN_PHONE_FORMAT_HINT,
+  INVALID_AFGHAN_PHONE_MESSAGE,
+  AFGHAN_PHONE_TOO_SHORT_MESSAGE,
+  AFGHAN_PHONE_TOO_LONG_MESSAGE,
+  getAfghanistanPhoneFormatMessage,
+  isAfghanPhoneFormatErrorMessage,
+  DING_CONFIRM_REQUIRED_MESSAGE,
+  DING_CONFIRM_MISMATCH_MESSAGE,
+  filterDingPhoneInputChars,
+  sanitizePortalDingHelpPhone,
+  sanitizePortalDingHelpNote,
+  PORTAL_DING_HELP_NEED_DETAIL_MESSAGE,
 };
