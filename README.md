@@ -118,7 +118,7 @@ If `SECRETS_JSON` is unset and `config/secrets.json` is absent (typical minimal 
 - `BASE_URL` - Default base URL for magic links when `PORTAL_BASE_URL` is unset (e.g., `https://aesop-afghanistan.fly.dev` or your apex domain).
 - `PORTAL_BASE_URL` - **Recommended for `portal.*` deployments.** Full origin where students should open magic links (no trailing slash), e.g. `https://portal.aesopafghanistan.org`. The app stores the signed-in student only in **sessionStorage**, which does **not** carry between different hosts (apex vs `portal.` vs `fly.dev`). If this is unset, magic links use `BASE_URL`; verifying on one host and browsing another looks “broken” (empty Ding tools).
 - `PORTAL_EXTRA_HOSTS` - Optional comma-separated hostnames that should receive the portal SPA for `/`, `/profile`, and `/faq` (for hosts that do not start with `portal.`).
-- `PORTAL_SPA_FALLBACK` - Set to `1` locally so `/profile` and `/faq` serve `portal.html` without a `portal.` hostname.
+- `PORTAL_SPA_FALLBACK` - **Legacy.** `/profile` and `/faq` always serve the portal SPA; this variable is no longer read by the server.
 
 ### Student portal (magic links)
 

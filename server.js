@@ -59,8 +59,8 @@ function getInboundHostname(req) {
 }
 
 /**
- * Portal SPA: host portal.* (or PORTAL_EXTRA_HOSTS) serves portal.html for /, /profile, /faq.
- * Set PORTAL_SPA_FALLBACK=1 locally so /profile and /faq load portal.html without a portal subdomain.
+ * Portal SPA: portal.* (or PORTAL_EXTRA_HOSTS) serves portal.html for /. /profile and /faq always
+ * serve portal.html so deep links and nav work on any host (including plain localhost).
  */
 function isPortalRequestHost(req) {
   const host = getInboundHostname(req);
@@ -81,11 +81,10 @@ app.use((req, res, next) => {
   if (req.method !== 'GET') {
     return next();
   }
-  const deep = process.env.PORTAL_SPA_FALLBACK === '1';
-  if (isPortalRequestHost(req) && req.path === '/') {
+  if (req.path === '/profile' || req.path === '/faq') {
     return res.sendFile(path.join(__dirname, 'public', 'portal.html'));
   }
-  if ((req.path === '/profile' || req.path === '/faq') && (isPortalRequestHost(req) || deep)) {
+  if (isPortalRequestHost(req) && req.path === '/') {
     return res.sendFile(path.join(__dirname, 'public', 'portal.html'));
   }
   next();

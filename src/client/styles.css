@@ -1,20 +1,25 @@
-/* AESOP-inspired palette — aligned with aesopafghanistan.org (clean, trustworthy, education-focused) */
+/*
+ * Theme aligned with aesopafghanistan.org (Squarespace 7.1):
+ * Fonts: Space Grotesk + Raleway (loaded from HTML).
+ * CSS vars mapped from site :root — accent-hsl, lightAccent-hsl, darkAccent-hsl.
+ */
 :root {
-  --aesop-ink: #1c1917;
-  --aesop-ink-soft: #292524;
-  --aesop-muted: #57534e;
-  --aesop-line: #e7e5e4;
-  --aesop-paper: #fafaf9;
+  --aesop-ink: #373737;
+  --aesop-ink-soft: #454545;
+  --aesop-muted: #5c5c5c;
+  --aesop-line: #e7e7e7;
+  --aesop-paper: #f3f3f2;
   --aesop-card: #ffffff;
-  --aesop-teal: #0f766e;
-  --aesop-teal-dark: #0d9488;
-  --aesop-teal-glow: rgba(13, 148, 136, 0.35);
-  --aesop-sky-tint: #e0f2f1;
-  --aesop-warm-tint: #f5f5f4;
+  /* Primary accent — matches site --accent-hsl */
+  --aesop-teal: hsl(11.73, 82.49%, 57.45%);
+  --aesop-teal-dark: hsl(11.73, 82.49%, 47%);
+  --aesop-teal-glow: hsla(11.73, 82.49%, 57.45%, 0.35);
+  --aesop-sky-tint: hsl(11.73, 38%, 96%);
+  --aesop-warm-tint: hsl(60, 4.35%, 95.49%);
   --aesop-radius-lg: 16px;
   --aesop-radius-md: 12px;
-  --aesop-shadow: 0 4px 24px rgba(28, 25, 23, 0.07), 0 1px 3px rgba(28, 25, 23, 0.06);
-  --aesop-shadow-hover: 0 12px 40px rgba(15, 118, 110, 0.15), 0 4px 12px rgba(28, 25, 23, 0.08);
+  --aesop-shadow: 0 4px 24px rgba(55, 55, 55, 0.06), 0 1px 3px rgba(55, 55, 55, 0.06);
+  --aesop-shadow-hover: 0 12px 40px hsla(11.73, 82.49%, 57.45%, 0.18), 0 4px 12px rgba(55, 55, 55, 0.08);
 }
 
 * {
@@ -23,8 +28,26 @@
   box-sizing: border-box;
 }
 
+h1,
+h2,
+.portal-header-title,
+.portal-welcome,
+.portal-page-title,
+.portal-signin-heading,
+.portal-hub-link-title,
+button {
+  font-family:
+    'Space Grotesk',
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    sans-serif;
+}
+
 body {
   font-family:
+    'Raleway',
     ui-sans-serif,
     system-ui,
     -apple-system,
@@ -35,9 +58,9 @@ body {
     Arial,
     sans-serif;
   background:
-    radial-gradient(120% 80% at 100% 0%, rgba(224, 242, 241, 0.65) 0%, transparent 55%),
-    radial-gradient(90% 70% at 0% 100%, rgba(245, 245, 244, 0.9) 0%, transparent 50%),
-    linear-gradient(168deg, #f8f6f3 0%, #eef6f7 48%, #e8f0f3 100%);
+    radial-gradient(120% 80% at 100% 0%, hsla(11.73, 82.49%, 57.45%, 0.09) 0%, transparent 55%),
+    radial-gradient(90% 70% at 0% 100%, hsla(60, 4.35%, 95.49%, 0.95) 0%, transparent 50%),
+    linear-gradient(168deg, var(--aesop-paper) 0%, #fafafa 48%, var(--aesop-warm-tint) 100%);
   color: var(--aesop-ink);
   min-height: 100vh;
   display: flex;
@@ -113,7 +136,7 @@ body.faq-body {
   background: var(--aesop-card);
   border-radius: var(--aesop-radius-lg);
   box-shadow: var(--aesop-shadow);
-  border: 1px solid rgba(231, 229, 228, 0.85);
+  border: 1px solid rgba(231, 231, 231, 0.95);
   padding: 40px 36px;
   max-width: 420px;
   width: 100%;
@@ -128,7 +151,7 @@ body.faq-body {
   left: 0;
   right: 0;
   height: 4px;
-  background: linear-gradient(90deg, var(--aesop-teal-dark), #14b8a6, var(--aesop-teal));
+  background: linear-gradient(90deg, var(--aesop-teal-dark), #e68a74, var(--aesop-teal));
   opacity: 0.95;
 }
 
@@ -306,9 +329,9 @@ button:disabled {
   display: flex;
   flex-direction: column;
   background:
-    radial-gradient(ellipse 100% 80% at 100% -10%, rgba(13, 148, 136, 0.12) 0%, transparent 55%),
-    radial-gradient(ellipse 80% 60% at 0% 100%, rgba(245, 245, 244, 0.95) 0%, transparent 50%),
-    linear-gradient(180deg, #fafaf9 0%, #f5f5f4 100%);
+    radial-gradient(ellipse 100% 80% at 100% -10%, hsla(11.73, 82.49%, 57.45%, 0.11) 0%, transparent 55%),
+    radial-gradient(ellipse 80% 60% at 0% 100%, hsla(60, 4.35%, 95.49%, 0.96) 0%, transparent 50%),
+    linear-gradient(180deg, var(--aesop-paper) 0%, var(--aesop-warm-tint) 100%);
   color: var(--aesop-ink);
 }
 
@@ -318,7 +341,7 @@ button:disabled {
   background: rgba(255, 255, 255, 0.72);
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
-  border-bottom: 1px solid rgba(231, 229, 228, 0.9);
+  border-bottom: 1px solid rgba(231, 231, 231, 0.9);
   box-shadow: 0 1px 0 rgba(255, 255, 255, 0.6) inset;
 }
 
@@ -353,6 +376,20 @@ button:disabled {
   line-height: 1.2;
 }
 
+.portal-header-tagline {
+  margin: 8px 0 0;
+  font-family:
+    'Raleway',
+    ui-sans-serif,
+    system-ui,
+    sans-serif;
+  font-size: clamp(0.85rem, 1.8vw, 0.95rem);
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--aesop-muted);
+}
+
 .portal-logo-wrap {
   flex-shrink: 0;
   display: flex;
@@ -370,7 +407,7 @@ button:disabled {
 
 .portal-logo-wrap:hover {
   transform: translateY(-2px);
-  border-color: rgba(13, 148, 136, 0.35);
+  border-color: hsla(11.73, 82.49%, 57.45%, 0.35);
   box-shadow: var(--aesop-shadow-hover);
 }
 
@@ -394,7 +431,7 @@ button:disabled {
   padding: clamp(22px, 4vw, 36px);
   background: var(--aesop-card);
   border-radius: var(--aesop-radius-lg);
-  border: 1px solid rgba(231, 229, 228, 0.95);
+  border: 1px solid rgba(231, 231, 231, 0.95);
   box-shadow: var(--aesop-shadow);
   position: relative;
 }
@@ -407,9 +444,9 @@ button:disabled {
   padding: 1px;
   background: linear-gradient(
     135deg,
-    rgba(13, 148, 136, 0.25) 0%,
+    hsla(11.73, 82.49%, 57.45%, 0.22) 0%,
     transparent 45%,
-    rgba(231, 229, 228, 0.5) 100%
+    rgba(231, 231, 231, 0.55) 100%
   );
   mask:
     linear-gradient(#fff 0 0) content-box,
@@ -460,7 +497,7 @@ button:disabled {
 
 .portal-nav-link:hover {
   color: var(--aesop-ink);
-  background: rgba(13, 148, 136, 0.08);
+  background: hsla(11.73, 82.49%, 57.45%, 0.09);
 }
 
 .portal-nav-link.is-active {
@@ -492,7 +529,7 @@ button:disabled {
 }
 
 .portal-session-banner-text a {
-  color: #0f766e;
+  color: var(--aesop-teal);
   font-weight: 600;
 }
 
@@ -504,8 +541,8 @@ button:disabled {
   margin: 0 0 20px;
   padding: 14px 16px;
   border-radius: var(--aesop-radius-md);
-  background: rgba(13, 148, 136, 0.09);
-  border: 1px solid rgba(13, 148, 136, 0.28);
+  background: hsla(11.73, 82.49%, 57.45%, 0.09);
+  border: 1px solid hsla(11.73, 82.49%, 57.45%, 0.28);
 }
 
 .portal-intent-banner-title {
@@ -648,7 +685,7 @@ button:disabled {
 }
 
 .portal-hub-link:hover {
-  border-color: rgba(13, 148, 136, 0.35);
+  border-color: hsla(11.73, 82.49%, 57.45%, 0.35);
   box-shadow: 0 4px 14px rgba(15, 23, 42, 0.06);
   background: #fff;
 }

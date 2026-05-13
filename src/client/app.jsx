@@ -61,18 +61,6 @@ function readSessionField(key) {
   return sessionStorage.getItem(key) || '';
 }
 
-/** Guests hitting /profile or /faq land on / with ?intent= so we can explain and show the magic-link form. */
-function ensurePortalGuestRedirectToHub() {
-  if (typeof window === 'undefined') return;
-  if (isPortalSessionCompleteSync()) return;
-  const path = window.location.pathname;
-  if (path === '/profile' || path.startsWith('/profile/')) {
-    window.history.replaceState(null, '', '/?intent=profile');
-  } else if (path === '/faq' || path.startsWith('/faq/')) {
-    window.history.replaceState(null, '', '/?intent=faq');
-  }
-}
-
 function getPortalUrlIntent() {
   if (typeof window === 'undefined') return '';
   const raw = new URLSearchParams(window.location.search).get('intent');
@@ -292,6 +280,7 @@ function PortalLayout({ children }) {
           <div className="portal-header-brand">
             <p className="portal-header-kicker">AESOP Afghanistan</p>
             <h1 className="portal-header-title">Student Portal</h1>
+            <p className="portal-header-tagline">Education · Service · Community</p>
           </div>
           <a
             className="portal-logo-wrap"
@@ -366,14 +355,16 @@ function PortalIntentNotice({ intent }) {
   const title = intent === 'profile' ? 'Edit Ding' : 'FAQs';
   return (
     <div className="portal-intent-banner" role="status">
-      <p className="portal-intent-banner-title">Sign in to open this section</p>
+      <p className="portal-intent-banner-title">
+        {intent === 'profile' ? 'Sign in to manage your Ding number' : 'Sign in for account-specific help'}
+      </p>
       <p className="portal-intent-banner-text">
-        You used a link to <strong>{title}</strong>.{' '}
+        You opened a link related to <strong>{title}</strong>.{' '}
         <a href="#portal-magic-link-form" className="portal-intent-inline-link">
           Request a magic link
         </a>{' '}
-        with your AESOP ID below—we&apos;ll email you a one-time link so you can open Edit Ding, FAQs, and the rest of the
-        portal.
+        with your AESOP ID—we&apos;ll email you a one-time link. <strong>FAQs</strong> stay available anytime from the tab
+        above.
       </p>
     </div>
   );
@@ -468,7 +459,7 @@ function PortalHubPage() {
               </li>
             </ul>
             <p className="portal-hub-links-hint">
-              Use the navigation for <strong>Edit Ding</strong> or <strong>FAQs</strong> after you&apos;re signed in. Not
+              Open <strong>FAQs</strong> anytime from the tabs above. <strong>Edit Ding</strong> needs a magic link. Not
               connected yet?{' '}
               <a href="#portal-magic-link-form" className="portal-intent-inline-link">
                 Request a magic link
@@ -489,6 +480,45 @@ function PortalHubPage() {
             </p>
           </>
         )}
+      </div>
+    </PortalLayout>
+  );
+}
+
+function PortalGuestProfilePage() {
+  const intent = typeof window !== 'undefined' ? getPortalUrlIntent() : '';
+
+  useEffect(() => {
+    if (intent === 'profile') {
+      document.getElementById('portal-magic-link-form')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }, [intent]);
+
+  return (
+    <PortalLayout>
+      <div className="portal-card portal-content portal-hub-card">
+        <PortalNav active="profile" />
+        {intent === 'profile' ? <PortalIntentNotice intent="profile" /> : null}
+        <h2 className="portal-welcome portal-welcome-signout">Edit Ding</h2>
+        <p className="portal-hub-intro">
+          Sign in with your magic link to update your Afghanistan Ding number, view history, or request help with a
+          non-Afghan number.
+        </p>
+        <div id="portal-magic-link-form" className="portal-signin-panel">
+          <h3 className="portal-signin-heading">Connect with your AESOP ID</h3>
+          <p className="portal-signin-lead">
+            Enter the student ID AESOP gave you. We&apos;ll email a magic link; open it on this device to finish signing in.
+          </p>
+          <MagicLinkRequestForm inputId="portalMagicUserIdProfile" submitLabel="Email me a magic link" />
+        </div>
+        <p className="portal-hub-footnote">
+          <a href="/faq">Read FAQs</a>
+          <span className="portal-footer-sep" aria-hidden="true">
+            {' '}
+            ·{' '}
+          </span>
+          <a href="https://aesopafghanistan.org/">aesopafghanistan.org</a>
+        </p>
       </div>
     </PortalLayout>
   );
@@ -521,16 +551,17 @@ function PortalShellApp() {
     return () => document.body.classList.remove('portal-body');
   }, []);
 
-  ensurePortalGuestRedirectToHub();
-
   const segment = getPortalRouteSegment();
   const signedIn = isPortalSessionCompleteSync();
 
-  if (signedIn && segment === 'profile') {
-    return <PortalProfilePage />;
-  }
-  if (signedIn && segment === 'faq') {
+  if (segment === 'faq') {
     return <PortalFaqPage />;
+  }
+  if (segment === 'profile') {
+    if (signedIn) {
+      return <PortalProfilePage />;
+    }
+    return <PortalGuestProfilePage />;
   }
   return <PortalHubPage />;
 }
