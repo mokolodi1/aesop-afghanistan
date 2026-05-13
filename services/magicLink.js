@@ -1,6 +1,13 @@
 const crypto = require('crypto');
 const { sendEmail } = require('./email');
-const config = require('../config/secrets');
+const {
+  AESOP_EMAIL,
+  FONT_HEADING,
+  FONT_STACK,
+  AESOP_CONTACT,
+  escapeHtml,
+  wrapAesopEmail,
+} = require('./emailBranding');
 
 // In-memory store for magic links (in production, use Redis or database)
 // Format: { token: { email, userId, expiresAt, used } }
@@ -114,61 +121,46 @@ async function sendMagicLinkEmail(email, token) {
   const origin = magicLinkSiteOrigin();
   const magicLink = `${origin}/verify.html?token=${token}`;
   
-  const emailSubject = 'Your AESOP Afghanistan Magic Link';
-  const emailHtml = `
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <meta charset="UTF-8">
-      <style>
-        body {
-          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-          line-height: 1.6;
-          color: #333;
-          max-width: 600px;
-          margin: 0 auto;
-          padding: 20px;
-        }
-        .button {
-          display: inline-block;
-          padding: 12px 24px;
-          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-          color: white;
-          text-decoration: none;
-          border-radius: 8px;
-          margin: 20px 0;
-        }
-        .footer {
-          margin-top: 30px;
-          font-size: 12px;
-          color: #666;
-        }
-      </style>
-    </head>
-    <body>
-      <h2>Welcome to AESOP Afghanistan</h2>
-      <p>Click the button below to log in:</p>
-      <a href="${magicLink}" class="button">Log In</a>
-      <p>Or copy and paste this link into your browser:</p>
-      <p style="word-break: break-all; color: #667eea;">${magicLink}</p>
-      <p><strong>This link will expire in 15 minutes.</strong></p>
-      <div class="footer">
-        <p>If you didn't request this link, please ignore this email.</p>
-      </div>
-    </body>
-    </html>
+  const emailSubject = 'Sign in to your AESOP student portal';
+  const { ink, muted, accent, accentDark, skyTint, line } = AESOP_EMAIL;
+  const safeLinkText = escapeHtml(magicLink);
+  const innerHtml = `
+      <p style="margin:0 0 16px;font-family:${FONT_HEADING};font-size:18px;font-weight:700;color:${ink};">
+        Sign in to the student portal
+      </p>
+      <p style="margin:0 0 18px;line-height:1.5;">
+        Use the link below on the same device where you requested access. It expires in <strong>15 minutes</strong>.
+      </p>
+      <table role="presentation" cellpadding="0" cellspacing="0">
+        <tr>
+          <td style="border-radius:12px;background-color:${accent};">
+            <a href="${magicLink.replace(/&/g, '&amp;')}" style="display:inline-block;padding:12px 24px;font-family:${FONT_STACK};font-size:14px;font-weight:700;color:#ffffff;text-decoration:none;border-radius:12px;">
+              Sign in
+            </a>
+          </td>
+        </tr>
+      </table>
+      <p style="margin:18px 0 6px;font-size:13px;color:${muted};">Or paste this URL:</p>
+      <p style="margin:0;padding:12px 14px;word-break:break-all;font-size:12px;line-height:1.45;color:${accentDark};background-color:${skyTint};border:1px solid ${line};border-radius:12px;">
+        ${safeLinkText}
+      </p>
+      <p style="margin:18px 0 0;font-size:13px;line-height:1.5;color:${muted};">
+        If you did not request this email, you may disregard it.
+      </p>
   `;
+  const emailHtml = wrapAesopEmail(innerHtml, { title: emailSubject });
 
-  const emailText = `
-Welcome to AESOP Afghanistan
-
-Click the link below to log in:
-${magicLink}
-
-This link will expire in 15 minutes.
-
-If you didn't request this link, please ignore this email.
-  `;
+  const emailText = [
+    'AESOP Afghanistan — Student portal',
+    '',
+    'Use this link to sign in (same device you used to request it). Expires in 15 minutes:',
+    magicLink,
+    '',
+    'If you did not request this email, you may disregard it.',
+    '',
+    `AESOP · ${AESOP_CONTACT.phoneDisplay} · ${AESOP_CONTACT.email}`,
+    'https://aesopafghanistan.org/',
+  ].join('\n');
 
   await sendEmail({
     to: email,

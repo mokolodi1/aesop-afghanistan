@@ -61,6 +61,27 @@ function readSessionField(key) {
   return sessionStorage.getItem(key) || '';
 }
 
+/** Keys written when a student completes magic-link verification */
+const PORTAL_SESSION_STORAGE_KEYS = [
+  'studentPortalName',
+  'studentPortalEmail',
+  'studentPortalNewDingNumber',
+  'studentPortalUserId',
+  'studentPortalPhone',
+];
+
+const PORTAL_IDLE_LOGOUT_MS = 10 * 60 * 1000;
+
+function clearPortalSession() {
+  if (typeof sessionStorage === 'undefined') return;
+  PORTAL_SESSION_STORAGE_KEYS.forEach((key) => sessionStorage.removeItem(key));
+}
+
+function logOutPortalClient() {
+  clearPortalSession();
+  window.location.assign(portalHubHref());
+}
+
 function getPortalUrlIntent() {
   if (typeof window === 'undefined') return '';
   const raw = new URLSearchParams(window.location.search).get('intent');
@@ -273,31 +294,68 @@ function VerifyMagicLinkApp() {
 }
 
 function PortalLayout({ children }) {
+  const portalHomeHref = portalHubHref();
+  const signedIn = isPortalSessionCompleteSync();
+  const fullName = readSessionField('studentPortalName').trim();
+  const aesopId = readSessionField('studentPortalUserId').trim();
+  const headerEmail = readSessionField('studentPortalEmail').trim();
+
+  const dash = '—';
+  const fullNameDisplay = fullName || dash;
+
   return (
     <div className="portal-page">
       <header className="portal-header">
         <div className="portal-header-inner">
-          <div className="portal-header-brand">
-            <p className="portal-header-kicker">AESOP Afghanistan</p>
-            <h1 className="portal-header-title">Student Portal</h1>
-            <p className="portal-header-tagline">Education · Service · Community</p>
+          <div className="portal-header-col portal-header-col--brand">
+            <div className="portal-header-brand">
+              <span className="portal-header-brand-accent" aria-hidden="true" />
+              <div className="portal-header-brand-text">
+                <p className="portal-header-kicker">AESOP Afghanistan</p>
+                <h1 className="portal-header-title">Student Portal</h1>
+                <p className="portal-header-tagline">
+                  <span className="portal-header-tagline-part">Education</span>
+                  <span className="portal-header-tagline-dot" aria-hidden="true">
+                    ·
+                  </span>
+                  <span className="portal-header-tagline-part">Service</span>
+                  <span className="portal-header-tagline-dot" aria-hidden="true">
+                    ·
+                  </span>
+                  <span className="portal-header-tagline-part">Community</span>
+                </p>
+              </div>
+            </div>
           </div>
-          <a
-            className="portal-logo-wrap"
-            href="https://aesopafghanistan.org/"
-            target="_blank"
-            rel="noopener noreferrer"
-            aria-label="AESOP Afghanistan — visit main site"
-          >
-            <img
-              className="portal-logo"
-              src="/images/aesop-logo.webp"
-              width={280}
-              height={80}
-              alt=""
-              decoding="async"
-            />
-          </a>
+          <div className="portal-header-col portal-header-col--logo">
+            <a href={portalHomeHref} className="portal-header-logo-link" aria-label="AESOP Afghanistan Student Portal — home">
+              <img
+                className="portal-logo portal-logo--header-center"
+                src="/images/aesop-logo.webp"
+                width={280}
+                height={80}
+                alt=""
+                decoding="async"
+              />
+            </a>
+          </div>
+          <div className="portal-header-col portal-header-col--student">
+            {signedIn ? (
+              <div className="portal-header-student-wrap">
+                <dl className="portal-header-id-meta" aria-label="Your profile">
+                  <dt className="portal-header-id-label">Full name</dt>
+                  <dd className="portal-header-id-value">{fullNameDisplay}</dd>
+                  <dt className="portal-header-id-label">AESOP ID</dt>
+                  <dd className="portal-header-id-value portal-header-id-mono">{aesopId || dash}</dd>
+                  <dt className="portal-header-id-label">Email</dt>
+                  <dd className="portal-header-id-value portal-header-id-email">{headerEmail || dash}</dd>
+                </dl>
+                <button type="button" className="portal-header-logout" onClick={() => logOutPortalClient()}>
+                  Log off
+                </button>
+              </div>
+            ) : null}
+          </div>
         </div>
       </header>
       <main className="portal-main">{children}</main>
@@ -314,17 +372,23 @@ function PortalLayout({ children }) {
   );
 }
 
-function PortalNav({ active }) {
+function PortalSectionLinks({ current }) {
   const hubHref = portalHubHref();
   return (
-    <nav className="portal-nav" aria-label="Portal sections">
-      <a href={hubHref} className={active === 'hub' ? 'portal-nav-link is-active' : 'portal-nav-link'}>
+    <nav className="portal-section-links" aria-label="Portal sections">
+      <a href={hubHref} className={current === 'hub' ? 'is-current' : undefined}>
         Home
       </a>
-      <a href="/profile" className={active === 'profile' ? 'portal-nav-link is-active' : 'portal-nav-link'}>
+      <span className="portal-section-links-sep" aria-hidden="true">
+        ·
+      </span>
+      <a href="/profile" className={current === 'profile' ? 'is-current' : undefined}>
         Edit Ding
       </a>
-      <a href="/faq" className={active === 'faq' ? 'portal-nav-link is-active' : 'portal-nav-link'}>
+      <span className="portal-section-links-sep" aria-hidden="true">
+        ·
+      </span>
+      <a href="/faq" className={current === 'faq' ? 'is-current' : undefined}>
         FAQs
       </a>
     </nav>
@@ -363,15 +427,18 @@ function PortalIntentNotice({ intent }) {
         <a href="#portal-magic-link-form" className="portal-intent-inline-link">
           Request a magic link
         </a>{' '}
-        with your AESOP ID—we&apos;ll email you a one-time link. <strong>FAQs</strong> stay available anytime from the tab
-        above.
+        with your AESOP ID—we&apos;ll email you a one-time link. The{' '}
+        <a href="/faq" className="portal-intent-inline-link">
+          FAQs page
+        </a>{' '}
+        does not require signing in.
       </p>
     </div>
   );
 }
 
 function PortalHubPage() {
-  const { studentName, studentUserId, studentEmail, studentPhone } = usePortalStudentRecord();
+  const { studentName, studentUserId, studentEmail, studentPhone, newDingNumber } = usePortalStudentRecord();
   const signedIn = isPortalSessionCompleteSync();
   const intent = typeof window !== 'undefined' ? getPortalUrlIntent() : '';
 
@@ -384,11 +451,46 @@ function PortalHubPage() {
   return (
     <PortalLayout>
       <div className="portal-card portal-content portal-hub-card">
-        <PortalNav active="hub" />
         {signedIn ? (
           <>
             <h2 className="portal-welcome">{`Welcome, ${studentName || 'Student'}!`}</h2>
-            <p className="portal-hub-lead">Open a section:</p>
+            <dl className="portal-hub-meta portal-hub-meta-panel" aria-label="Your account">
+              <div className="portal-hub-meta-row">
+                <dt className="portal-hub-meta-label">AESOP ID</dt>
+                <dd className="portal-hub-meta-value portal-hub-meta-mono">{studentUserId || '—'}</dd>
+              </div>
+              <div className="portal-hub-meta-row">
+                <dt className="portal-hub-meta-label">Email</dt>
+                <dd className="portal-hub-meta-value">{studentEmail || '—'}</dd>
+              </div>
+              <div className="portal-hub-meta-row">
+                <dt className="portal-hub-meta-label">Ding number</dt>
+                <dd
+                  className={`portal-hub-meta-value portal-hub-meta-mono${newDingNumber.trim() ? '' : ' portal-hub-meta-empty'}`}
+                >
+                  {newDingNumber.trim() ? newDingNumber.trim() : 'Not set yet'}
+                </dd>
+              </div>
+              {studentPhone ? (
+                <div className="portal-hub-meta-row">
+                  <dt className="portal-hub-meta-label">Phone on file</dt>
+                  <dd className="portal-hub-meta-value">{studentPhone}</dd>
+                </div>
+              ) : null}
+            </dl>
+            <section className="portal-hub-purpose" aria-labelledby="portal-hub-purpose-heading">
+              <h3 id="portal-hub-purpose-heading" className="portal-hub-purpose-heading">
+                About this portal
+              </h3>
+              <p className="portal-hub-purpose-text">
+                This secure student portal is where you sign in with a magic link—there is no password to remember on this
+                site. Use it to update your Afghanistan <strong>Ding</strong> phone number when it changes (with
+                confirmation), review past Ding updates, request help if you need a non-Afghan number for Ding, and read{' '}
+                <a href="/faq">frequently asked questions</a>. Your AESOP ID, email, and Ding number above summarize what we
+                have on file—open <a href="/profile">Edit Ding</a> to change your Ding number.
+              </p>
+            </section>
+            <p className="portal-hub-lead">Quick links:</p>
             <ul className="portal-hub-list">
               <li>
                 <a className="portal-hub-link" href="/profile">
@@ -416,56 +518,29 @@ function PortalHubPage() {
                 </a>
               </li>
             </ul>
-            {studentUserId || studentPhone || studentEmail ? (
-              <div className="portal-hub-meta">
-                {studentUserId ? (
-                  <p className="portal-email">
-                    <span className="portal-email-label">AESOP ID</span>
-                    <span className="portal-email-value">{studentUserId}</span>
-                  </p>
-                ) : null}
-                {studentPhone ? (
-                  <p className="portal-email">
-                    <span className="portal-email-label">Phone on file</span>
-                    <span className="portal-email-value">{studentPhone}</span>
-                  </p>
-                ) : null}
-                {studentEmail ? (
-                  <p className="portal-email">
-                    <span className="portal-email-label">Contact email</span>
-                    <span className="portal-email-value">{studentEmail}</span>
-                  </p>
-                ) : null}
-              </div>
-            ) : null}
           </>
         ) : (
           <>
             <PortalIntentNotice intent={intent} />
             <h2 className="portal-welcome portal-welcome-signout">Student portal</h2>
-            <p className="portal-hub-intro">
-              This secure area is for AESOP students. After you sign in with a magic link, you can manage your Afghanistan
-              Ding number and read portal FAQs—without sharing a password on this site.
-            </p>
-            <ul className="portal-hub-features" aria-label="What you can do after signing in">
-              <li>
-                <strong>Edit Ding</strong> — update your Afghanistan Ding number when it changes, with confirmation.
-              </li>
-              <li>
-                <strong>History &amp; help</strong> — see past Ding updates or contact us if you use a non-Afghan number.
-              </li>
-              <li>
-                <strong>FAQs</strong> — answers for common questions (we&apos;re adding more).
-              </li>
-            </ul>
-            <p className="portal-hub-links-hint">
-              Open <strong>FAQs</strong> anytime from the tabs above. <strong>Edit Ding</strong> needs a magic link. Not
-              connected yet?{' '}
-              <a href="#portal-magic-link-form" className="portal-intent-inline-link">
-                Request a magic link
-              </a>{' '}
-              with your AESOP ID.
-            </p>
+            <section className="portal-hub-purpose" aria-labelledby="portal-hub-purpose-signout-heading">
+              <h3 id="portal-hub-purpose-signout-heading" className="portal-hub-purpose-heading">
+                About this portal
+              </h3>
+              <p className="portal-hub-purpose-text">
+                This secure area is for AESOP students. After you sign in with a magic link, you can manage your
+                Afghanistan <strong>Ding</strong> number and read portal <a href="/faq">FAQs</a>
+                —without sharing a password on this site. <strong>Edit Ding</strong> — update your Afghanistan Ding number
+                when it changes, with confirmation. <strong>History &amp; help</strong> — see past Ding updates or contact us
+                if you use a non-Afghan number. <strong>FAQs</strong> — answers for common questions (we&apos;re adding
+                more). Open <a href="/faq">FAQs</a> anytime without signing in. <strong>Edit Ding</strong> needs a magic
+                link. Not connected yet?{' '}
+                <a href="#portal-magic-link-form" className="portal-intent-inline-link">
+                  Request a magic link
+                </a>{' '}
+                with your AESOP ID.
+              </p>
+            </section>
             <div id="portal-magic-link-form" className="portal-signin-panel">
               <h3 className="portal-signin-heading">Connect with your AESOP ID</h3>
               <p className="portal-signin-lead">
@@ -497,9 +572,8 @@ function PortalGuestProfilePage() {
   return (
     <PortalLayout>
       <div className="portal-card portal-content portal-hub-card">
-        <PortalNav active="profile" />
+        <PortalSectionLinks current="profile" />
         {intent === 'profile' ? <PortalIntentNotice intent="profile" /> : null}
-        <h2 className="portal-welcome portal-welcome-signout">Edit Ding</h2>
         <p className="portal-hub-intro">
           Sign in with your magic link to update your Afghanistan Ding number, view history, or request help with a
           non-Afghan number.
@@ -528,7 +602,7 @@ function PortalFaqPage() {
   return (
     <PortalLayout>
       <div className="portal-card portal-content portal-faq-card">
-        <PortalNav active="faq" />
+        <PortalSectionLinks current="faq" />
         <p className="faq-kicker">AESOP Afghanistan</p>
         <h2 className="faq-title">Frequently asked questions</h2>
         <p className="faq-placeholder">
@@ -554,6 +628,36 @@ function PortalShellApp() {
   const segment = getPortalRouteSegment();
   const signedIn = isPortalSessionCompleteSync();
 
+  useEffect(() => {
+    if (!signedIn) {
+      return undefined;
+    }
+
+    let timeoutId = 0;
+
+    const resetIdleTimer = () => {
+      window.clearTimeout(timeoutId);
+      timeoutId = window.setTimeout(() => {
+        clearPortalSession();
+        window.location.assign(portalHubHref());
+      }, PORTAL_IDLE_LOGOUT_MS);
+    };
+
+    const activityEvents = ['mousemove', 'mousedown', 'keydown', 'touchstart', 'wheel'];
+    const opts = { capture: true, passive: true };
+
+    activityEvents.forEach((evt) => window.addEventListener(evt, resetIdleTimer, opts));
+    window.addEventListener('scroll', resetIdleTimer, opts);
+
+    resetIdleTimer();
+
+    return () => {
+      window.clearTimeout(timeoutId);
+      activityEvents.forEach((evt) => window.removeEventListener(evt, resetIdleTimer, opts));
+      window.removeEventListener('scroll', resetIdleTimer, opts);
+    };
+  }, [signedIn]);
+
   if (segment === 'faq') {
     return <PortalFaqPage />;
   }
@@ -577,22 +681,78 @@ function PortalProfilePage() {
     canUpdateDing,
   } = usePortalStudentRecord();
 
-  const [showDingForm, setShowDingForm] = useState(false);
+  /** Single open accordion panel on Edit Ding (others close automatically). */
+  const [activeDingPanel, setActiveDingPanel] = useState(null); // null | 'update' | 'history' | 'help'
   const [formDing, setFormDing] = useState('');
   const [formDingConfirm, setFormDingConfirm] = useState('');
   const [dingFieldError, setDingFieldError] = useState('');
   const [dingConfirmFieldError, setDingConfirmFieldError] = useState('');
   const [formStatus, setFormStatus] = useState({ type: '', text: '' });
   const [saving, setSaving] = useState(false);
-  const [showDingHelpForm, setShowDingHelpForm] = useState(false);
   const [dingHelpPhone, setDingHelpPhone] = useState('');
   const [dingHelpNote, setDingHelpNote] = useState('');
   const [dingHelpStatus, setDingHelpStatus] = useState({ type: '', text: '' });
   const [dingHelpSubmitting, setDingHelpSubmitting] = useState(false);
-  const [showDingHistory, setShowDingHistory] = useState(false);
   const [dingHistoryLoading, setDingHistoryLoading] = useState(false);
   const [dingHistoryError, setDingHistoryError] = useState('');
   const [dingHistoryEntries, setDingHistoryEntries] = useState([]);
+
+  const toggleDingPanel = (panelId) => {
+    setActiveDingPanel((prev) => {
+      const next = prev === panelId ? null : panelId;
+      if (next === 'update') {
+        setFormStatus({ type: '', text: '' });
+        setFormDing('');
+        setFormDingConfirm('');
+        setDingFieldError('');
+        setDingConfirmFieldError('');
+      }
+      if (next === 'help') {
+        setDingHelpStatus({ type: '', text: '' });
+      }
+      return next;
+    });
+  };
+
+  useEffect(() => {
+    if (activeDingPanel !== 'history' || !canUpdateDing) {
+      return undefined;
+    }
+    let cancelled = false;
+    setDingHistoryLoading(true);
+    setDingHistoryError('');
+    (async () => {
+      try {
+        const response = await fetch('/api/portal-ding-history', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId: studentUserId, email: studentEmail }),
+        });
+        const data = await response.json();
+        if (cancelled) {
+          return;
+        }
+        if (!response.ok) {
+          setDingHistoryError(data.error || 'Could not load history.');
+          setDingHistoryEntries([]);
+          return;
+        }
+        setDingHistoryEntries(Array.isArray(data.entries) ? data.entries : []);
+      } catch {
+        if (!cancelled) {
+          setDingHistoryError('Network error. Please try again.');
+          setDingHistoryEntries([]);
+        }
+      } finally {
+        if (!cancelled) {
+          setDingHistoryLoading(false);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeDingPanel, canUpdateDing, studentUserId, studentEmail]);
 
   const submitDingUpdate = async () => {
     if (!canUpdateDing) {
@@ -682,7 +842,7 @@ function PortalProfilePage() {
       }
       setFormDing('');
       setFormDingConfirm('');
-      setShowDingForm(false);
+      setActiveDingPanel(null);
       setDingFieldError('');
       setDingConfirmFieldError('');
       setFormStatus({ type: 'success', text: 'Ding number updated.' });
@@ -738,43 +898,10 @@ function PortalProfilePage() {
     }
   };
 
-  const toggleDingHistory = async () => {
-    if (!canUpdateDing) {
-      return;
-    }
-    if (showDingHistory) {
-      setShowDingHistory(false);
-      return;
-    }
-    setShowDingHistory(true);
-    setDingHistoryLoading(true);
-    setDingHistoryError('');
-    try {
-      const response = await fetch('/api/portal-ding-history', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: studentUserId, email: studentEmail }),
-      });
-      const data = await response.json();
-      if (!response.ok) {
-        setDingHistoryError(data.error || 'Could not load history.');
-        setDingHistoryEntries([]);
-        return;
-      }
-      setDingHistoryEntries(Array.isArray(data.entries) ? data.entries : []);
-    } catch {
-      setDingHistoryError('Network error. Please try again.');
-      setDingHistoryEntries([]);
-    } finally {
-      setDingHistoryLoading(false);
-    }
-  };
-
   return (
     <PortalLayout>
       <div className="portal-card portal-content">
-        <PortalNav active="profile" />
-        <h2 className="portal-page-title">Edit Ding</h2>
+        <PortalSectionLinks current="profile" />
         {!canUpdateDing ? (
           <div className="portal-session-banner" role="status">
             <p className="portal-session-banner-title">Session incomplete</p>
@@ -783,329 +910,355 @@ function PortalProfilePage() {
             </p>
           </div>
         ) : null}
-        {studentUserId ? (
-          <p className="portal-email">
-            <span className="portal-email-label">AESOP ID</span>
-            <span className="portal-email-value">{studentUserId}</span>
-          </p>
-        ) : null}
-        {studentPhone ? (
-          <p className="portal-email">
-            <span className="portal-email-label">Phone on file</span>
-            <span className="portal-email-value">{studentPhone}</span>
-          </p>
-        ) : null}
-        {studentEmail ? (
-          <p className="portal-email">
-            <span className="portal-email-label">Contact email</span>
-            <span className="portal-email-value">{studentEmail}</span>
-          </p>
-        ) : null}
 
         {canUpdateDing ? (
-          <section className="portal-ding-section" aria-label="Ding number">
+          <section className="portal-ding-section" aria-label="Your number on file">
             <p className="portal-ding">
-              <span className="portal-ding-label">Ding number</span>
+              <span className="portal-ding-label">Your number</span>
               <span
                 className={`portal-ding-value${newDingNumber.trim() ? '' : ' portal-ding-value-empty'}`}
               >
-                {newDingNumber.trim() ? newDingNumber.trim() : 'Enter Ding number'}
+                {newDingNumber.trim() ? newDingNumber.trim() : 'Not set yet'}
               </span>
             </p>
-            <div className="portal-ding-toolbar">
-              <button
-                type="button"
-                className="portal-ding-button"
-                onClick={() => {
-                  setShowDingForm((v) => !v);
-                  setFormStatus({ type: '', text: '' });
-                  setFormDing('');
-                  setFormDingConfirm('');
-                  setDingFieldError('');
-                  setDingConfirmFieldError('');
-                }}
-              >
-                Update Ding number
-              </button>
-              <button
-                type="button"
-                className="portal-ding-history-button"
-                onClick={toggleDingHistory}
-                aria-expanded={showDingHistory}
-              >
-                {showDingHistory ? 'Hide Ding history' : 'Ding number history'}
-              </button>
-            </div>
-
-            {showDingHistory ? (
-              <div
-                className="portal-ding-history-panel"
-                role="region"
-                aria-label="Ding number change history"
-              >
-                {dingHistoryLoading ? <p className="portal-ding-history-status">Loading history…</p> : null}
-                {dingHistoryError ? (
-                  <p className="portal-field-error portal-ding-history-status" role="alert">
-                    {dingHistoryError}
-                  </p>
-                ) : null}
-                {!dingHistoryLoading && !dingHistoryError && dingHistoryEntries.length === 0 ? (
-                  <p className="portal-field-hint portal-ding-history-status">
-                    No Ding changes are recorded for your account yet.
-                  </p>
-                ) : null}
-                {!dingHistoryLoading && dingHistoryEntries.length > 0 ? (
-                  <div className="portal-ding-history-scroll">
-                    <table className="portal-ding-history-table">
-                      <thead>
-                        <tr>
-                          <th scope="col">Date &amp; time</th>
-                          <th scope="col">Ding number</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {dingHistoryEntries.map((row, i) => (
-                          <tr key={`${row.displayedAt}-${row.dingNumber}-${i}`}>
-                            <td>{row.displayedAt}</td>
-                            <td className="portal-ding-history-num">{row.dingNumber}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                ) : null}
-              </div>
-            ) : null}
-
-            <div className="portal-ding-help">
-              <p className="portal-ding-help-intro">
-                If you cannot submit an Afghanistan Ding number here—for example you use a Pakistani or other
-                non-Afghan number—ask us to update it manually.
-              </p>
-              {!showDingHelpForm ? (
+            <div className="portal-ding-accordion" aria-label="Ding actions">
+              <div className="portal-ding-accordion-item">
                 <button
                   type="button"
-                  className="portal-ding-help-open"
-                  onClick={() => {
-                    setShowDingHelpForm(true);
-                    setDingHelpStatus({ type: '', text: '' });
-                  }}
+                  role="tab"
+                  id="ding-tab-update"
+                  aria-selected={activeDingPanel === 'update'}
+                  aria-controls="ding-panel-update"
+                  aria-expanded={activeDingPanel === 'update'}
+                  className={`portal-ding-tab${activeDingPanel === 'update' ? ' is-active' : ''}`}
+                  onClick={() => toggleDingPanel('update')}
                 >
-                  Contact us
+                  <span className="portal-ding-tab-label">Update Ding number</span>
+                  <span className="portal-ding-tab-chevron" aria-hidden="true">
+                    {activeDingPanel === 'update' ? '▼' : '▶'}
+                  </span>
                 </button>
-              ) : (
-                <div className="portal-ding-help-panel">
-                  <div className="form-group">
-                    <label htmlFor="dingHelpPhone">Phone number you need for Ding</label>
-                    <input
-                      id="dingHelpPhone"
-                      type="text"
-                      inputMode="tel"
-                      autoComplete="tel"
-                      value={dingHelpPhone}
-                      onChange={(e) => setDingHelpPhone(e.target.value.slice(0, 96))}
-                      disabled={dingHelpSubmitting}
-                      placeholder="e.g. +92 300 1234567"
-                      maxLength={96}
-                    />
-                    <p className="portal-field-hint">
-                      Include country code if applicable. This field accepts international formats.
+                {activeDingPanel === 'update' ? (
+                  <div
+                    id="ding-panel-update"
+                    role="tabpanel"
+                    aria-labelledby="ding-tab-update"
+                    className="portal-ding-tab-panel"
+                  >
+                    <div className="portal-ding-form portal-ding-form--embedded">
+                      <div className="form-group">
+                        <label htmlFor="newDing">Ding number</label>
+                        <input
+                          id="newDing"
+                          type="text"
+                          inputMode="tel"
+                          autoComplete="tel"
+                          className={dingFieldError ? 'portal-input-invalid' : ''}
+                          aria-invalid={!!dingFieldError}
+                          aria-describedby={['newDing-hint', dingFieldError ? 'newDing-error' : '']
+                            .filter(Boolean)
+                            .join(' ')}
+                          value={formDing}
+                          onChange={(e) => {
+                            const next = filterDingPhoneInputChars(e.target.value);
+                            setFormDing(next);
+                            const t = next.trim();
+                            if (dingFieldError) {
+                              setDingFieldError(
+                                t && !isValidAfghanistanPhoneNumber(t)
+                                  ? getAfghanistanPhoneFormatMessage(t)
+                                  : '',
+                              );
+                            }
+                            if (dingConfirmFieldError === DING_CONFIRM_MISMATCH_MESSAGE) {
+                              setDingConfirmFieldError('');
+                            }
+                          }}
+                          onBlur={() => {
+                            const t = formDing.trim();
+                            setDingFieldError(
+                              t && !isValidAfghanistanPhoneNumber(t)
+                                ? getAfghanistanPhoneFormatMessage(t)
+                                : '',
+                            );
+                          }}
+                          disabled={saving}
+                          maxLength={24}
+                          placeholder="e.g. 93701234567 or +93 70 123 4567"
+                        />
+                        <p id="newDing-hint" className="portal-field-hint">
+                          {AFGHAN_PHONE_FORMAT_HINT}
+                        </p>
+                        {dingFieldError ? (
+                          <p id="newDing-error" className="portal-field-error" role="alert">
+                            {dingFieldError}
+                          </p>
+                        ) : null}
+                      </div>
+                      <div className="form-group">
+                        <label htmlFor="newDingConfirm">Confirm Ding number</label>
+                        <input
+                          id="newDingConfirm"
+                          type="text"
+                          inputMode="tel"
+                          autoComplete="off"
+                          className={dingConfirmFieldError ? 'portal-input-invalid' : ''}
+                          aria-invalid={!!dingConfirmFieldError}
+                          aria-describedby={[
+                            'newDingConfirm-hint',
+                            dingConfirmFieldError ? 'newDingConfirm-error' : '',
+                          ]
+                            .filter(Boolean)
+                            .join(' ')}
+                          value={formDingConfirm}
+                          onChange={(e) => {
+                            const next = filterDingPhoneInputChars(e.target.value);
+                            setFormDingConfirm(next);
+                            const t = next.trim();
+                            if (!t) {
+                              setDingConfirmFieldError('');
+                              return;
+                            }
+                            if (dingConfirmFieldError === DING_CONFIRM_MISMATCH_MESSAGE) {
+                              setDingConfirmFieldError('');
+                              return;
+                            }
+                            if (dingConfirmFieldError === DING_CONFIRM_REQUIRED_MESSAGE) {
+                              setDingConfirmFieldError('');
+                              return;
+                            }
+                            if (isAfghanPhoneFormatErrorMessage(dingConfirmFieldError)) {
+                              setDingConfirmFieldError(
+                                isValidAfghanistanPhoneNumber(t) ? '' : getAfghanistanPhoneFormatMessage(t),
+                              );
+                            }
+                          }}
+                          onBlur={() => {
+                            const t = formDingConfirm.trim();
+                            if (!t) {
+                              return;
+                            }
+                            if (!isValidAfghanistanPhoneNumber(t)) {
+                              setDingConfirmFieldError(getAfghanistanPhoneFormatMessage(t));
+                              return;
+                            }
+                            const na = normalizeAfghanistanPhoneDigits(formDing.trim());
+                            const nb = normalizeAfghanistanPhoneDigits(t);
+                            if (na && nb && na !== nb) {
+                              setDingConfirmFieldError(DING_CONFIRM_MISMATCH_MESSAGE);
+                            } else {
+                              setDingConfirmFieldError((prev) =>
+                                prev === DING_CONFIRM_MISMATCH_MESSAGE ? '' : prev,
+                              );
+                            }
+                          }}
+                          onPaste={(e) => {
+                            e.preventDefault();
+                          }}
+                          onDrop={(e) => {
+                            e.preventDefault();
+                          }}
+                          disabled={saving}
+                          maxLength={24}
+                          placeholder="Same number again"
+                        />
+                        <p id="newDingConfirm-hint" className="portal-field-hint">
+                          Type the same number again by hand—paste is turned off here. Only digits, +,
+                          spaces, and dashes are allowed.
+                        </p>
+                        {dingConfirmFieldError ? (
+                          <p id="newDingConfirm-error" className="portal-field-error" role="alert">
+                            {dingConfirmFieldError}
+                          </p>
+                        ) : null}
+                      </div>
+                      <div className="portal-ding-actions">
+                        <button
+                          type="button"
+                          className="portal-ding-save"
+                          onClick={submitDingUpdate}
+                          disabled={saving}
+                        >
+                          {saving ? 'Saving…' : 'Save'}
+                        </button>
+                        <button
+                          type="button"
+                          className="portal-ding-cancel"
+                          onClick={() => {
+                            setActiveDingPanel(null);
+                            setFormStatus({ type: '', text: '' });
+                            setFormDing('');
+                            setFormDingConfirm('');
+                            setDingFieldError('');
+                            setDingConfirmFieldError('');
+                          }}
+                          disabled={saving}
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="portal-ding-accordion-item">
+                <button
+                  type="button"
+                  role="tab"
+                  id="ding-tab-history"
+                  aria-selected={activeDingPanel === 'history'}
+                  aria-controls="ding-panel-history"
+                  aria-expanded={activeDingPanel === 'history'}
+                  className={`portal-ding-tab${activeDingPanel === 'history' ? ' is-active' : ''}`}
+                  onClick={() => toggleDingPanel('history')}
+                >
+                  <span className="portal-ding-tab-label">Ding number history</span>
+                  <span className="portal-ding-tab-chevron" aria-hidden="true">
+                    {activeDingPanel === 'history' ? '▼' : '▶'}
+                  </span>
+                </button>
+                {activeDingPanel === 'history' ? (
+                  <div
+                    id="ding-panel-history"
+                    role="tabpanel"
+                    aria-labelledby="ding-tab-history"
+                    className="portal-ding-tab-panel"
+                  >
+                    <div
+                      className="portal-ding-history-panel portal-ding-history-panel--embedded"
+                      role="region"
+                      aria-label="Ding number change history"
+                    >
+                      {dingHistoryLoading ? (
+                        <p className="portal-ding-history-status">Loading history…</p>
+                      ) : null}
+                      {dingHistoryError ? (
+                        <p className="portal-field-error portal-ding-history-status" role="alert">
+                          {dingHistoryError}
+                        </p>
+                      ) : null}
+                      {!dingHistoryLoading && !dingHistoryError && dingHistoryEntries.length === 0 ? (
+                        <p className="portal-field-hint portal-ding-history-status">
+                          No Ding changes are recorded for your account yet.
+                        </p>
+                      ) : null}
+                      {!dingHistoryLoading && dingHistoryEntries.length > 0 ? (
+                        <div className="portal-ding-history-scroll">
+                          <table className="portal-ding-history-table">
+                            <thead>
+                              <tr>
+                                <th scope="col">Date &amp; time</th>
+                                <th scope="col">Ding number</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {dingHistoryEntries.map((row, i) => (
+                                <tr key={`${row.displayedAt}-${row.dingNumber}-${i}`}>
+                                  <td>{row.displayedAt}</td>
+                                  <td className="portal-ding-history-num">{row.dingNumber}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="portal-ding-accordion-item">
+                <button
+                  type="button"
+                  role="tab"
+                  id="ding-tab-help"
+                  aria-selected={activeDingPanel === 'help'}
+                  aria-controls="ding-panel-help"
+                  aria-expanded={activeDingPanel === 'help'}
+                  className={`portal-ding-tab${activeDingPanel === 'help' ? ' is-active' : ''}`}
+                  onClick={() => toggleDingPanel('help')}
+                >
+                  <span className="portal-ding-tab-label">Contact us (manual Ding update)</span>
+                  <span className="portal-ding-tab-chevron" aria-hidden="true">
+                    {activeDingPanel === 'help' ? '▼' : '▶'}
+                  </span>
+                </button>
+                {activeDingPanel === 'help' ? (
+                  <div
+                    id="ding-panel-help"
+                    role="tabpanel"
+                    aria-labelledby="ding-tab-help"
+                    className="portal-ding-tab-panel portal-ding-tab-panel--help"
+                  >
+                    <p className="portal-ding-help-intro portal-ding-help-intro--embedded">
+                      If you cannot submit an Afghanistan Ding number here—for example you use a Pakistani or
+                      other non-Afghan number—ask us to update it manually.
                     </p>
+                    <div className="form-group">
+                      <label htmlFor="dingHelpPhone">Phone number you need for Ding</label>
+                      <input
+                        id="dingHelpPhone"
+                        type="text"
+                        inputMode="tel"
+                        autoComplete="tel"
+                        value={dingHelpPhone}
+                        onChange={(e) => setDingHelpPhone(e.target.value.slice(0, 96))}
+                        disabled={dingHelpSubmitting}
+                        placeholder="e.g. +92 300 1234567"
+                        maxLength={96}
+                      />
+                      <p className="portal-field-hint">
+                        Include country code if applicable. This field accepts international formats.
+                      </p>
+                    </div>
+                    <div className="form-group">
+                      <label htmlFor="dingHelpNote">Anything else we should know (optional)</label>
+                      <textarea
+                        id="dingHelpNote"
+                        rows={4}
+                        value={dingHelpNote}
+                        onChange={(e) => setDingHelpNote(e.target.value.slice(0, 2000))}
+                        disabled={dingHelpSubmitting}
+                        maxLength={2000}
+                      />
+                    </div>
+                    <div className="portal-ding-help-actions">
+                      <button
+                        type="button"
+                        className="portal-ding-save"
+                        onClick={submitDingHelpRequest}
+                        disabled={dingHelpSubmitting}
+                      >
+                        {dingHelpSubmitting ? 'Sending…' : 'Send request'}
+                      </button>
+                      <button
+                        type="button"
+                        className="portal-ding-cancel"
+                        onClick={() => {
+                          setActiveDingPanel(null);
+                          setDingHelpPhone('');
+                          setDingHelpNote('');
+                          setDingHelpStatus({ type: '', text: '' });
+                        }}
+                        disabled={dingHelpSubmitting}
+                      >
+                        Close
+                      </button>
+                    </div>
+                    {dingHelpStatus.text ? (
+                      <p
+                        className={`portal-ding-help-feedback ${dingHelpStatus.type || ''}`}
+                        role={dingHelpStatus.type === 'error' ? 'alert' : 'status'}
+                      >
+                        {dingHelpStatus.text}
+                      </p>
+                    ) : null}
                   </div>
-                  <div className="form-group">
-                    <label htmlFor="dingHelpNote">Anything else we should know (optional)</label>
-                    <textarea
-                      id="dingHelpNote"
-                      rows={4}
-                      value={dingHelpNote}
-                      onChange={(e) => setDingHelpNote(e.target.value.slice(0, 2000))}
-                      disabled={dingHelpSubmitting}
-                      maxLength={2000}
-                    />
-                  </div>
-                  <div className="portal-ding-help-actions">
-                    <button
-                      type="button"
-                      className="portal-ding-save"
-                      onClick={submitDingHelpRequest}
-                      disabled={dingHelpSubmitting}
-                    >
-                      {dingHelpSubmitting ? 'Sending…' : 'Send request'}
-                    </button>
-                    <button
-                      type="button"
-                      className="portal-ding-cancel"
-                      onClick={() => {
-                        setShowDingHelpForm(false);
-                        setDingHelpPhone('');
-                        setDingHelpNote('');
-                        setDingHelpStatus({ type: '', text: '' });
-                      }}
-                      disabled={dingHelpSubmitting}
-                    >
-                      Close
-                    </button>
-                  </div>
-                  {dingHelpStatus.text ? (
-                    <p
-                      className={`portal-ding-help-feedback ${dingHelpStatus.type || ''}`}
-                      role={dingHelpStatus.type === 'error' ? 'alert' : 'status'}
-                    >
-                      {dingHelpStatus.text}
-                    </p>
-                  ) : null}
-                </div>
-              )}
+                ) : null}
+              </div>
             </div>
 
-            {showDingForm ? (
-              <div className="portal-ding-form">
-                <div className="form-group">
-                  <label htmlFor="newDing">Ding number</label>
-                  <input
-                    id="newDing"
-                    type="text"
-                    inputMode="tel"
-                    autoComplete="tel"
-                    className={dingFieldError ? 'portal-input-invalid' : ''}
-                    aria-invalid={!!dingFieldError}
-                    aria-describedby={['newDing-hint', dingFieldError ? 'newDing-error' : '']
-                      .filter(Boolean)
-                      .join(' ')}
-                    value={formDing}
-                    onChange={(e) => {
-                      const next = filterDingPhoneInputChars(e.target.value);
-                      setFormDing(next);
-                      const t = next.trim();
-                      if (dingFieldError) {
-                        setDingFieldError(
-                          t && !isValidAfghanistanPhoneNumber(t) ? getAfghanistanPhoneFormatMessage(t) : '',
-                        );
-                      }
-                      if (dingConfirmFieldError === DING_CONFIRM_MISMATCH_MESSAGE) {
-                        setDingConfirmFieldError('');
-                      }
-                    }}
-                    onBlur={() => {
-                      const t = formDing.trim();
-                      setDingFieldError(
-                        t && !isValidAfghanistanPhoneNumber(t) ? getAfghanistanPhoneFormatMessage(t) : '',
-                      );
-                    }}
-                    disabled={saving}
-                    maxLength={24}
-                    placeholder="e.g. 93701234567 or +93 70 123 4567"
-                  />
-                  <p id="newDing-hint" className="portal-field-hint">
-                    {AFGHAN_PHONE_FORMAT_HINT}
-                  </p>
-                  {dingFieldError ? (
-                    <p id="newDing-error" className="portal-field-error" role="alert">
-                      {dingFieldError}
-                    </p>
-                  ) : null}
-                </div>
-                <div className="form-group">
-                  <label htmlFor="newDingConfirm">Confirm Ding number</label>
-                  <input
-                    id="newDingConfirm"
-                    type="text"
-                    inputMode="tel"
-                    autoComplete="off"
-                    className={dingConfirmFieldError ? 'portal-input-invalid' : ''}
-                    aria-invalid={!!dingConfirmFieldError}
-                    aria-describedby={['newDingConfirm-hint', dingConfirmFieldError ? 'newDingConfirm-error' : '']
-                      .filter(Boolean)
-                      .join(' ')}
-                    value={formDingConfirm}
-                    onChange={(e) => {
-                      const next = filterDingPhoneInputChars(e.target.value);
-                      setFormDingConfirm(next);
-                      const t = next.trim();
-                      if (!t) {
-                        setDingConfirmFieldError('');
-                        return;
-                      }
-                      if (dingConfirmFieldError === DING_CONFIRM_MISMATCH_MESSAGE) {
-                        setDingConfirmFieldError('');
-                        return;
-                      }
-                      if (dingConfirmFieldError === DING_CONFIRM_REQUIRED_MESSAGE) {
-                        setDingConfirmFieldError('');
-                        return;
-                      }
-                      if (isAfghanPhoneFormatErrorMessage(dingConfirmFieldError)) {
-                        setDingConfirmFieldError(
-                          isValidAfghanistanPhoneNumber(t) ? '' : getAfghanistanPhoneFormatMessage(t),
-                        );
-                      }
-                    }}
-                    onBlur={() => {
-                      const t = formDingConfirm.trim();
-                      if (!t) {
-                        return;
-                      }
-                      if (!isValidAfghanistanPhoneNumber(t)) {
-                        setDingConfirmFieldError(getAfghanistanPhoneFormatMessage(t));
-                        return;
-                      }
-                      const na = normalizeAfghanistanPhoneDigits(formDing.trim());
-                      const nb = normalizeAfghanistanPhoneDigits(t);
-                      if (na && nb && na !== nb) {
-                        setDingConfirmFieldError(DING_CONFIRM_MISMATCH_MESSAGE);
-                      } else {
-                        setDingConfirmFieldError((prev) =>
-                          prev === DING_CONFIRM_MISMATCH_MESSAGE ? '' : prev,
-                        );
-                      }
-                    }}
-                    onPaste={(e) => {
-                      e.preventDefault();
-                    }}
-                    onDrop={(e) => {
-                      e.preventDefault();
-                    }}
-                    disabled={saving}
-                    maxLength={24}
-                    placeholder="Same number again"
-                  />
-                  <p id="newDingConfirm-hint" className="portal-field-hint">
-                    Type the same number again by hand—paste is turned off here. Only digits, +, spaces,
-                    and dashes are allowed.
-                  </p>
-                  {dingConfirmFieldError ? (
-                    <p id="newDingConfirm-error" className="portal-field-error" role="alert">
-                      {dingConfirmFieldError}
-                    </p>
-                  ) : null}
-                </div>
-                <div className="portal-ding-actions">
-                  <button
-                    type="button"
-                    className="portal-ding-save"
-                    onClick={submitDingUpdate}
-                    disabled={saving}
-                  >
-                    {saving ? 'Saving…' : 'Save'}
-                  </button>
-                  <button
-                    type="button"
-                    className="portal-ding-cancel"
-                    onClick={() => {
-                      setShowDingForm(false);
-                      setFormStatus({ type: '', text: '' });
-                      setFormDing('');
-                      setFormDingConfirm('');
-                      setDingFieldError('');
-                      setDingConfirmFieldError('');
-                    }}
-                    disabled={saving}
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </div>
-            ) : null}
             {formStatus.text ? (
               <p className={`portal-ding-form-status ${formStatus.type || ''}`}>{formStatus.text}</p>
             ) : null}

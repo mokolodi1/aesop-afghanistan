@@ -1,6 +1,7 @@
 const nodemailer = require('nodemailer');
 const { JWT } = require('google-auth-library');
 const config = require('../config/secrets');
+const { AESOP_EMAIL, FONT_HEADING, AESOP_CONTACT, wrapAesopEmail } = require('./emailBranding');
 const { formatGmailAuthError, formatErrorForLog } = require('../utils/errorLogging');
 
 let transporter = null;
@@ -263,29 +264,42 @@ async function sendDingNumberUpdatedEmail({ to, displayName, newDingNumber }) {
   const safeName = escapeHtml(name);
   const safeDing = escapeHtml(ding);
 
-  const subject = 'Your AESOP Ding number was updated';
+  const subject = 'Your Ding number was updated';
   const text = [
-    `Hello ${name},`,
+    `Dear ${name},`,
     '',
-    `Your Ding number on file has been updated to: ${ding}`,
+    `Your Ding number on file is now: ${ding}`,
     '',
-    'If you did not make this change, please contact AESOP Afghanistan right away.',
+    'If you did not make this change, contact AESOP immediately.',
     '',
-    '— AESOP Afghanistan',
+    `${AESOP_CONTACT.phoneDisplay}`,
+    AESOP_CONTACT.email,
+    '',
+    'AESOP Afghanistan',
     'https://aesopafghanistan.org/',
   ].join('\n');
 
-  const html = `<!DOCTYPE html>
-<html>
-<head><meta charset="UTF-8"></head>
-<body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;line-height:1.6;color:#1c1917;max-width:560px;margin:0 auto;padding:24px;">
-  <p>Hello ${safeName},</p>
-  <p>Your <strong>Ding number</strong> on file has been updated to:</p>
-  <p style="font-size:1.15rem;font-weight:700;letter-spacing:0.03em;">${safeDing}</p>
-  <p style="color:#57534e;font-size:14px;">If you did not make this change, please contact AESOP Afghanistan right away.</p>
-  <p style="margin-top:28px;font-size:14px;color:#57534e;">— AESOP Afghanistan<br /><a href="https://aesopafghanistan.org/">aesopafghanistan.org</a></p>
-</body>
-</html>`;
+  const { ink, muted, accent, skyTint, line } = AESOP_EMAIL;
+  const innerHtml = `
+      <p style="margin:0 0 12px;">Dear ${safeName},</p>
+      <p style="margin:0 0 14px;">
+        Your Ding number on file is now:
+      </p>
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 18px;background-color:${skyTint};border:1px solid ${line};border-radius:12px;">
+        <tr>
+          <td style="padding:14px 16px;font-family:${FONT_HEADING};font-size:18px;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:0.03em;color:${ink};">
+            ${safeDing}
+          </td>
+        </tr>
+      </table>
+      <p style="margin:0;font-size:13px;line-height:1.5;color:${muted};">
+        If you did not make this change, contact us immediately:
+        <a href="tel:${AESOP_CONTACT.phoneTel}" style="color:${accent};font-weight:600;text-decoration:none;">${AESOP_CONTACT.phoneDisplay}</a>
+        ·
+        <a href="mailto:${AESOP_CONTACT.email}" style="color:${accent};font-weight:600;text-decoration:none;">${AESOP_CONTACT.email}</a>
+      </p>
+  `;
+  const html = wrapAesopEmail(innerHtml, { title: subject });
 
   await sendEmail({ to, subject, text, html });
 }

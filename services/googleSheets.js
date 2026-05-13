@@ -420,7 +420,8 @@ async function getPortalDingChangeHistory(userId, options = {}) {
 }
 
 /**
- * Append a row to the Ding changes tab: A=id, B=datetime serial, C=ding#, D=name, E=note, F=phone.
+ * Append a row to the Ding changes tab: A=id, B=datetime serial, C=ding#, D=name or source label, E=note, F=phone.
+ * Column D may be a fixed label (e.g. "Student portal") for self-service updates rather than a person's name.
  * Column B is a Sheets date/time serial (numeric); we apply number format `m/d/yyyy HH:mm:ss` so it
  * displays like `4/27/2026 20:39:12`. Other columns use text literals (leading ') where needed.
  * Requires a header row on that sheet and spreadsheet scope for writes.

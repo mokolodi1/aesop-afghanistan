@@ -26,6 +26,9 @@ const { formatDingChangeTimestamp } = require('./utils/dingSheetTime');
 const { sendDingNumberUpdatedEmail, sendPortalDingHelpRequestEmail } = require('./services/email');
 const { formatErrorForLog, formatGoogleSheetsWriteErrorForLog, isGoogleSheetsForbidden } = require('./utils/errorLogging');
 
+/** Value for Ding changes sheet column D when the student updates Ding via the portal (not their personal name). */
+const PORTAL_DING_CHANGE_SOURCE_LABEL = 'Student portal';
+
 function resolvePortalContactEmail() {
   const explicit = config.portalContactEmail && String(config.portalContactEmail).trim();
   if (explicit && isValidEmail(explicit)) {
@@ -276,9 +279,12 @@ app.post('/api/update-ding-number', dingUpdateRateLimiter, async (req, res) => {
       return res.status(403).json({ error: 'Unable to update. Please sign in again from the magic link.' });
     }
 
-    const nameForRow = sanitizePortalDisplayName(
-      typeof displayName === 'string' && displayName.trim() !== '' ? displayName : profile.name
-    ) || (profile.name || '');
+    const greetingName =
+      sanitizePortalDisplayName(
+        typeof displayName === 'string' && displayName.trim() !== '' ? displayName : profile.name,
+      ) ||
+      profile.name ||
+      '';
 
     const when = new Date();
     const timestamp = formatDingChangeTimestamp(when);
@@ -291,7 +297,7 @@ app.post('/api/update-ding-number', dingUpdateRateLimiter, async (req, res) => {
       userId: idForSheet,
       timestampAt: when,
       newDingNumber: ding,
-      displayName: nameForRow,
+      displayName: PORTAL_DING_CHANGE_SOURCE_LABEL,
       portalNote,
       phone: typeof profile.phone === 'string' ? profile.phone.trim() : '',
     });
@@ -312,7 +318,7 @@ app.post('/api/update-ding-number', dingUpdateRateLimiter, async (req, res) => {
     try {
       await sendDingNumberUpdatedEmail({
         to: emailSan,
-        displayName: profile.name || nameForRow,
+        displayName: greetingName || 'Student',
         newDingNumber: displayDing,
       });
     } catch (emailErr) {
