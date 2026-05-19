@@ -43,6 +43,26 @@ function buildGoogleSheetsConfig(fileSection) {
       "peoplePastDingColumn",
       "V"
     ),
+    googleGradesSheetName: envOr(
+      "GOOGLE_GRADES_SHEET_NAME",
+      "googleGradesSheetName",
+      "Import: Google Grades"
+    ),
+    googleGradesHeaderRow: envOr("GOOGLE_GRADES_HEADER_ROW", "googleGradesHeaderRow", "1"),
+    googleGradesNameHeader: envOr("GOOGLE_GRADES_NAME_HEADER", "googleGradesNameHeader", "Name"),
+    googleGradesSectionHeader: envOr(
+      "GOOGLE_GRADES_SECTION_HEADER",
+      "googleGradesSectionHeader",
+      "Section"
+    ),
+    googleGradesGradeHeader: envOr(
+      "GOOGLE_GRADES_GRADE_HEADER",
+      "googleGradesGradeHeader",
+      "Calculated Grade"
+    ),
+    teachersSheetName: envOr("GOOGLE_TEACHERS_SHEET_NAME", "teachersSheetName", "Teachers"),
+    teachersIdColumn: envOr("GOOGLE_TEACHERS_ID_COLUMN", "teachersIdColumn", "A"),
+    teachersClassesColumn: envOr("GOOGLE_TEACHERS_CLASSES_COLUMN", "teachersClassesColumn", "B"),
   };
 }
 

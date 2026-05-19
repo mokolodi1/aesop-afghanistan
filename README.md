@@ -108,6 +108,8 @@ If `SECRETS_JSON` is unset and `config/secrets.json` is absent (typical minimal 
 - `GOOGLE_SHEET_NAME` - Sheet name (default: `People`)
 - `GOOGLE_ID_COLUMN` - ID column (default: `B`)
 - `GOOGLE_EMAIL_COLUMN` - Column name or index containing emails
+- `GOOGLE_GRADES_SHEET_NAME` - Tab for imported grades (default: `Import: Google Grades`). The portal matches the student’s **People** name to the **`Name`** column, shows **`Section`** as class and **`Calculated Grade`** as grade. Optional: `GOOGLE_GRADES_HEADER_ROW`, `GOOGLE_GRADES_NAME_HEADER`, `GOOGLE_GRADES_SECTION_HEADER`, `GOOGLE_GRADES_GRADE_HEADER` (use `|` for alternates).
+- `GOOGLE_TEACHERS_SHEET_NAME` - Tab listing teachers (default: `Teachers`). If the signed-in **AESOP ID** matches column **`A`** (`GOOGLE_TEACHERS_ID_COLUMN`), **Category** is **Teacher** and column **`B`** (`GOOGLE_TEACHERS_CLASSES_COLUMN`) is shown as **Teaching** (classes they teach).
 - `EMAIL_PROVIDER` - Email provider: `smtp`, `sendgrid`, `gmail`, or `gmailServiceAccount`
 - `EMAIL_FROM` - From email address
 - `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD` - SMTP settings
@@ -118,6 +120,7 @@ If `SECRETS_JSON` is unset and `config/secrets.json` is absent (typical minimal 
 - `BASE_URL` - Default base URL for magic links when `PORTAL_BASE_URL` is unset (e.g., `https://aesop-afghanistan.fly.dev` or your apex domain).
 - `PORTAL_BASE_URL` - **Recommended for `portal.*` deployments.** Full origin where students should open magic links (no trailing slash), e.g. `https://portal.aesopafghanistan.org`. The app stores the signed-in student only in **sessionStorage**, which does **not** carry between different hosts (apex vs `portal.` vs `fly.dev`). If this is unset, magic links use `BASE_URL`; verifying on one host and browsing another looks “broken” (empty Ding tools).
 - `PORTAL_EXTRA_HOSTS` - Optional comma-separated hostnames that should receive the portal SPA for `/`, `/profile`, and `/faq` (for hosts that do not start with `portal.`).
+- **Portal Ding history** (“Date &amp; time” column): the API returns UTC **`atMs`** per row; the browser formats it with **`Intl`** in **the student’s device timezone**. Plain-text timestamps from Sheets are normalized (commas stripped). Both **`M/D/YYYY H:mm:ss`** (24-hour) and **`M/D/YYYY h:mm:ss AM/PM`** are parsed as **UTC civil time**, aligned with **`dateToGoogleSheetsSerial`** when the spreadsheet’s **display time zone** is **UTC** (common): e.g. **`6:38 PM`** in column B means **18:38 UTC**, which displays as **`~2:38 PM EDT`** on Eastern devices — **not** “6:38 PM Eastern”. To make Google Sheets itself show Eastern wall-clock (e.g. **`2:38 PM`** with Eastern formatting), set **File → Settings → Time zone** on that spreadsheet to **`(GMT-05:00) Eastern Time`**. **`luxon`** remains for spreadsheet portal-note formatting when saving Ding rows.
 - `PORTAL_SPA_FALLBACK` - **Legacy.** `/profile` and `/faq` always serve the portal SPA; this variable is no longer read by the server.
 
 ### Student portal (magic links)

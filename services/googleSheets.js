@@ -2,11 +2,28 @@ const { GoogleSpreadsheet } = require("google-spreadsheet");
 const { GoogleAuth, JWT } = require("google-auth-library");
 const config = require("../config/secrets");
 const { formatGoogleSheetsOperationError } = require("../utils/errorLogging");
-const { dateToGoogleSheetsSerial, formatDingChangeTimestamp } = require("../utils/dingSheetTime");
+const { dateToGoogleSheetsSerial, sheetDatetimeCellTextToUtcMillis } = require("../utils/dingSheetTime");
 
 let doc = null;
 let initPromise = null;
 const SHEETS_SCOPE = "https://www.googleapis.com/auth/spreadsheets";
+
+// #region agent log
+function agentDebugLog(location, message, data, hypothesisId) {
+  fetch("http://127.0.0.1:7639/ingest/1051cd26-72b6-4ce7-82ae-d3b10c65d4b2", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "c2ebdd" },
+    body: JSON.stringify({
+      sessionId: "c2ebdd",
+      location,
+      message,
+      data,
+      timestamp: Date.now(),
+      hypothesisId,
+    }),
+  }).catch(() => {});
+}
+// #endregion
 
 /**
  * Build an auth client for Google Sheets.
@@ -92,10 +109,10 @@ function resolveColumnIndex(columnRef) {
   return index - 1;
 }
 
-/** Display serial datetimes like `4/27/2026 20:39:12` (still stored as a number). */
+/** Match portal Ding history: 12-hour + comma after date (stored value is still a serial number). */
 const DING_TIMESTAMP_NUMBER_FORMAT = {
   type: "DATE_TIME",
-  pattern: "m/d/yyyy HH:mm:ss",
+  pattern: "m/d/yyyy, h:mm:ss AM/PM",
 };
 
 /**
@@ -272,6 +289,10 @@ function parseSheetTimestamp(raw) {
   }
   if (typeof raw === "string") {
     const trimmed = raw.trim();
+    const utcCellMs = sheetDatetimeCellTextToUtcMillis(trimmed);
+    if (utcCellMs != null) {
+      return utcCellMs;
+    }
     if (/^\d+(\.\d+)?$/.test(trimmed)) {
       const n = Number(trimmed);
       if (Number.isFinite(n)) {
@@ -358,7 +379,7 @@ async function findLatestDingNumberById(userId) {
  * Portal: Ding change rows for one student from Ding changes (newest first).
  * @param {string} userId
  * @param {{ maxRows?: number }} [options]
- * @returns {Promise<{ displayedAt: string, dingNumber: string }[]>}
+ * @returns {Promise<{ atMs: number | null, dingNumber: string }[]>}
  */
 async function getPortalDingChangeHistory(userId, options = {}) {
   const maxRows = Math.min(Math.max(Number(options.maxRows) || 500, 1), 1000);
@@ -392,9 +413,25 @@ async function getPortalDingChangeHistory(userId, options = {}) {
       continue;
     }
 
-    const tsParsed = parseSheetTimestamp(rowData[tsColumnIndex]);
+    const rawTsCell = rowData[tsColumnIndex];
+    const tsParsed = parseSheetTimestamp(rawTsCell);
     const tsMs = tsParsed === -Infinity ? null : tsParsed;
-    collected.push({ tsMs, order: sheetOrder++, dingNumber: dingStr });
+    let rawTsSnippet = null;
+    if (rawTsCell != null && rawTsCell !== "") {
+      if (typeof rawTsCell === "number") rawTsSnippet = rawTsCell;
+      else if (typeof rawTsCell === "string") rawTsSnippet = rawTsCell.slice(0, 120);
+      else if (rawTsCell instanceof Date) rawTsSnippet = rawTsCell.toISOString();
+      else rawTsSnippet = String(rawTsCell).slice(0, 120);
+    }
+
+    collected.push({
+      tsMs,
+      order: sheetOrder++,
+      dingNumber: dingStr,
+      _dbgRawTsType: typeof rawTsCell,
+      _dbgRawTsSnippet: rawTsSnippet,
+      _dbgParsedIso: tsMs != null && Number.isFinite(tsMs) ? new Date(tsMs).toISOString() : null,
+    });
   }
 
   collected.sort((a, b) => {
@@ -410,11 +447,40 @@ async function getPortalDingChangeHistory(userId, options = {}) {
     return b.order - a.order;
   });
 
+  const sheetFmt = DING_TIMESTAMP_NUMBER_FORMAT.pattern;
+  for (let i = 0; i < Math.min(3, collected.length); i++) {
+    const e = collected[i];
+    agentDebugLog(
+      "googleSheets.js:getPortalDingChangeHistory",
+      "history_row_sample",
+      {
+        rowIdxNewestFirst: i,
+        tsColumnRef: config.googleSheets.dingTimestampColumn || "B",
+        rawTsType: e._dbgRawTsType,
+        rawTsSnippet: e._dbgRawTsSnippet,
+        atMs: e.tsMs,
+        parsedUtcIso: e._dbgParsedIso,
+        dingMaskedSuffix:
+          typeof e.dingNumber === "string" && e.dingNumber.length >= 4 ? e.dingNumber.slice(-4) : "",
+        sheetsAppliedPattern: sheetFmt,
+        runId: "post-HD-fix",
+      },
+      "H-A,B,C,D,E",
+    );
+  }
+  agentDebugLog(
+    "googleSheets.js:getPortalDingChangeHistory",
+    "history_summary",
+    {
+      matchedRows: collected.length,
+      newestUtcIso: collected[0]?._dbgParsedIso ?? null,
+      runId: "post-HD-fix",
+    },
+    "H-D",
+  );
+
   return collected.slice(0, maxRows).map((e) => ({
-    displayedAt:
-      e.tsMs != null && Number.isFinite(e.tsMs)
-        ? formatDingChangeTimestamp(new Date(e.tsMs))
-        : "—",
+    atMs: e.tsMs != null && Number.isFinite(e.tsMs) ? e.tsMs : null,
     dingNumber: e.dingNumber,
   }));
 }
@@ -422,8 +488,8 @@ async function getPortalDingChangeHistory(userId, options = {}) {
 /**
  * Append a row to the Ding changes tab: A=id, B=datetime serial, C=ding#, D=name or source label, E=note, F=phone.
  * Column D may be a fixed label (e.g. "Student portal") for self-service updates rather than a person's name.
- * Column B is a Sheets date/time serial (numeric); we apply number format `m/d/yyyy HH:mm:ss` so it
- * displays like `4/27/2026 20:39:12`. Other columns use text literals (leading ') where needed.
+ * Column B is a Sheets date/time serial (numeric); we apply `m/d/yyyy, h:mm:ss AM/PM` so it
+ * matches the portal’s 12-hour style (comma after date). Other columns use text literals (leading ') where needed.
  * Requires a header row on that sheet and spreadsheet scope for writes.
  * @param {{ userId: string, timestampAt: Date, newDingNumber: string, displayName: string, portalNote: string, phone: string }} row
  * @returns {Promise<void>}
@@ -442,6 +508,20 @@ async function appendDingChangeRow(row) {
   if (!Number.isFinite(tsSerial)) {
     throw new Error("Invalid timestampAt for ding change row.");
   }
+
+  // #region agent log
+  agentDebugLog(
+    "googleSheets.js:appendDingChangeRow",
+    "write_ts_serial",
+    {
+      timestampAtIso: row.timestampAt instanceof Date ? row.timestampAt.toISOString() : null,
+      tsSerial,
+      sheetsAppliedPattern: DING_TIMESTAMP_NUMBER_FORMAT.pattern,
+      runId: "post-HD-fix",
+    },
+    "H-B,D",
+  );
+  // #endregion
 
   const values = [
     googleSheetPlainText(row.userId),
@@ -774,6 +854,179 @@ async function syncAllPeoplePastDingColumns() {
 }
 
 /**
+ * @param {string} s
+ * @returns {string}
+ */
+function normalizePortalPersonName(s) {
+  return String(s ?? "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .toLowerCase();
+}
+
+/**
+ * @param {string} s
+ * @returns {string}
+ */
+function normalizeGradeSheetHeaderLabel(s) {
+  return String(s ?? "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .toLowerCase();
+}
+
+/**
+ * @param {string|undefined|null} primary
+ * @param {string} fallbackCsv
+ * @returns {string[]}
+ */
+function splitGradeHeaderCandidates(primary, fallbackCsv) {
+  const raw =
+    primary != null && String(primary).trim() !== "" ? String(primary).trim() : fallbackCsv;
+  return String(raw)
+    .split(/[|,]/)
+    .map((x) => x.trim())
+    .filter(Boolean);
+}
+
+/**
+ * @param {string[]} headerValues
+ * @param {string[]} candidates
+ * @returns {number}
+ */
+function findGradeSheetColumnIndex(headerValues, candidates) {
+  if (!headerValues.length || !candidates.length) {
+    return -1;
+  }
+  const wanted = new Set(candidates.map(normalizeGradeSheetHeaderLabel));
+  for (let i = 0; i < headerValues.length; i++) {
+    if (wanted.has(normalizeGradeSheetHeaderLabel(headerValues[i]))) {
+      return i;
+    }
+  }
+  return -1;
+}
+
+/**
+ * Class (section) + calculated grade: match People display name to **Import: Google Grades** `Name` column.
+ * @param {string} studentName
+ * @returns {Promise<{ classSection: string, calculatedGrade: string }>}
+ */
+async function getPortalClassGradeByStudentName(studentName) {
+  const plain = typeof studentName === "string" ? studentName.trim() : "";
+  const want = normalizePortalPersonName(plain);
+  if (!want) {
+    return { classSection: "", calculatedGrade: "" };
+  }
+
+  try {
+    const sheet = await initGoogleSheets();
+    const gs = config.googleSheets;
+    const gradesTitle = gs.googleGradesSheetName || "Import: Google Grades";
+    const worksheet = sheet.sheetsByTitle[gradesTitle];
+    if (!worksheet) {
+      console.warn(`getPortalClassGradeByStudentName: sheet "${gradesTitle}" not found.`);
+      return { classSection: "", calculatedGrade: "" };
+    }
+
+    const headerRowNum = Math.max(1, parseInt(String(gs.googleGradesHeaderRow || "1"), 10) || 1);
+    await worksheet.loadHeaderRow(headerRowNum);
+    const headerValues = worksheet.headerValues;
+    if (!Array.isArray(headerValues) || headerValues.length === 0) {
+      console.warn("getPortalClassGradeByStudentName: empty header row.");
+      return { classSection: "", calculatedGrade: "" };
+    }
+
+    const nameCandidates = splitGradeHeaderCandidates(gs.googleGradesNameHeader, "Name");
+    const sectionCandidates = splitGradeHeaderCandidates(gs.googleGradesSectionHeader, "Section");
+    const gradeCandidates = splitGradeHeaderCandidates(
+      gs.googleGradesGradeHeader,
+      "Calculated Grade"
+    );
+
+    const nameIdx = findGradeSheetColumnIndex(headerValues, nameCandidates);
+    const sectionIdx = findGradeSheetColumnIndex(headerValues, sectionCandidates);
+    const gradeIdx = findGradeSheetColumnIndex(headerValues, gradeCandidates);
+
+    if (nameIdx === -1 || sectionIdx === -1 || gradeIdx === -1) {
+      console.warn("getPortalClassGradeByStudentName: could not map columns.", {
+        nameIdx,
+        sectionIdx,
+        gradeIdx,
+        headersPreview: headerValues.slice(0, 24),
+      });
+      return { classSection: "", calculatedGrade: "" };
+    }
+
+    const rows = await worksheet.getRows();
+    for (const row of rows) {
+      const rowData = Array.isArray(row._rawData) ? row._rawData : [];
+      const cellName = normalizePortalPersonName(rowData[nameIdx]);
+      if (cellName !== want) {
+        continue;
+      }
+      return {
+        classSection: String(rowData[sectionIdx] ?? "").trim(),
+        calculatedGrade: String(rowData[gradeIdx] ?? "").trim(),
+      };
+    }
+
+    return { classSection: "", calculatedGrade: "" };
+  } catch (error) {
+    const formattedError = formatGoogleSheetsOperationError(error);
+    console.warn("getPortalClassGradeByStudentName:", formattedError);
+    return { classSection: "", calculatedGrade: "" };
+  }
+}
+
+/**
+ * **Teachers** tab: ID in column A (default), classes currently teaching in column B (default).
+ * Match ID case-insensitively to signed-in AESOP ID.
+ * @param {string} userId
+ * @returns {Promise<{ isTeacher: boolean, teacherClasses: string }>}
+ */
+async function getPortalTeacherByUserId(userId) {
+  const normalized = typeof userId === "string" ? userId.trim().toLowerCase() : "";
+  if (!normalized) {
+    return { isTeacher: false, teacherClasses: "" };
+  }
+
+  try {
+    const sheet = await initGoogleSheets();
+    const gs = config.googleSheets;
+    const tabTitle = gs.teachersSheetName || "Teachers";
+    const worksheet = sheet.sheetsByTitle[tabTitle];
+    if (!worksheet) {
+      return { isTeacher: false, teacherClasses: "" };
+    }
+
+    const idIdx = resolveColumnIndex(gs.teachersIdColumn || "A");
+    const classesIdx = resolveColumnIndex(gs.teachersClassesColumn || "B");
+
+    const rows = await worksheet.getRows();
+    for (const row of rows) {
+      const rowData = Array.isArray(row._rawData) ? row._rawData : [];
+      const rowId = String(rowData[idIdx] ?? "")
+        .trim()
+        .toLowerCase();
+      if (rowId !== normalized) {
+        continue;
+      }
+      return {
+        isTeacher: true,
+        teacherClasses: String(rowData[classesIdx] ?? "").trim(),
+      };
+    }
+
+    return { isTeacher: false, teacherClasses: "" };
+  } catch (error) {
+    const formattedError = formatGoogleSheetsOperationError(error);
+    console.warn("getPortalTeacherByUserId:", formattedError);
+    return { isTeacher: false, teacherClasses: "" };
+  }
+}
+
+/**
  * Get user data from Google Sheet by email
  * @param {string} email - Email address
  * @returns {Promise<Object|null>} User data or null if not found
@@ -819,6 +1072,8 @@ module.exports = {
   findProfileByEmail,
   findProfileById,
   getPortalDingChangeHistory,
+  getPortalClassGradeByStudentName,
+  getPortalTeacherByUserId,
   getUserData,
   initGoogleSheets,
   syncAllPeoplePastDingColumns,

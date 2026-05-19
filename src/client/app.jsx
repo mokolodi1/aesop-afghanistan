@@ -68,9 +68,97 @@ const PORTAL_SESSION_STORAGE_KEYS = [
   'studentPortalNewDingNumber',
   'studentPortalUserId',
   'studentPortalPhone',
+  'studentPortalClass',
+  'studentPortalGrade',
+  'studentPortalIsTeacher',
+  'studentPortalTeacherClasses',
 ];
 
 const PORTAL_IDLE_LOGOUT_MS = 10 * 60 * 1000;
+
+/** Dedupe concurrent class/grade fetches (header + hub both mount). */
+let portalClassGradeInFlight = null;
+
+async function loadPortalClassGradeFromApi() {
+  if (typeof window === 'undefined' || !isPortalSessionCompleteSync()) {
+    return Promise.resolve({
+      classSection: '',
+      calculatedGrade: '',
+      isTeacher: false,
+      teacherClasses: '',
+    });
+  }
+  if (portalClassGradeInFlight) {
+    return portalClassGradeInFlight;
+  }
+  portalClassGradeInFlight = (async () => {
+    try {
+      const userId = readSessionField('studentPortalUserId');
+      const email = readSessionField('studentPortalEmail');
+      if (!userId.trim() || !email.trim()) {
+        return { classSection: '', calculatedGrade: '', isTeacher: false, teacherClasses: '' };
+      }
+      const response = await fetch('/api/portal-class-grade', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId, email }),
+      });
+      const data = await response.json();
+      if (!data.success) {
+        return { classSection: '', calculatedGrade: '', isTeacher: false, teacherClasses: '' };
+      }
+      const classSection = typeof data.classSection === 'string' ? data.classSection.trim() : '';
+      const calculatedGrade =
+        typeof data.calculatedGrade === 'string' ? data.calculatedGrade.trim() : '';
+      const isTeacher = data.isTeacher === true;
+      const teacherClasses =
+        typeof data.teacherClasses === 'string' ? data.teacherClasses.trim() : '';
+      sessionStorage.setItem('studentPortalClass', classSection);
+      sessionStorage.setItem('studentPortalGrade', calculatedGrade);
+      if (isTeacher) {
+        sessionStorage.setItem('studentPortalIsTeacher', '1');
+      } else {
+        sessionStorage.removeItem('studentPortalIsTeacher');
+      }
+      if (teacherClasses) {
+        sessionStorage.setItem('studentPortalTeacherClasses', teacherClasses);
+      } else {
+        sessionStorage.removeItem('studentPortalTeacherClasses');
+      }
+      return { classSection, calculatedGrade, isTeacher, teacherClasses };
+    } catch {
+      return { classSection: '', calculatedGrade: '', isTeacher: false, teacherClasses: '' };
+    } finally {
+      portalClassGradeInFlight = null;
+    }
+  })();
+  return portalClassGradeInFlight;
+}
+
+function usePortalClassGrade() {
+  const [studentClass, setStudentClass] = useState(() => readSessionField('studentPortalClass'));
+  const [studentGrade, setStudentGrade] = useState(() => readSessionField('studentPortalGrade'));
+  const [isTeacher, setIsTeacher] = useState(() => readSessionField('studentPortalIsTeacher') === '1');
+  const [teacherClasses, setTeacherClasses] = useState(() => readSessionField('studentPortalTeacherClasses'));
+
+  useEffect(() => {
+    let cancelled = false;
+    loadPortalClassGradeFromApi().then(
+      ({ classSection, calculatedGrade, isTeacher: tchr, teacherClasses: teach }) => {
+        if (cancelled) return;
+        setStudentClass(classSection);
+        setStudentGrade(calculatedGrade);
+        setIsTeacher(tchr);
+        setTeacherClasses(teach);
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return { studentClass, studentGrade, isTeacher, teacherClasses };
+}
 
 function clearPortalSession() {
   if (typeof sessionStorage === 'undefined') return;
@@ -86,6 +174,36 @@ function getPortalUrlIntent() {
   if (typeof window === 'undefined') return '';
   const raw = new URLSearchParams(window.location.search).get('intent');
   return raw === 'profile' || raw === 'faq' ? raw : '';
+}
+
+/** Ding history instant from the sheet (UTC ms); formatted in this device’s local timezone */
+function formatPortalDingHistoryAt(atMs) {
+  let ms = atMs;
+  if (typeof ms === 'string') {
+    const n = Number(ms);
+    ms = Number.isFinite(n) ? n : NaN;
+  }
+  if (ms == null || !Number.isFinite(ms)) return '—';
+  try {
+    return new Intl.DateTimeFormat('en-US', {
+      calendar: 'gregory',
+      month: 'numeric',
+      day: 'numeric',
+      year: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: true,
+      hourCycle: 'h12',
+      timeZoneName: 'short',
+    }).format(new Date(ms));
+  } catch {
+    try {
+      return new Date(ms).toLocaleString();
+    } catch {
+      return '—';
+    }
+  }
 }
 
 function MagicLinkRequestForm({ inputId, submitLabel }) {
@@ -239,6 +357,12 @@ function VerifyMagicLinkApp() {
             typeof data.newDingNumber === 'string' ? data.newDingNumber.trim() : '';
           const userIdFromApi = typeof data.userId === 'string' ? data.userId.trim() : '';
           const phoneFromApi = typeof data.phone === 'string' ? data.phone.trim() : '';
+          const classFromApi = typeof data.classSection === 'string' ? data.classSection.trim() : '';
+          const gradeFromApi =
+            typeof data.calculatedGrade === 'string' ? data.calculatedGrade.trim() : '';
+          const isTeacherFromApi = data.isTeacher === true;
+          const teachingFromApi =
+            typeof data.teacherClasses === 'string' ? data.teacherClasses.trim() : '';
           if (nameFromApi) {
             sessionStorage.setItem('studentPortalName', nameFromApi);
           } else {
@@ -263,6 +387,26 @@ function VerifyMagicLinkApp() {
             sessionStorage.setItem('studentPortalPhone', phoneFromApi);
           } else {
             sessionStorage.removeItem('studentPortalPhone');
+          }
+          if (classFromApi) {
+            sessionStorage.setItem('studentPortalClass', classFromApi);
+          } else {
+            sessionStorage.removeItem('studentPortalClass');
+          }
+          if (gradeFromApi) {
+            sessionStorage.setItem('studentPortalGrade', gradeFromApi);
+          } else {
+            sessionStorage.removeItem('studentPortalGrade');
+          }
+          if (isTeacherFromApi) {
+            sessionStorage.setItem('studentPortalIsTeacher', '1');
+          } else {
+            sessionStorage.removeItem('studentPortalIsTeacher');
+          }
+          if (teachingFromApi) {
+            sessionStorage.setItem('studentPortalTeacherClasses', teachingFromApi);
+          } else {
+            sessionStorage.removeItem('studentPortalTeacherClasses');
           }
           window.setTimeout(() => {
             const hub =
@@ -299,9 +443,19 @@ function PortalLayout({ children }) {
   const fullName = readSessionField('studentPortalName').trim();
   const aesopId = readSessionField('studentPortalUserId').trim();
   const headerEmail = readSessionField('studentPortalEmail').trim();
+  const { studentClass, studentGrade, isTeacher, teacherClasses } = usePortalClassGrade();
 
   const dash = '—';
   const fullNameDisplay = fullName || dash;
+  const classDisplay = studentClass.trim() || dash;
+  const gradeDisplay = studentGrade.trim() || dash;
+  const teachingDisplay = teacherClasses.trim() || dash;
+  const hasStudentCategory =
+    !isTeacher &&
+    aesopId.trim() !== '' &&
+    studentClass.trim() !== '' &&
+    studentGrade.trim() !== '';
+  const categoryDisplay = isTeacher ? 'Teacher' : hasStudentCategory ? 'Student' : dash;
 
   return (
     <div className="portal-page">
@@ -349,6 +503,14 @@ function PortalLayout({ children }) {
                   <dd className="portal-header-id-value portal-header-id-mono">{aesopId || dash}</dd>
                   <dt className="portal-header-id-label">Email</dt>
                   <dd className="portal-header-id-value portal-header-id-email">{headerEmail || dash}</dd>
+                  <dt className="portal-header-id-label">Class</dt>
+                  <dd className="portal-header-id-value">{classDisplay}</dd>
+                  <dt className="portal-header-id-label">Grade</dt>
+                  <dd className="portal-header-id-value">{gradeDisplay}</dd>
+                  <dt className="portal-header-id-label">Teaching</dt>
+                  <dd className="portal-header-id-value">{teachingDisplay}</dd>
+                  <dt className="portal-header-id-label">Category</dt>
+                  <dd className="portal-header-id-value">{categoryDisplay}</dd>
                 </dl>
                 <button type="button" className="portal-header-logout" onClick={() => logOutPortalClient()}>
                   Log off
@@ -375,9 +537,9 @@ function PortalLayout({ children }) {
 function PortalSectionLinks({ current }) {
   const hubHref = portalHubHref();
   return (
-    <nav className="portal-section-links" aria-label="Portal sections">
+    <nav className="portal-section-links" aria-label="Portal navigation">
       <a href={hubHref} className={current === 'hub' ? 'is-current' : undefined}>
-        Home
+        Profile
       </a>
       <span className="portal-section-links-sep" aria-hidden="true">
         ·
@@ -389,7 +551,7 @@ function PortalSectionLinks({ current }) {
         ·
       </span>
       <a href="/faq" className={current === 'faq' ? 'is-current' : undefined}>
-        FAQs
+        FAQ
       </a>
     </nav>
   );
@@ -439,8 +601,16 @@ function PortalIntentNotice({ intent }) {
 
 function PortalHubPage() {
   const { studentName, studentUserId, studentEmail, studentPhone, newDingNumber } = usePortalStudentRecord();
+  const { studentClass, studentGrade, isTeacher, teacherClasses } = usePortalClassGrade();
   const signedIn = isPortalSessionCompleteSync();
+  const hasStudentCategory =
+    !isTeacher &&
+    studentUserId.trim() !== '' &&
+    studentClass.trim() !== '' &&
+    studentGrade.trim() !== '';
   const intent = typeof window !== 'undefined' ? getPortalUrlIntent() : '';
+  const [aboutPortalOpenSignedIn, setAboutPortalOpenSignedIn] = useState(false);
+  const [aboutPortalOpenSignout, setAboutPortalOpenSignout] = useState(false);
 
   useEffect(() => {
     if (!signedIn && intent) {
@@ -453,6 +623,7 @@ function PortalHubPage() {
       <div className="portal-card portal-content portal-hub-card">
         {signedIn ? (
           <>
+            <PortalSectionLinks current="hub" />
             <h2 className="portal-welcome">{`Welcome, ${studentName || 'Student'}!`}</h2>
             <dl className="portal-hub-meta portal-hub-meta-panel" aria-label="Your account">
               <div className="portal-hub-meta-row">
@@ -471,6 +642,36 @@ function PortalHubPage() {
                   {newDingNumber.trim() ? newDingNumber.trim() : 'Not set yet'}
                 </dd>
               </div>
+              <div className="portal-hub-meta-row">
+                <dt className="portal-hub-meta-label">Class</dt>
+                <dd className={`portal-hub-meta-value${studentClass.trim() ? '' : ' portal-hub-meta-empty'}`}>
+                  {studentClass.trim() || '—'}
+                </dd>
+              </div>
+              <div className="portal-hub-meta-row">
+                <dt className="portal-hub-meta-label">Grade</dt>
+                <dd className={`portal-hub-meta-value${studentGrade.trim() ? '' : ' portal-hub-meta-empty'}`}>
+                  {studentGrade.trim() || '—'}
+                </dd>
+              </div>
+              <div className="portal-hub-meta-row">
+                <dt className="portal-hub-meta-label">Teaching</dt>
+                <dd
+                  className={`portal-hub-meta-value${teacherClasses.trim() ? '' : ' portal-hub-meta-empty'}`}
+                >
+                  {teacherClasses.trim() || '—'}
+                </dd>
+              </div>
+              <div className="portal-hub-meta-row">
+                <dt className="portal-hub-meta-label">Category</dt>
+                <dd
+                  className={`portal-hub-meta-value${
+                    isTeacher || hasStudentCategory ? '' : ' portal-hub-meta-empty'
+                  }`}
+                >
+                  {isTeacher ? 'Teacher' : hasStudentCategory ? 'Student' : '—'}
+                </dd>
+              </div>
               {studentPhone ? (
                 <div className="portal-hub-meta-row">
                   <dt className="portal-hub-meta-label">Phone on file</dt>
@@ -478,69 +679,40 @@ function PortalHubPage() {
                 </div>
               ) : null}
             </dl>
-            <section className="portal-hub-purpose" aria-labelledby="portal-hub-purpose-heading">
-              <h3 id="portal-hub-purpose-heading" className="portal-hub-purpose-heading">
-                About this portal
-              </h3>
-              <p className="portal-hub-purpose-text">
-                This secure student portal is where you sign in with a magic link—there is no password to remember on this
-                site. Use it to update your Afghanistan <strong>Ding</strong> phone number when it changes (with
-                confirmation), review past Ding updates, request help if you need a non-Afghan number for Ding, and read{' '}
-                <a href="/faq">frequently asked questions</a>. Your AESOP ID, email, and Ding number above summarize what we
-                have on file—open <a href="/profile">Edit Ding</a> to change your Ding number.
-              </p>
+            <section className="portal-hub-purpose portal-hub-purpose-collapsible" aria-label="About this portal">
+              <button
+                type="button"
+                className="portal-hub-purpose-toggle"
+                id="portal-hub-purpose-heading"
+                aria-expanded={aboutPortalOpenSignedIn}
+                aria-controls="portal-hub-purpose-signedin-panel"
+                onClick={() => setAboutPortalOpenSignedIn((open) => !open)}
+              >
+                <span className="portal-hub-purpose-heading">About this portal</span>
+                <span className="portal-hub-purpose-chevron" aria-hidden="true">
+                  {aboutPortalOpenSignedIn ? '▼' : '▶'}
+                </span>
+              </button>
+              <div
+                id="portal-hub-purpose-signedin-panel"
+                className="portal-hub-purpose-panel"
+                hidden={!aboutPortalOpenSignedIn}
+              >
+                <p className="portal-hub-purpose-text">
+                  This secure student portal is where you sign in with a magic link—there is no password to remember on this
+                  site. Use it to update your Afghanistan <strong>Ding</strong> phone number when it changes (with
+                  confirmation), review past Ding updates, request help if you need a non-Afghan number for Ding, and read{' '}
+                  <a href="/faq">frequently asked questions</a>. Your AESOP ID, email, and Ding number above summarize what
+                  we have on file—open <a href="/profile">Edit Ding</a> to change your Ding number.
+                </p>
+              </div>
             </section>
-            <p className="portal-hub-lead">Quick links:</p>
-            <ul className="portal-hub-list">
-              <li>
-                <a className="portal-hub-link" href="/profile">
-                  <span className="portal-hub-link-title">Edit Ding</span>
-                  <span className="portal-hub-link-desc">
-                    Update your Afghanistan Ding number, view history, or contact us for help.
-                  </span>
-                </a>
-              </li>
-              <li>
-                <a className="portal-hub-link" href="/faq">
-                  <span className="portal-hub-link-title">FAQs</span>
-                  <span className="portal-hub-link-desc">Frequently asked questions (content coming soon).</span>
-                </a>
-              </li>
-              <li>
-                <a
-                  className="portal-hub-link portal-hub-link-external"
-                  href="https://aesopafghanistan.org/"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  <span className="portal-hub-link-title">AESOP Afghanistan website</span>
-                  <span className="portal-hub-link-desc">Visit the main organization site.</span>
-                </a>
-              </li>
-            </ul>
           </>
         ) : (
           <>
             <PortalIntentNotice intent={intent} />
-            <h2 className="portal-welcome portal-welcome-signout">Student portal</h2>
-            <section className="portal-hub-purpose" aria-labelledby="portal-hub-purpose-signout-heading">
-              <h3 id="portal-hub-purpose-signout-heading" className="portal-hub-purpose-heading">
-                About this portal
-              </h3>
-              <p className="portal-hub-purpose-text">
-                This secure area is for AESOP students. After you sign in with a magic link, you can manage your
-                Afghanistan <strong>Ding</strong> number and read portal <a href="/faq">FAQs</a>
-                —without sharing a password on this site. <strong>Edit Ding</strong> — update your Afghanistan Ding number
-                when it changes, with confirmation. <strong>History &amp; help</strong> — see past Ding updates or contact us
-                if you use a non-Afghan number. <strong>FAQs</strong> — answers for common questions (we&apos;re adding
-                more). Open <a href="/faq">FAQs</a> anytime without signing in. <strong>Edit Ding</strong> needs a magic
-                link. Not connected yet?{' '}
-                <a href="#portal-magic-link-form" className="portal-intent-inline-link">
-                  Request a magic link
-                </a>{' '}
-                with your AESOP ID.
-              </p>
-            </section>
+            <PortalSectionLinks current="hub" />
+            <h2 className="portal-welcome portal-welcome-signout">Student Portal</h2>
             <div id="portal-magic-link-form" className="portal-signin-panel">
               <h3 className="portal-signin-heading">Connect with your AESOP ID</h3>
               <p className="portal-signin-lead">
@@ -549,6 +721,39 @@ function PortalHubPage() {
               </p>
               <MagicLinkRequestForm inputId="portalMagicUserId" submitLabel="Email me a magic link" />
             </div>
+            <section className="portal-hub-purpose portal-hub-purpose-collapsible" aria-label="About this portal">
+              <button
+                type="button"
+                className="portal-hub-purpose-toggle"
+                id="portal-hub-purpose-signout-toggle"
+                aria-expanded={aboutPortalOpenSignout}
+                aria-controls="portal-hub-purpose-signout-panel"
+                onClick={() => setAboutPortalOpenSignout((open) => !open)}
+              >
+                <span className="portal-hub-purpose-heading">About this portal</span>
+                <span className="portal-hub-purpose-chevron" aria-hidden="true">
+                  {aboutPortalOpenSignout ? '▼' : '▶'}
+                </span>
+              </button>
+              <div
+                id="portal-hub-purpose-signout-panel"
+                className="portal-hub-purpose-panel"
+                hidden={!aboutPortalOpenSignout}
+              >
+                <p className="portal-hub-purpose-text">
+                  The AESOP Student Portal helps you update your Afghanistan <strong>Ding</strong> number, see Ding number
+                  history after you sign in, and read <a href="/faq">FAQs</a>—using a magic link, not a password on this site.
+                </p>
+                <p className="portal-hub-purpose-text">
+                  Portal sections: <a href={portalHubHref()}>Profile</a>, <a href="/profile">Edit Ding</a>, and{' '}
+                  <a href="/faq">FAQ</a>. Not connected?{' '}
+                  <a href="#portal-magic-link-form" className="portal-intent-inline-link">
+                    Request a magic link
+                  </a>{' '}
+                  above with your AESOP ID.
+                </p>
+              </div>
+            </section>
             <p className="portal-hub-footnote">
               Prefer the main site?{' '}
               <a href="https://aesopafghanistan.org/">aesopafghanistan.org</a>
@@ -906,7 +1111,8 @@ function PortalProfilePage() {
           <div className="portal-session-banner" role="status">
             <p className="portal-session-banner-title">Session incomplete</p>
             <p className="portal-session-banner-text">
-              Go back to <a href="/">Student portal home</a> and connect with your AESOP ID so we can load your profile.
+              Go back to{' '}
+              <a href={portalHubHref()}>Profile</a> and connect with your AESOP ID so we can load your account.
             </p>
           </div>
         ) : null}
@@ -1148,14 +1354,14 @@ function PortalProfilePage() {
                           <table className="portal-ding-history-table">
                             <thead>
                               <tr>
-                                <th scope="col">Date &amp; time</th>
+                                <th scope="col">Date &amp; time (your device)</th>
                                 <th scope="col">Ding number</th>
                               </tr>
                             </thead>
                             <tbody>
                               {dingHistoryEntries.map((row, i) => (
-                                <tr key={`${row.displayedAt}-${row.dingNumber}-${i}`}>
-                                  <td>{row.displayedAt}</td>
+                                <tr key={`${row.atMs}-${row.dingNumber}-${i}`}>
+                                  <td>{formatPortalDingHistoryAt(row.atMs)}</td>
                                   <td className="portal-ding-history-num">{row.dingNumber}</td>
                                 </tr>
                               ))}

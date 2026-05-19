@@ -3,7 +3,16 @@ const path = require('path');
 const config = require('./config/secrets');
 const { checkIdAndSendMagicLink } = require('./services/auth');
 const { verifyMagicLink } = require('./services/magicLink');
-const { findProfileByEmail, findProfileById, findLatestDingNumberById, appendDingChangeRow, syncPastDingNumbersToPeople, getPortalDingChangeHistory } = require('./services/googleSheets');
+const {
+  findProfileByEmail,
+  findProfileById,
+  findLatestDingNumberById,
+  appendDingChangeRow,
+  syncPastDingNumbersToPeople,
+  getPortalDingChangeHistory,
+  getPortalClassGradeByStudentName,
+  getPortalTeacherByUserId,
+} = require('./services/googleSheets');
 const {
   sanitizeEmail,
   isValidEmail,
@@ -210,6 +219,22 @@ app.post('/api/verify-magic-link', verifyRateLimiter, async (req, res) => {
         }
       }
 
+      let classSection = '';
+      let calculatedGrade = '';
+      if (studentName.trim()) {
+        const cg = await getPortalClassGradeByStudentName(studentName);
+        classSection = cg.classSection;
+        calculatedGrade = cg.calculatedGrade;
+      }
+
+      let isTeacher = false;
+      let teacherClasses = '';
+      if (studentUserId) {
+        const t = await getPortalTeacherByUserId(studentUserId);
+        isTeacher = t.isTeacher;
+        teacherClasses = t.teacherClasses;
+      }
+
       res.json({
         success: true,
         email: emailFromSheet,
@@ -217,6 +242,10 @@ app.post('/api/verify-magic-link', verifyRateLimiter, async (req, res) => {
         phone: studentPhone,
         userId: studentUserId,
         newDingNumber,
+        classSection,
+        calculatedGrade,
+        isTeacher,
+        teacherClasses,
         message: 'Magic link verified successfully',
       });
     } else {
@@ -235,6 +264,8 @@ const dingUpdateRateLimiter = createRateLimiter({ windowMs: 15 * 60 * 1000, max:
 const portalDingHelpRateLimiter = createRateLimiter({ windowMs: 15 * 60 * 1000, max: 8 });
 
 const portalDingHistoryRateLimiter = createRateLimiter({ windowMs: 15 * 60 * 1000, max: 40 });
+
+const portalClassGradeRateLimiter = createRateLimiter({ windowMs: 15 * 60 * 1000, max: 40 });
 
 app.post('/api/update-ding-number', dingUpdateRateLimiter, async (req, res) => {
   try {
@@ -437,6 +468,50 @@ app.post('/api/portal-ding-history', portalDingHistoryRateLimiter, async (req, r
   } catch (error) {
     console.error('Error loading portal Ding history:', formatErrorForLog(error));
     res.status(500).json({ error: 'Could not load Ding history. Please try again later.' });
+  }
+});
+
+app.post('/api/portal-class-grade', portalClassGradeRateLimiter, async (req, res) => {
+  try {
+    let { userId, email } = req.body;
+
+    if (!userId || typeof userId !== 'string' || !email || typeof email !== 'string') {
+      return res.status(400).json({ error: 'ID and email are required.' });
+    }
+
+    userId = sanitizeIdentifier(userId);
+    const emailSan = sanitizeEmail(email);
+    if (!userId || !emailSan) {
+      return res.status(400).json({ error: 'Invalid ID or email.' });
+    }
+
+    const profile = await findProfileById(userId);
+    if (!profile) {
+      return res
+        .status(403)
+        .json({ error: 'Unable to load class. Please sign in again from the magic link.' });
+    }
+
+    if (sanitizeEmail(profile.email) !== emailSan) {
+      return res
+        .status(403)
+        .json({ error: 'Unable to load class. Please sign in again from the magic link.' });
+    }
+
+    const studentName = typeof profile.name === 'string' ? profile.name : '';
+    const { classSection, calculatedGrade } = await getPortalClassGradeByStudentName(studentName);
+    const teacherInfo = await getPortalTeacherByUserId(userId);
+
+    res.json({
+      success: true,
+      classSection,
+      calculatedGrade,
+      isTeacher: teacherInfo.isTeacher,
+      teacherClasses: teacherInfo.teacherClasses,
+    });
+  } catch (error) {
+    console.error('Error loading portal class/grade:', formatErrorForLog(error));
+    res.status(500).json({ error: 'Could not load class or grade. Please try again later.' });
   }
 });
 
