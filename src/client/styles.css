@@ -988,6 +988,102 @@ button:disabled {
   font-weight: 500;
 }
 
+.portal-roster {
+  margin-top: 22px;
+}
+
+.portal-roster-heading {
+  margin: 0 0 12px;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--aesop-muted);
+}
+
+.portal-roster-status {
+  margin: 8px 0;
+  font-size: 14px;
+  color: var(--aesop-muted);
+}
+
+.portal-roster-status--error {
+  color: #b3261e;
+}
+
+.portal-roster-class {
+  margin-bottom: 18px;
+  padding: 14px 16px;
+  border: 1px solid var(--aesop-line);
+  border-radius: var(--aesop-radius-md);
+  background: var(--aesop-warm-tint);
+}
+
+.portal-roster-class:last-child {
+  margin-bottom: 0;
+}
+
+.portal-roster-class-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px 12px;
+  margin-bottom: 10px;
+}
+
+.portal-roster-class-name {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--aesop-ink);
+}
+
+.portal-roster-class-count {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--aesop-muted);
+}
+
+.portal-roster-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.portal-roster-table th {
+  text-align: left;
+  padding: 8px 10px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--aesop-muted);
+  border-bottom: 1px solid var(--aesop-line);
+}
+
+.portal-roster-table td {
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--aesop-line);
+  color: var(--aesop-ink);
+  vertical-align: top;
+  word-break: break-word;
+}
+
+.portal-roster-table tr:last-child td {
+  border-bottom: none;
+}
+
+.portal-roster-email {
+  color: var(--aesop-muted);
+}
+
+.portal-roster-grade {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
 .portal-faq-card .faq-kicker {
   margin-top: 4px;
 }
@@ -1469,4 +1565,45 @@ button:disabled {
     width: 100%;
     text-align: left;
   }
+}
+
+/*
+ * Role badge — adapted from the AESOP Dashboard's RoleNav pill, restyled with the
+ * portal's palette. Teacher uses the AESOP teal tint; Student uses a calm blue
+ * tint echoing the Dashboard's blue role pill.
+ */
+.portal-role-badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 2px 10px;
+  font-family:
+    'Space Grotesk',
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    sans-serif;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  line-height: 1.6;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.portal-role-badge--teacher {
+  background: var(--aesop-sky-tint);
+  color: var(--aesop-teal-dark);
+  border: 1px solid hsla(11.73, 82.49%, 57.45%, 0.28);
+}
+
+.portal-role-badge--student {
+  background: #e8f0fe;
+  color: #1a56b8;
+  border: 1px solid rgba(26, 86, 184, 0.22);
+}
+
+.portal-welcome .portal-role-badge.portal-welcome-role {
+  margin-left: 10px;
+  transform: translateY(-2px);
 }

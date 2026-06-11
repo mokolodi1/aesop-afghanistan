@@ -160,6 +160,114 @@ function usePortalClassGrade() {
   return { studentClass, studentGrade, isTeacher, teacherClasses };
 }
 
+/**
+ * Fetch a teacher's live per-class roster (students + grades). Only runs when
+ * `isTeacher` is true and a portal session exists. Returns loading/error state
+ * so the hub can render placeholders.
+ */
+function useTeacherRoster(isTeacher) {
+  const [state, setState] = useState({ status: 'idle', classes: [], error: '' });
+
+  useEffect(() => {
+    if (!isTeacher || !isPortalSessionCompleteSync()) {
+      setState({ status: 'idle', classes: [], error: '' });
+      return undefined;
+    }
+    let cancelled = false;
+    setState({ status: 'loading', classes: [], error: '' });
+    (async () => {
+      try {
+        const userId = readSessionField('studentPortalUserId');
+        const email = readSessionField('studentPortalEmail');
+        const response = await fetch('/api/portal-teacher-roster', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId, email }),
+        });
+        const data = await response.json();
+        if (cancelled) return;
+        if (!response.ok || !data.success) {
+          setState({
+            status: 'error',
+            classes: [],
+            error: (data && data.error) || 'Could not load your class roster.',
+          });
+          return;
+        }
+        setState({ status: 'ready', classes: Array.isArray(data.classes) ? data.classes : [], error: '' });
+      } catch {
+        if (!cancelled) {
+          setState({ status: 'error', classes: [], error: 'Could not load your class roster.' });
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isTeacher]);
+
+  return state;
+}
+
+function PortalTeacherRoster({ isTeacher }) {
+  const { status, classes, error } = useTeacherRoster(isTeacher);
+
+  if (!isTeacher) {
+    return null;
+  }
+
+  return (
+    <section className="portal-roster" aria-label="Your classes">
+      <h3 className="portal-roster-heading">Your classes</h3>
+      {status === 'loading' ? (
+        <p className="portal-roster-status">Loading your roster…</p>
+      ) : null}
+      {status === 'error' ? (
+        <p className="portal-roster-status portal-roster-status--error" role="alert">
+          {error}
+        </p>
+      ) : null}
+      {status === 'ready' && classes.length === 0 ? (
+        <p className="portal-roster-status">No active classes found for your account.</p>
+      ) : null}
+      {status === 'ready'
+        ? classes.map((cls) => (
+            <div className="portal-roster-class" key={cls.label}>
+              <div className="portal-roster-class-head">
+                <span className="portal-roster-class-name">{cls.label}</span>
+                <span className="portal-roster-class-count">
+                  {cls.students.length} {cls.students.length === 1 ? 'student' : 'students'}
+                </span>
+              </div>
+              {cls.students.length > 0 ? (
+                <table className="portal-roster-table">
+                  <thead>
+                    <tr>
+                      <th scope="col">Name</th>
+                      <th scope="col">Email</th>
+                      <th scope="col">Grade</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {cls.students.map((s) => (
+                      <tr key={s.email}>
+                        <td>{s.name || '—'}</td>
+                        <td className="portal-roster-email">{s.email}</td>
+                        <td className="portal-roster-grade">{s.grade || '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : (
+                <p className="portal-roster-status">No students enrolled yet.</p>
+              )}
+            </div>
+          ))
+        : null}
+    </section>
+  );
+}
+
 function clearPortalSession() {
   if (typeof sessionStorage === 'undefined') return;
   PORTAL_SESSION_STORAGE_KEYS.forEach((key) => sessionStorage.removeItem(key));
@@ -437,6 +545,19 @@ function VerifyMagicLinkApp() {
   );
 }
 
+/**
+ * Role pill adapted from the AESOP Dashboard's RoleNav badge. Shows Teacher or
+ * Student only when the role is known (from the Classroom sync / sheets).
+ */
+function PortalRoleBadge({ isTeacher, hasStudentCategory, className }) {
+  if (!isTeacher && !hasStudentCategory) {
+    return null;
+  }
+  const variant = isTeacher ? 'portal-role-badge--teacher' : 'portal-role-badge--student';
+  const classes = ['portal-role-badge', variant, className].filter(Boolean).join(' ');
+  return <span className={classes}>{isTeacher ? 'Teacher' : 'Student'}</span>;
+}
+
 function PortalLayout({ children }) {
   const portalHomeHref = portalHubHref();
   const signedIn = isPortalSessionCompleteSync();
@@ -510,7 +631,13 @@ function PortalLayout({ children }) {
                   <dt className="portal-header-id-label">Teaching</dt>
                   <dd className="portal-header-id-value">{teachingDisplay}</dd>
                   <dt className="portal-header-id-label">Category</dt>
-                  <dd className="portal-header-id-value">{categoryDisplay}</dd>
+                  <dd className="portal-header-id-value">
+                    {isTeacher || hasStudentCategory ? (
+                      <PortalRoleBadge isTeacher={isTeacher} hasStudentCategory={hasStudentCategory} />
+                    ) : (
+                      categoryDisplay
+                    )}
+                  </dd>
                 </dl>
                 <button type="button" className="portal-header-logout" onClick={() => logOutPortalClient()}>
                   Log off
@@ -624,7 +751,14 @@ function PortalHubPage() {
         {signedIn ? (
           <>
             <PortalSectionLinks current="hub" />
-            <h2 className="portal-welcome">{`Welcome, ${studentName || 'Student'}!`}</h2>
+            <h2 className="portal-welcome">
+              {`Welcome, ${studentName || 'Student'}!`}
+              <PortalRoleBadge
+                isTeacher={isTeacher}
+                hasStudentCategory={hasStudentCategory}
+                className="portal-welcome-role"
+              />
+            </h2>
             <dl className="portal-hub-meta portal-hub-meta-panel" aria-label="Your account">
               <div className="portal-hub-meta-row">
                 <dt className="portal-hub-meta-label">AESOP ID</dt>
@@ -669,7 +803,11 @@ function PortalHubPage() {
                     isTeacher || hasStudentCategory ? '' : ' portal-hub-meta-empty'
                   }`}
                 >
-                  {isTeacher ? 'Teacher' : hasStudentCategory ? 'Student' : '—'}
+                  {isTeacher || hasStudentCategory ? (
+                    <PortalRoleBadge isTeacher={isTeacher} hasStudentCategory={hasStudentCategory} />
+                  ) : (
+                    '—'
+                  )}
                 </dd>
               </div>
               {studentPhone ? (
@@ -679,6 +817,7 @@ function PortalHubPage() {
                 </div>
               ) : null}
             </dl>
+            <PortalTeacherRoster isTeacher={isTeacher} />
             <section className="portal-hub-purpose portal-hub-purpose-collapsible" aria-label="About this portal">
               <button
                 type="button"

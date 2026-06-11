@@ -1027,6 +1027,166 @@ async function getPortalTeacherByUserId(userId) {
 }
 
 /**
+ * Build a row array placing values at specific zero-based column indices.
+ * Gaps are filled with empty strings so values land in the configured columns.
+ * @param {Record<number, string>} indexed
+ * @returns {string[]}
+ */
+function buildIndexedRow(indexed) {
+  const indices = Object.keys(indexed).map((k) => Number(k));
+  if (indices.length === 0) {
+    return [];
+  }
+  const maxIdx = Math.max(...indices);
+  const arr = new Array(maxIdx + 1).fill("");
+  for (const [idx, value] of Object.entries(indexed)) {
+    arr[Number(idx)] = value == null ? "" : String(value);
+  }
+  return arr;
+}
+
+/**
+ * Get (or create) a worksheet by title and ensure its header row matches headerByIndex.
+ * @param {import('google-spreadsheet').GoogleSpreadsheet} doc
+ * @param {string} title
+ * @param {Record<number, string>} headerByIndex
+ * @returns {Promise<import('google-spreadsheet').GoogleSpreadsheetWorksheet>}
+ */
+async function ensureWorksheetWithHeader(doc, title, headerByIndex) {
+  const headerArray = buildIndexedRow(headerByIndex).map((h, i) => (h === "" ? `col${i}` : h));
+  let worksheet = doc.sheetsByTitle[title];
+  if (!worksheet) {
+    worksheet = await doc.addSheet({ title, headerValues: headerArray });
+    return worksheet;
+  }
+  await worksheet.setHeaderRow(headerArray);
+  return worksheet;
+}
+
+/**
+ * Replace all data rows in a tab (header preserved) with the provided indexed rows.
+ * Used by the Classroom sync to rewrite the Classroom Roles / Classroom Grades tabs.
+ * @param {string} title
+ * @param {Record<number, string>} headerByIndex
+ * @param {Record<number, string>[]} indexedRows
+ * @returns {Promise<number>} Number of data rows written
+ */
+async function replaceTabData(title, headerByIndex, indexedRows) {
+  const doc = await initGoogleSheets();
+  const worksheet = await ensureWorksheetWithHeader(doc, title, headerByIndex);
+
+  const existing = await worksheet.getRows();
+  if (existing.length > 0) {
+    await worksheet.clearRows();
+  }
+
+  const rows = indexedRows.map((indexed) => buildIndexedRow(indexed));
+  if (rows.length > 0) {
+    await worksheet.addRows(rows, { raw: false, insert: false });
+  }
+  return rows.length;
+}
+
+/**
+ * Classroom Roles tab lookup by email. Mirrors the Teachers-tab role logic but
+ * keyed on the signed-in email (populated by the Classroom sync). Returns the
+ * stored role plus a convenience `isTeacher` flag and the classes they teach.
+ * @param {string} email
+ * @returns {Promise<{ found: boolean, role: string, isTeacher: boolean, teacherClasses: string }>}
+ */
+async function getRoleByEmail(email) {
+  const normalized = typeof email === "string" ? email.trim().toLowerCase() : "";
+  const empty = { found: false, role: "", isTeacher: false, teacherClasses: "" };
+  if (!normalized) {
+    return empty;
+  }
+
+  try {
+    const sheet = await initGoogleSheets();
+    const cr = config.classroom || {};
+    const tabTitle = cr.rolesSheetName || "Classroom Roles";
+    const worksheet = sheet.sheetsByTitle[tabTitle];
+    if (!worksheet) {
+      return empty;
+    }
+
+    const emailIdx = resolveColumnIndex(cr.rolesEmailColumn || "A");
+    const roleIdx = resolveColumnIndex(cr.rolesRoleColumn || "B");
+    const classesIdx = resolveColumnIndex(cr.rolesClassesColumn || "C");
+
+    const rows = await worksheet.getRows();
+    for (const row of rows) {
+      const rowData = Array.isArray(row._rawData) ? row._rawData : [];
+      const rowEmail = String(rowData[emailIdx] ?? "").trim().toLowerCase();
+      if (rowEmail !== normalized) {
+        continue;
+      }
+      const role = String(rowData[roleIdx] ?? "").trim();
+      const isTeacher = role.toLowerCase() === "teacher";
+      return {
+        found: true,
+        role,
+        isTeacher,
+        teacherClasses: isTeacher ? String(rowData[classesIdx] ?? "").trim() : "",
+      };
+    }
+
+    return empty;
+  } catch (error) {
+    const formattedError = formatGoogleSheetsOperationError(error);
+    console.warn("getRoleByEmail:", formattedError);
+    return empty;
+  }
+}
+
+/**
+ * Classroom Grades tab lookup by email (populated by the Classroom sync).
+ * @param {string} email
+ * @returns {Promise<{ found: boolean, classSection: string, calculatedGrade: string }>}
+ */
+async function getClassGradeByEmail(email) {
+  const normalized = typeof email === "string" ? email.trim().toLowerCase() : "";
+  const empty = { found: false, classSection: "", calculatedGrade: "" };
+  if (!normalized) {
+    return empty;
+  }
+
+  try {
+    const sheet = await initGoogleSheets();
+    const cr = config.classroom || {};
+    const tabTitle = cr.gradesSheetName || "Classroom Grades";
+    const worksheet = sheet.sheetsByTitle[tabTitle];
+    if (!worksheet) {
+      return empty;
+    }
+
+    const emailIdx = resolveColumnIndex(cr.gradesEmailColumn || "A");
+    const sectionIdx = resolveColumnIndex(cr.gradesSectionColumn || "C");
+    const gradeIdx = resolveColumnIndex(cr.gradesGradeColumn || "D");
+
+    const rows = await worksheet.getRows();
+    for (const row of rows) {
+      const rowData = Array.isArray(row._rawData) ? row._rawData : [];
+      const rowEmail = String(rowData[emailIdx] ?? "").trim().toLowerCase();
+      if (rowEmail !== normalized) {
+        continue;
+      }
+      return {
+        found: true,
+        classSection: String(rowData[sectionIdx] ?? "").trim(),
+        calculatedGrade: String(rowData[gradeIdx] ?? "").trim(),
+      };
+    }
+
+    return empty;
+  } catch (error) {
+    const formattedError = formatGoogleSheetsOperationError(error);
+    console.warn("getClassGradeByEmail:", formattedError);
+    return empty;
+  }
+}
+
+/**
  * Get user data from Google Sheet by email
  * @param {string} email - Email address
  * @returns {Promise<Object|null>} User data or null if not found
@@ -1074,8 +1234,12 @@ module.exports = {
   getPortalDingChangeHistory,
   getPortalClassGradeByStudentName,
   getPortalTeacherByUserId,
+  getRoleByEmail,
+  getClassGradeByEmail,
   getUserData,
   initGoogleSheets,
+  replaceTabData,
+  resolveColumnIndex,
   syncAllPeoplePastDingColumns,
   syncPastDingNumbersToPeople,
 };

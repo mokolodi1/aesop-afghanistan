@@ -110,6 +110,11 @@ If `SECRETS_JSON` is unset and `config/secrets.json` is absent (typical minimal 
 - `GOOGLE_EMAIL_COLUMN` - Column name or index containing emails
 - `GOOGLE_GRADES_SHEET_NAME` - Tab for imported grades (default: `Import: Google Grades`). The portal matches the student’s **People** name to the **`Name`** column, shows **`Section`** as class and **`Calculated Grade`** as grade. Optional: `GOOGLE_GRADES_HEADER_ROW`, `GOOGLE_GRADES_NAME_HEADER`, `GOOGLE_GRADES_SECTION_HEADER`, `GOOGLE_GRADES_GRADE_HEADER` (use `|` for alternates).
 - `GOOGLE_TEACHERS_SHEET_NAME` - Tab listing teachers (default: `Teachers`). If the signed-in **AESOP ID** matches column **`A`** (`GOOGLE_TEACHERS_ID_COLUMN`), **Category** is **Teacher** and column **`B`** (`GOOGLE_TEACHERS_CLASSES_COLUMN`) is shown as **Teaching** (classes they teach).
+- **Google Classroom sync** (see [Google Classroom roles &amp; grades](#google-classroom-roles--grades) below):
+  - `CLASSROOM_SYNC_ENABLED` - Set to `true` to let the portal read roles/grades from the Classroom-synced tabs (default: off).
+  - `CLASSROOM_IMPERSONATE_EMAIL` - Workspace user the service account impersonates to read all courses (defaults to `GMAIL_SA_DELEGATED_USER`).
+  - `CLASSROOM_ROLES_SHEET_NAME` (default `Classroom Roles`), `CLASSROOM_ROLES_EMAIL_COLUMN` (`A`), `CLASSROOM_ROLES_ROLE_COLUMN` (`B`), `CLASSROOM_ROLES_CLASSES_COLUMN` (`C`).
+  - `CLASSROOM_GRADES_SHEET_NAME` (default `Classroom Grades`), `CLASSROOM_GRADES_EMAIL_COLUMN` (`A`), `CLASSROOM_GRADES_NAME_COLUMN` (`B`), `CLASSROOM_GRADES_SECTION_COLUMN` (`C`), `CLASSROOM_GRADES_GRADE_COLUMN` (`D`).
 - `EMAIL_PROVIDER` - Email provider: `smtp`, `sendgrid`, `gmail`, or `gmailServiceAccount`
 - `EMAIL_FROM` - From email address
 - `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD` - SMTP settings
@@ -130,6 +135,45 @@ If `SECRETS_JSON` is unset and `config/secrets.json` is absent (typical minimal 
 3. If magic links must stay on the apex domain, keep using **`BASE_URL`** there and use **`/portal.html`** on that same host only—do not expect a session on **`portal.*`** until you add cross-host sessions (cookies/JWT), which this app does not implement yet.
 
 Magic-link tokens are stored **in memory** on each server instance. If Fly runs **more than one machine**, verifications can fail intermittently; keep **one machine** or replace the store with shared storage (for example Redis).
+
+### Google Classroom roles &amp; grades
+
+The portal can derive each person's **role** (Student or Teacher) and **grades** directly from Google Classroom instead of hand-maintaining the `Teachers` and `Import: Google Grades` tabs. Login is unchanged (students still use the magic link); Classroom data is pulled by a background sync that runs as the service account and matches Classroom accounts to the **`People`** tab **by email**.
+
+How it works:
+
+1. `npm run sync:classroom` signs in as the Gmail service account via **domain-wide delegation**, impersonating `CLASSROOM_IMPERSONATE_EMAIL`, and reads all **ACTIVE** courses, their teachers, students, coursework, and submissions (read-only).
+2. It rewrites two email-keyed tabs in the same spreadsheet:
+   - **`Classroom Roles`** - `Email`, `Role` (`Teacher` if they teach &ge;1 active course, else `Student`), `Classes Taught`.
+   - **`Classroom Grades`** - `Email`, `Name`, `Section` (enrolled courses), `Calculated Grade` (overall % across graded submissions).
+3. On magic-link verify, the portal looks up the signed-in email in those tabs. If `CLASSROOM_SYNC_ENABLED` is off or a row is missing, it falls back to the legacy `Teachers` (by AESOP ID) and `Import: Google Grades` (by name) tabs, so nothing breaks during the transition.
+
+Setup:
+
+1. **Enable the Google Classroom API** in the same Google Cloud project (APIs &amp; Services -> Library).
+2. **Grant the service account read-only Classroom scopes via domain-wide delegation** (Workspace Admin Console -> Security -> API controls -> Domain-wide delegation). Use the service account's client ID and these scopes:
+   - `https://www.googleapis.com/auth/classroom.courses.readonly`
+   - `https://www.googleapis.com/auth/classroom.rosters.readonly`
+   - `https://www.googleapis.com/auth/classroom.profile.emails`
+   - `https://www.googleapis.com/auth/classroom.coursework.students.readonly`
+   - `https://www.googleapis.com/auth/classroom.student-submissions.students.readonly`
+3. Set `CLASSROOM_IMPERSONATE_EMAIL` to a Workspace user (usually an admin or teacher) who can see the courses, and set `CLASSROOM_SYNC_ENABLED=true`.
+4. Run the sync once to populate the tabs:
+
+```bash
+npm run sync:classroom
+```
+
+5. Schedule it so roles/grades stay current. On Fly.io, create a daily scheduled Machine that reuses the app image and inherits `SECRETS_JSON`:
+
+```bash
+bash scripts/schedule-classroom-sync.sh            # daily, app aesop-afghanistan
+FLY_APP=my-app SCHEDULE=hourly bash scripts/schedule-classroom-sync.sh
+```
+
+The script resolves the current deployed image, then runs `fly machine run <image> --schedule daily node scripts/sync-classroom.js`. A dedicated scheduled Machine is used (rather than in-process `node-cron`) because `fly.toml` sets `min_machines_running = 0` with `auto_stop_machines`, so the web machine sleeps when idle. Inspect with `fly machine list -a <app>`.
+
+> The sync reuses the existing `email.gmailServiceAccount.credentials`, so no second key is needed - the service account just needs the Classroom scopes added to its delegation.
 
 ### Google Sheets Setup
 

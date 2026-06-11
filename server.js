@@ -12,7 +12,10 @@ const {
   getPortalDingChangeHistory,
   getPortalClassGradeByStudentName,
   getPortalTeacherByUserId,
+  getRoleByEmail,
+  getClassGradeByEmail,
 } = require('./services/googleSheets');
+const { getTeacherRoster } = require('./services/classroomSync');
 const {
   sanitizeEmail,
   isValidEmail,
@@ -48,6 +51,60 @@ function resolvePortalContactEmail() {
     return sanitizeEmail(from);
   }
   return '';
+}
+
+/**
+ * Resolve a signed-in user's role, class/section, and calculated grade.
+ *
+ * When the Google Classroom sync is enabled, the email-keyed Classroom Roles /
+ * Classroom Grades tabs are the source of truth. Anything not found there falls
+ * back to the legacy Teachers (by AESOP ID) and Import: Google Grades (by name)
+ * tabs so existing data keeps working during the transition.
+ *
+ * @param {{ userId: string, email: string, name: string }} params
+ * @returns {Promise<{ isTeacher: boolean, teacherClasses: string, classSection: string, calculatedGrade: string }>}
+ */
+async function resolvePortalRoleAndGrade({ userId, email, name }) {
+  let isTeacher = false;
+  let teacherClasses = '';
+  let classSection = '';
+  let calculatedGrade = '';
+
+  const classroomEnabled = !!config.classroom?.enabled;
+  const emailKey = email && isValidEmail(email) ? sanitizeEmail(email) : '';
+
+  if (classroomEnabled && emailKey) {
+    try {
+      const role = await getRoleByEmail(emailKey);
+      if (role.found) {
+        isTeacher = role.isTeacher;
+        teacherClasses = role.teacherClasses;
+      }
+      const grade = await getClassGradeByEmail(emailKey);
+      if (grade.found) {
+        classSection = grade.classSection;
+        calculatedGrade = grade.calculatedGrade;
+      }
+    } catch (error) {
+      console.warn('Classroom role/grade lookup failed; using legacy tabs:', formatErrorForLog(error));
+    }
+  }
+
+  // Fallback to the legacy ID/name-based tabs for anything still missing.
+  if (!isTeacher && userId) {
+    const t = await getPortalTeacherByUserId(userId);
+    if (t.isTeacher) {
+      isTeacher = true;
+      teacherClasses = t.teacherClasses;
+    }
+  }
+  if (!classSection && !calculatedGrade && name && name.trim()) {
+    const cg = await getPortalClassGradeByStudentName(name);
+    classSection = cg.classSection;
+    calculatedGrade = cg.calculatedGrade;
+  }
+
+  return { isTeacher, teacherClasses, classSection, calculatedGrade };
 }
 
 const app = express();
@@ -219,21 +276,12 @@ app.post('/api/verify-magic-link', verifyRateLimiter, async (req, res) => {
         }
       }
 
-      let classSection = '';
-      let calculatedGrade = '';
-      if (studentName.trim()) {
-        const cg = await getPortalClassGradeByStudentName(studentName);
-        classSection = cg.classSection;
-        calculatedGrade = cg.calculatedGrade;
-      }
-
-      let isTeacher = false;
-      let teacherClasses = '';
-      if (studentUserId) {
-        const t = await getPortalTeacherByUserId(studentUserId);
-        isTeacher = t.isTeacher;
-        teacherClasses = t.teacherClasses;
-      }
+      const { isTeacher, teacherClasses, classSection, calculatedGrade } =
+        await resolvePortalRoleAndGrade({
+          userId: studentUserId,
+          email: emailFromSheet,
+          name: studentName,
+        });
 
       res.json({
         success: true,
@@ -266,6 +314,8 @@ const portalDingHelpRateLimiter = createRateLimiter({ windowMs: 15 * 60 * 1000, 
 const portalDingHistoryRateLimiter = createRateLimiter({ windowMs: 15 * 60 * 1000, max: 40 });
 
 const portalClassGradeRateLimiter = createRateLimiter({ windowMs: 15 * 60 * 1000, max: 40 });
+
+const portalTeacherRosterRateLimiter = createRateLimiter({ windowMs: 15 * 60 * 1000, max: 20 });
 
 app.post('/api/update-ding-number', dingUpdateRateLimiter, async (req, res) => {
   try {
@@ -499,19 +549,72 @@ app.post('/api/portal-class-grade', portalClassGradeRateLimiter, async (req, res
     }
 
     const studentName = typeof profile.name === 'string' ? profile.name : '';
-    const { classSection, calculatedGrade } = await getPortalClassGradeByStudentName(studentName);
-    const teacherInfo = await getPortalTeacherByUserId(userId);
+    const profileEmail = profile?.email ? sanitizeEmail(profile.email) : emailSan;
+    const { isTeacher, teacherClasses, classSection, calculatedGrade } =
+      await resolvePortalRoleAndGrade({
+        userId,
+        email: profileEmail,
+        name: studentName,
+      });
 
     res.json({
       success: true,
       classSection,
       calculatedGrade,
-      isTeacher: teacherInfo.isTeacher,
-      teacherClasses: teacherInfo.teacherClasses,
+      isTeacher,
+      teacherClasses,
     });
   } catch (error) {
     console.error('Error loading portal class/grade:', formatErrorForLog(error));
     res.status(500).json({ error: 'Could not load class or grade. Please try again later.' });
+  }
+});
+
+app.post('/api/portal-teacher-roster', portalTeacherRosterRateLimiter, async (req, res) => {
+  try {
+    let { userId, email } = req.body;
+
+    if (!userId || typeof userId !== 'string' || !email || typeof email !== 'string') {
+      return res.status(400).json({ error: 'ID and email are required.' });
+    }
+
+    userId = sanitizeIdentifier(userId);
+    const emailSan = sanitizeEmail(email);
+    if (!userId || !emailSan) {
+      return res.status(400).json({ error: 'Invalid ID or email.' });
+    }
+
+    const profile = await findProfileById(userId);
+    if (!profile) {
+      return res
+        .status(403)
+        .json({ error: 'Unable to load roster. Please sign in again from the magic link.' });
+    }
+
+    if (sanitizeEmail(profile.email) !== emailSan) {
+      return res
+        .status(403)
+        .json({ error: 'Unable to load roster. Please sign in again from the magic link.' });
+    }
+
+    if (!config.classroom?.enabled) {
+      return res.status(503).json({ error: 'Classroom data is not enabled.' });
+    }
+
+    const profileEmail = profile?.email ? sanitizeEmail(profile.email) : emailSan;
+
+    // Only confirmed teachers may pull a roster of other students' grades.
+    const role = await getRoleByEmail(profileEmail);
+    if (!role.found || !role.isTeacher) {
+      return res.status(403).json({ error: 'Only teachers can view class rosters.' });
+    }
+
+    const { classes } = await getTeacherRoster(profileEmail);
+
+    res.json({ success: true, classes });
+  } catch (error) {
+    console.error('Error loading teacher roster:', formatErrorForLog(error));
+    res.status(500).json({ error: 'Could not load your class roster. Please try again later.' });
   }
 });
 

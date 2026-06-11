@@ -66,6 +66,68 @@ function buildGoogleSheetsConfig(fileSection) {
   };
 }
 
+/**
+ * Build Google Classroom sync settings from an optional secrets.json `classroom`
+ * section merged with process.env (env wins when set). The sync reuses the Gmail
+ * service-account credentials, so only an impersonation email and the destination
+ * tab/column layout are configured here.
+ * @param {Record<string, unknown>|undefined} fileSection
+ * @param {Record<string, unknown>|undefined} emailSection
+ */
+function buildClassroomConfig(fileSection, emailSection) {
+  const f = fileSection && typeof fileSection === "object" ? fileSection : {};
+  const envOr = (envKey, fileKey, fallback) => {
+    const fromEnv = process.env[envKey];
+    if (fromEnv != null && String(fromEnv).trim() !== "") {
+      return String(fromEnv).trim();
+    }
+    const fromFile = f[fileKey];
+    if (fromFile != null && String(fromFile).trim() !== "") {
+      return String(fromFile).trim();
+    }
+    return fallback;
+  };
+
+  const boolOr = (envKey, fileKey, fallback) => {
+    const fromEnv = process.env[envKey];
+    if (fromEnv != null && String(fromEnv).trim() !== "") {
+      return String(fromEnv).trim().toLowerCase() === "true";
+    }
+    const fromFile = f[fileKey];
+    if (typeof fromFile === "boolean") {
+      return fromFile;
+    }
+    if (fromFile != null && String(fromFile).trim() !== "") {
+      return String(fromFile).trim().toLowerCase() === "true";
+    }
+    return fallback;
+  };
+
+  // Default the impersonated Workspace user to the Gmail delegated user when not set.
+  const delegatedUser =
+    emailSection && typeof emailSection === "object"
+      ? emailSection.gmailServiceAccount?.delegatedUser
+      : undefined;
+  const impersonateFallback =
+    delegatedUser != null && String(delegatedUser).trim() !== ""
+      ? String(delegatedUser).trim()
+      : "";
+
+  return {
+    enabled: boolOr("CLASSROOM_SYNC_ENABLED", "enabled", false),
+    impersonateEmail: envOr("CLASSROOM_IMPERSONATE_EMAIL", "impersonateEmail", impersonateFallback),
+    rolesSheetName: envOr("CLASSROOM_ROLES_SHEET_NAME", "rolesSheetName", "Classroom Roles"),
+    rolesEmailColumn: envOr("CLASSROOM_ROLES_EMAIL_COLUMN", "rolesEmailColumn", "A"),
+    rolesRoleColumn: envOr("CLASSROOM_ROLES_ROLE_COLUMN", "rolesRoleColumn", "B"),
+    rolesClassesColumn: envOr("CLASSROOM_ROLES_CLASSES_COLUMN", "rolesClassesColumn", "C"),
+    gradesSheetName: envOr("CLASSROOM_GRADES_SHEET_NAME", "gradesSheetName", "Classroom Grades"),
+    gradesEmailColumn: envOr("CLASSROOM_GRADES_EMAIL_COLUMN", "gradesEmailColumn", "A"),
+    gradesNameColumn: envOr("CLASSROOM_GRADES_NAME_COLUMN", "gradesNameColumn", "B"),
+    gradesSectionColumn: envOr("CLASSROOM_GRADES_SECTION_COLUMN", "gradesSectionColumn", "C"),
+    gradesGradeColumn: envOr("CLASSROOM_GRADES_GRADE_COLUMN", "gradesGradeColumn", "D"),
+  };
+}
+
 function buildEmailFromEnv() {
   return {
     provider: process.env.EMAIL_PROVIDER || "smtp",
@@ -138,6 +200,7 @@ function loadSecretsFromSecretsJsonEnv() {
       return null;
     }
     parsed.googleSheets = buildGoogleSheetsConfig(parsed.googleSheets);
+    parsed.classroom = buildClassroomConfig(parsed.classroom, parsed.email);
     mergePortalContactEmail(parsed);
     return parsed;
   } catch (error) {
@@ -167,6 +230,7 @@ function loadSecrets() {
       const fileContent = fs.readFileSync(secretsPath, "utf8");
       secrets = JSON.parse(fileContent);
       secrets.googleSheets = buildGoogleSheetsConfig(secrets.googleSheets);
+      secrets.classroom = buildClassroomConfig(secrets.classroom, secrets.email);
       mergePortalContactEmail(secrets);
       return secrets;
     } catch (error) {
@@ -174,9 +238,11 @@ function loadSecrets() {
     }
   }
 
+  const emailFromEnv = buildEmailFromEnv();
   secrets = {
     googleSheets: buildGoogleSheetsConfig(undefined),
-    email: buildEmailFromEnv(),
+    classroom: buildClassroomConfig(undefined, emailFromEnv),
+    email: emailFromEnv,
     portalContactEmail: "",
   };
   mergePortalContactEmail(secrets);
