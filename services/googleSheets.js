@@ -1223,14 +1223,232 @@ async function getUserData(email) {
   }
 }
 
+/**
+ * Build a lookup map from normalized People-tab email to AESOP ID and display name.
+ * Used to enrich Classroom rosters with student IDs for portal search.
+ * @returns {Promise<Map<string, { id: string, name: string }>>}
+ */
+async function loadEmailToPeopleProfileMap() {
+  const map = new Map();
+  try {
+    const sheet = await initGoogleSheets();
+    const sheetName = config.googleSheets.sheetName || "People";
+    const worksheet = sheet.sheetsByTitle[sheetName];
+    if (!worksheet) {
+      return map;
+    }
+
+    const rows = await worksheet.getRows();
+    const idColumnIndex = resolveColumnIndex(config.googleSheets.idColumn || "B");
+    const nameColumnIndex = resolveColumnIndex(config.googleSheets.nameColumn || "C");
+    const emailColumnIndex = resolveColumnIndex(config.googleSheets.emailColumn || "D");
+
+    for (const row of rows) {
+      const rowData = Array.isArray(row._rawData) ? row._rawData : [];
+      const email = String(rowData[emailColumnIndex] ?? "")
+        .trim()
+        .toLowerCase();
+      if (!email) {
+        continue;
+      }
+      map.set(email, {
+        id: String(rowData[idColumnIndex] ?? "").trim(),
+        name: String(rowData[nameColumnIndex] ?? "").trim(),
+      });
+    }
+  } catch (error) {
+    console.warn("loadEmailToPeopleProfileMap:", formatGoogleSheetsOperationError(error));
+  }
+  return map;
+}
+
+/**
+ * Latest Ding number per AESOP ID from the Ding changes tab (one sheet pass).
+ * @returns {Promise<Map<string, string>>} normalized userId -> ding number
+ */
+async function buildLatestDingNumberByUserIdMap() {
+  const map = new Map();
+  try {
+    const sheet = await initGoogleSheets();
+    const dingSheetName = config.googleSheets.dingChangesSheetName || "Ding changes";
+    const worksheet = sheet.sheetsByTitle[dingSheetName];
+    if (!worksheet) {
+      return map;
+    }
+
+    const rows = await worksheet.getRows();
+    const idColumnIndex = resolveColumnIndex(config.googleSheets.dingIdColumn || "A");
+    const tsColumnIndex = resolveColumnIndex(config.googleSheets.dingTimestampColumn || "B");
+    const dingColumnIndex = resolveColumnIndex(config.googleSheets.dingNumberColumn || "C");
+
+    /** userId -> { bestTs, ding, fallbackDing } */
+    const acc = new Map();
+
+    for (const row of rows) {
+      const rowData = Array.isArray(row._rawData) ? row._rawData : [];
+      const userId = String(rowData[idColumnIndex] ?? "").trim().toLowerCase();
+      if (!userId) {
+        continue;
+      }
+      const dingStr = String(rowData[dingColumnIndex] ?? "").trim();
+      let entry = acc.get(userId);
+      if (!entry) {
+        entry = { bestTs: -Infinity, ding: "", fallbackDing: "" };
+        acc.set(userId, entry);
+      }
+      if (dingStr) {
+        entry.fallbackDing = dingStr;
+      }
+      const ts = parseSheetTimestamp(rowData[tsColumnIndex]);
+      if (ts !== -Infinity && ts >= entry.bestTs) {
+        entry.bestTs = ts;
+        entry.ding = dingStr;
+      }
+    }
+
+    for (const [userId, entry] of acc.entries()) {
+      const ding = entry.bestTs > -Infinity ? entry.ding : entry.fallbackDing;
+      if (ding) {
+        map.set(userId, ding);
+      }
+    }
+  } catch (error) {
+    console.warn("buildLatestDingNumberByUserIdMap:", formatGoogleSheetsOperationError(error));
+  }
+  return map;
+}
+
+/**
+ * All rows from the Classroom Grades tab (sync output).
+ * @returns {Promise<Array<{ email: string, name: string, classSection: string, calculatedGrade: string }>>}
+ */
+async function listAllClassroomGradeRows() {
+  try {
+    const sheet = await initGoogleSheets();
+    const cr = config.classroom || {};
+    const tabTitle = cr.gradesSheetName || "Classroom Grades";
+    const worksheet = sheet.sheetsByTitle[tabTitle];
+    if (!worksheet) {
+      return [];
+    }
+
+    const emailIdx = resolveColumnIndex(cr.gradesEmailColumn || "A");
+    const nameIdx = resolveColumnIndex(cr.gradesNameColumn || "B");
+    const sectionIdx = resolveColumnIndex(cr.gradesSectionColumn || "C");
+    const gradeIdx = resolveColumnIndex(cr.gradesGradeColumn || "D");
+
+    const rows = await worksheet.getRows();
+    const out = [];
+    for (const row of rows) {
+      const rowData = Array.isArray(row._rawData) ? row._rawData : [];
+      const email = String(rowData[emailIdx] ?? "").trim().toLowerCase();
+      if (!email) {
+        continue;
+      }
+      out.push({
+        email,
+        name: String(rowData[nameIdx] ?? "").trim(),
+        classSection: String(rowData[sectionIdx] ?? "").trim(),
+        calculatedGrade: String(rowData[gradeIdx] ?? "").trim(),
+      });
+    }
+    return out;
+  } catch (error) {
+    console.warn("listAllClassroomGradeRows:", formatGoogleSheetsOperationError(error));
+    return [];
+  }
+}
+
+/**
+ * Search People tab by partial AESOP ID, name, or email (admin lookup).
+ * @param {string} query
+ * @param {number} [limit]
+ */
+async function searchPeopleProfiles(query, limit = 25) {
+  const q = typeof query === "string" ? query.trim().toLowerCase() : "";
+  if (!q || q.length < 2) {
+    return [];
+  }
+
+  try {
+    const sheet = await initGoogleSheets();
+    const sheetName = config.googleSheets.sheetName || "People";
+    const worksheet = sheet.sheetsByTitle[sheetName];
+    if (!worksheet) {
+      return [];
+    }
+
+    const rows = await worksheet.getRows();
+    const idColumnIndex = resolveColumnIndex(config.googleSheets.idColumn || "B");
+    const nameColumnIndex = resolveColumnIndex(config.googleSheets.nameColumn || "C");
+    const emailColumnIndex = resolveColumnIndex(config.googleSheets.emailColumn || "D");
+    let phoneColumnIndex = null;
+    const pc = config.googleSheets.phoneColumn;
+    if (pc !== "") {
+      try {
+        phoneColumnIndex = resolveColumnIndex(pc != null ? String(pc).trim() : "E");
+      } catch {
+        phoneColumnIndex = null;
+      }
+    }
+
+    const matches = [];
+    for (const row of rows) {
+      const rowData = Array.isArray(row._rawData) ? row._rawData : [];
+      const id = String(rowData[idColumnIndex] ?? "").trim();
+      const name = String(rowData[nameColumnIndex] ?? "").trim();
+      const email = String(rowData[emailColumnIndex] ?? "").trim();
+      const phone =
+        phoneColumnIndex !== null ? String(rowData[phoneColumnIndex] ?? "").trim() : "";
+      const haystack = `${id} ${name} ${email}`.toLowerCase();
+      if (!haystack.includes(q)) {
+        continue;
+      }
+      matches.push({ id, name, email, phone });
+      if (matches.length >= limit) {
+        break;
+      }
+    }
+    return matches;
+  } catch (error) {
+    console.warn("searchPeopleProfiles:", formatGoogleSheetsOperationError(error));
+    return [];
+  }
+}
+
+/**
+ * Count data rows in Classroom Roles / Grades tabs (admin dashboard).
+ */
+async function getClassroomTabStats() {
+  try {
+    const sheet = await initGoogleSheets();
+    const cr = config.classroom || {};
+    const rolesTitle = cr.rolesSheetName || "Classroom Roles";
+    const gradesTitle = cr.gradesSheetName || "Classroom Grades";
+    const rolesSheet = sheet.sheetsByTitle[rolesTitle];
+    const gradesSheet = sheet.sheetsByTitle[gradesTitle];
+    const rolesRows = rolesSheet ? (await rolesSheet.getRows()).length : 0;
+    const gradesRows = gradesSheet ? (await gradesSheet.getRows()).length : 0;
+    return { rolesRows, gradesRows, rolesTitle, gradesTitle };
+  } catch (error) {
+    console.warn("getClassroomTabStats:", formatGoogleSheetsOperationError(error));
+    return { rolesRows: 0, gradesRows: 0, rolesTitle: "", gradesTitle: "" };
+  }
+}
+
 module.exports = {
   appendDingChangeRow,
   buildPastDingSummaryFromChanges,
+  buildLatestDingNumberByUserIdMap,
   findEmailById,
   findLatestDingNumberById,
   findNameByEmail,
   findProfileByEmail,
   findProfileById,
+  getClassroomTabStats,
+  loadEmailToPeopleProfileMap,
+  listAllClassroomGradeRows,
+  searchPeopleProfiles,
   getPortalDingChangeHistory,
   getPortalClassGradeByStudentName,
   getPortalTeacherByUserId,

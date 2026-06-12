@@ -24,6 +24,7 @@ function getPortalRouteSegment() {
   if (pathname === '/' && isPortalHostname()) return 'hub';
   if (pathname === '/profile' || pathname.startsWith('/profile/')) return 'profile';
   if (pathname === '/faq' || pathname.startsWith('/faq/')) return 'faq';
+  if (pathname === '/admin' || pathname.startsWith('/admin/')) return 'admin';
   return 'hub';
 }
 
@@ -43,8 +44,10 @@ function shouldMountPortalSpa() {
     p === '/' ||
     p === '/profile' ||
     p === '/faq' ||
+    p === '/admin' ||
     p.startsWith('/profile/') ||
-    p.startsWith('/faq/');
+    p.startsWith('/faq/') ||
+    p.startsWith('/admin/');
   if (!portalPath) return false;
   return isPortalHostname() || isPortalSpaDocument();
 }
@@ -72,12 +75,28 @@ const PORTAL_SESSION_STORAGE_KEYS = [
   'studentPortalGrade',
   'studentPortalIsTeacher',
   'studentPortalTeacherClasses',
+  'studentPortalIsAdmin',
 ];
 
 const PORTAL_IDLE_LOGOUT_MS = 10 * 60 * 1000;
 
 /** Dedupe concurrent class/grade fetches (header + hub both mount). */
 let portalClassGradeInFlight = null;
+
+async function adminApiPost(path, body = {}) {
+  const userId = readSessionField('studentPortalUserId');
+  const email = readSessionField('studentPortalEmail');
+  const response = await fetch(path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ userId, email, ...body }),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || !data.success) {
+    throw new Error((data && data.error) || 'Request failed.');
+  }
+  return data;
+}
 
 async function loadPortalClassGradeFromApi() {
   if (typeof window === 'undefined' || !isPortalSessionCompleteSync()) {
@@ -86,6 +105,7 @@ async function loadPortalClassGradeFromApi() {
       calculatedGrade: '',
       isTeacher: false,
       teacherClasses: '',
+      isAdmin: false,
     });
   }
   if (portalClassGradeInFlight) {
@@ -96,7 +116,7 @@ async function loadPortalClassGradeFromApi() {
       const userId = readSessionField('studentPortalUserId');
       const email = readSessionField('studentPortalEmail');
       if (!userId.trim() || !email.trim()) {
-        return { classSection: '', calculatedGrade: '', isTeacher: false, teacherClasses: '' };
+        return { classSection: '', calculatedGrade: '', isTeacher: false, teacherClasses: '', isAdmin: false };
       }
       const response = await fetch('/api/portal-class-grade', {
         method: 'POST',
@@ -105,12 +125,13 @@ async function loadPortalClassGradeFromApi() {
       });
       const data = await response.json();
       if (!data.success) {
-        return { classSection: '', calculatedGrade: '', isTeacher: false, teacherClasses: '' };
+        return { classSection: '', calculatedGrade: '', isTeacher: false, teacherClasses: '', isAdmin: false };
       }
       const classSection = typeof data.classSection === 'string' ? data.classSection.trim() : '';
       const calculatedGrade =
         typeof data.calculatedGrade === 'string' ? data.calculatedGrade.trim() : '';
       const isTeacher = data.isTeacher === true;
+      const isAdmin = data.isAdmin === true;
       const teacherClasses =
         typeof data.teacherClasses === 'string' ? data.teacherClasses.trim() : '';
       sessionStorage.setItem('studentPortalClass', classSection);
@@ -120,14 +141,19 @@ async function loadPortalClassGradeFromApi() {
       } else {
         sessionStorage.removeItem('studentPortalIsTeacher');
       }
+      if (isAdmin) {
+        sessionStorage.setItem('studentPortalIsAdmin', '1');
+      } else {
+        sessionStorage.removeItem('studentPortalIsAdmin');
+      }
       if (teacherClasses) {
         sessionStorage.setItem('studentPortalTeacherClasses', teacherClasses);
       } else {
         sessionStorage.removeItem('studentPortalTeacherClasses');
       }
-      return { classSection, calculatedGrade, isTeacher, teacherClasses };
+      return { classSection, calculatedGrade, isTeacher, teacherClasses, isAdmin };
     } catch {
-      return { classSection: '', calculatedGrade: '', isTeacher: false, teacherClasses: '' };
+      return { classSection: '', calculatedGrade: '', isTeacher: false, teacherClasses: '', isAdmin: false };
     } finally {
       portalClassGradeInFlight = null;
     }
@@ -141,15 +167,18 @@ function usePortalClassGrade() {
   const [isTeacher, setIsTeacher] = useState(() => readSessionField('studentPortalIsTeacher') === '1');
   const [teacherClasses, setTeacherClasses] = useState(() => readSessionField('studentPortalTeacherClasses'));
 
+  const [isAdmin, setIsAdmin] = useState(() => readSessionField('studentPortalIsAdmin') === '1');
+
   useEffect(() => {
     let cancelled = false;
     loadPortalClassGradeFromApi().then(
-      ({ classSection, calculatedGrade, isTeacher: tchr, teacherClasses: teach }) => {
+      ({ classSection, calculatedGrade, isTeacher: tchr, teacherClasses: teach, isAdmin: adm }) => {
         if (cancelled) return;
         setStudentClass(classSection);
         setStudentGrade(calculatedGrade);
         setIsTeacher(tchr);
         setTeacherClasses(teach);
+        setIsAdmin(adm);
       },
     );
     return () => {
@@ -157,19 +186,18 @@ function usePortalClassGrade() {
     };
   }, []);
 
-  return { studentClass, studentGrade, isTeacher, teacherClasses };
+  return { studentClass, studentGrade, isTeacher, teacherClasses, isAdmin };
 }
 
 /**
- * Fetch a teacher's live per-class roster (students + grades). Only runs when
- * `isTeacher` is true and a portal session exists. Returns loading/error state
- * so the hub can render placeholders.
+ * Fetch a live per-class roster (students + grades). Runs for teachers and admins
+ * when a portal session exists. Returns loading/error state for placeholders.
  */
-function useTeacherRoster(isTeacher) {
+function useTeacherRoster(rosterEnabled) {
   const [state, setState] = useState({ status: 'idle', classes: [], error: '' });
 
   useEffect(() => {
-    if (!isTeacher || !isPortalSessionCompleteSync()) {
+    if (!rosterEnabled || !isPortalSessionCompleteSync()) {
       setState({ status: 'idle', classes: [], error: '' });
       return undefined;
     }
@@ -204,21 +232,353 @@ function useTeacherRoster(isTeacher) {
     return () => {
       cancelled = true;
     };
-  }, [isTeacher]);
+  }, [rosterEnabled]);
 
   return state;
 }
 
-function PortalTeacherRoster({ isTeacher }) {
-  const { status, classes, error } = useTeacherRoster(isTeacher);
+async function downloadAdminDingConnectCsv() {
+  const userId = readSessionField('studentPortalUserId');
+  const email = readSessionField('studentPortalEmail');
+  const response = await fetch('/api/portal-admin/dingconnect-export', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ userId, email, download: true }),
+  });
+  if (!response.ok) {
+    let message = 'Could not download CSV.';
+    const contentType = response.headers.get('Content-Type') || '';
+    if (contentType.includes('application/json')) {
+      const data = await response.json().catch(() => ({}));
+      message = (data && data.error) || message;
+    }
+    throw new Error(message);
+  }
+  const blob = await response.blob();
+  const contentDisposition = response.headers.get('Content-Disposition') || '';
+  const match = contentDisposition.match(/filename="([^"]+)"/);
+  const filename = match ? match[1] : 'dingconnect-topup.csv';
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
 
-  if (!isTeacher) {
+function classTabId(label) {
+  return `class-tab-${String(label).replace(/[^a-zA-Z0-9]+/g, '-')}`;
+}
+
+function studentRowKey(classLabel, email) {
+  return `${classLabel}::${email}`;
+}
+
+function matchesStudentSearch(student, query) {
+  if (!query) {
+    return true;
+  }
+  const haystack = [student.name, student.email, student.userId]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+  return haystack.includes(query);
+}
+
+function PortalAssignmentTable({ assignments }) {
+  const rows = Array.isArray(assignments) ? assignments : [];
+  if (rows.length === 0) {
+    return <p className="portal-roster-status">No assignments to show for this class yet.</p>;
+  }
+  return (
+    <table className="portal-roster-table portal-assignment-table">
+      <thead>
+        <tr>
+          <th scope="col">Assignment</th>
+          <th scope="col">Grade</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((a) => (
+          <tr key={a.title}>
+            <td>{a.title}</td>
+            <td className="portal-roster-grade">{a.display || '—'}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+function useStudentGrades(isStudent) {
+  const [state, setState] = useState({ status: 'idle', classes: [], error: '' });
+
+  useEffect(() => {
+    if (!isStudent || !isPortalSessionCompleteSync()) {
+      setState({ status: 'idle', classes: [], error: '' });
+      return undefined;
+    }
+    let cancelled = false;
+    setState({ status: 'loading', classes: [], error: '' });
+    (async () => {
+      try {
+        const userId = readSessionField('studentPortalUserId');
+        const email = readSessionField('studentPortalEmail');
+        const response = await fetch('/api/portal-student-grades', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId, email }),
+        });
+        const data = await response.json();
+        if (cancelled) return;
+        if (!response.ok || !data.success) {
+          setState({
+            status: 'error',
+            classes: [],
+            error: (data && data.error) || 'Could not load your grades.',
+          });
+          return;
+        }
+        setState({
+          status: 'ready',
+          classes: Array.isArray(data.classes) ? data.classes : [],
+          error: '',
+        });
+      } catch {
+        if (!cancelled) {
+          setState({ status: 'error', classes: [], error: 'Could not load your grades.' });
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isStudent]);
+
+  return state;
+}
+
+function PortalStudentGrades({ isStudent }) {
+  const { status, classes, error } = useStudentGrades(isStudent);
+  const [openClassLabel, setOpenClassLabel] = useState('');
+
+  const toggleClassPanel = (label) => {
+    setOpenClassLabel((prev) => (prev === label ? '' : label));
+  };
+
+  if (!isStudent) {
     return null;
   }
 
   return (
-    <section className="portal-roster" aria-label="Your classes">
-      <h3 className="portal-roster-heading">Your classes</h3>
+    <section className="portal-roster portal-student-grades" aria-label="Your grades by class">
+      <h3 className="portal-roster-heading">Your grades</h3>
+      {status === 'loading' ? <p className="portal-roster-status">Loading your assignments…</p> : null}
+      {status === 'error' ? (
+        <p className="portal-roster-status portal-roster-status--error" role="alert">
+          {error}
+        </p>
+      ) : null}
+      {status === 'ready' && classes.length === 0 ? (
+        <p className="portal-roster-status">No enrolled classes found for your account.</p>
+      ) : null}
+      {status === 'ready' && classes.length > 0 ? (
+        <div className="portal-class-accordion" aria-label="Your classes">
+          {classes.map((cls) => {
+            const tabId = classTabId(cls.label);
+            const isOpen = openClassLabel === cls.label;
+            return (
+              <div className="portal-class-accordion-item" key={cls.label}>
+                <button
+                  type="button"
+                  id={tabId}
+                  className={`portal-class-accordion-tab${isOpen ? ' is-active' : ''}`}
+                  aria-expanded={isOpen}
+                  aria-controls={`${tabId}-panel`}
+                  onClick={() => toggleClassPanel(cls.label)}
+                >
+                  <span className="portal-class-accordion-label">{cls.label}</span>
+                  <span className="portal-class-accordion-meta">{cls.grade || '—'}</span>
+                  <span className="portal-class-accordion-chevron" aria-hidden="true">
+                    {isOpen ? '▼' : '▶'}
+                  </span>
+                </button>
+                {isOpen ? (
+                  <div
+                    id={`${tabId}-panel`}
+                    className="portal-class-accordion-panel"
+                    role="region"
+                    aria-labelledby={tabId}
+                  >
+                    <PortalAssignmentTable assignments={cls.assignments} />
+                  </div>
+                ) : null}
+              </div>
+            );
+          })}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function PortalTeacherStudentList({
+  classLabel,
+  students,
+  openStudentKey,
+  onToggleStudent,
+  searchQuery,
+}) {
+  const normalizedQuery = searchQuery.trim().toLowerCase();
+  const visibleStudents = normalizedQuery
+    ? students.filter((s) => matchesStudentSearch(s, normalizedQuery))
+    : students;
+
+  if (visibleStudents.length === 0) {
+    return <p className="portal-roster-status">No students match your search in this class.</p>;
+  }
+
+  return (
+    <div className="portal-student-accordion" aria-label={`Students in ${classLabel}`}>
+      {visibleStudents.map((student) => {
+        const rowKey = studentRowKey(classLabel, student.email);
+        const isOpen = openStudentKey === rowKey;
+        const rowId = classTabId(rowKey);
+        return (
+          <div className="portal-student-accordion-item" key={rowKey}>
+            <button
+              type="button"
+              id={rowId}
+              className={`portal-student-accordion-tab${isOpen ? ' is-active' : ''}`}
+              aria-expanded={isOpen}
+              aria-controls={`${rowId}-panel`}
+              onClick={() => onToggleStudent(rowKey)}
+            >
+              <span className="portal-student-accordion-name">{student.name || '—'}</span>
+              <span className="portal-student-accordion-meta">
+                {student.userId ? `${student.userId} · ` : ''}
+                {student.grade || '—'}
+              </span>
+              <span className="portal-student-accordion-chevron" aria-hidden="true">
+                {isOpen ? '▼' : '▶'}
+              </span>
+            </button>
+            {isOpen ? (
+              <div
+                id={`${rowId}-panel`}
+                className="portal-student-accordion-panel"
+                role="region"
+                aria-labelledby={rowId}
+              >
+                <p className="portal-student-accordion-email">{student.email}</p>
+                <PortalAssignmentTable assignments={student.assignments} />
+              </div>
+            ) : null}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function PortalTeacherRoster({ rosterEnabled, isAdminView }) {
+  const { status, classes, error } = useTeacherRoster(rosterEnabled);
+  const [openClassLabel, setOpenClassLabel] = useState('');
+  const [openStudentKey, setOpenStudentKey] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
+
+  const normalizedSearch = searchQuery.trim().toLowerCase();
+
+  const searchResults = useMemo(() => {
+    if (!normalizedSearch || status !== 'ready') {
+      return [];
+    }
+    const results = [];
+    for (const cls of classes) {
+      for (const student of cls.students) {
+        if (matchesStudentSearch(student, normalizedSearch)) {
+          results.push({
+            classLabel: cls.label,
+            student,
+            rowKey: studentRowKey(cls.label, student.email),
+          });
+        }
+      }
+    }
+    results.sort((a, b) =>
+      (a.student.name || a.student.email).localeCompare(b.student.name || b.student.email),
+    );
+    return results.slice(0, 25);
+  }, [classes, normalizedSearch, status]);
+
+  const toggleClassPanel = (label) => {
+    setOpenClassLabel((prev) => {
+      const next = prev === label ? '' : label;
+      if (next !== prev) {
+        setOpenStudentKey('');
+      }
+      return next;
+    });
+  };
+
+  const toggleStudentPanel = (rowKey) => {
+    setOpenStudentKey((prev) => (prev === rowKey ? '' : rowKey));
+  };
+
+  const jumpToSearchResult = (result) => {
+    setOpenClassLabel(result.classLabel);
+    setOpenStudentKey(result.rowKey);
+    setSearchQuery('');
+  };
+
+  if (!rosterEnabled) {
+    return null;
+  }
+
+  return (
+    <section className="portal-roster" aria-label={isAdminView ? 'Class rosters' : 'Your classes'}>
+      <h3 className="portal-roster-heading">{isAdminView ? 'Class rosters' : 'Your classes'}</h3>
+      {status === 'ready' && classes.length > 0 ? (
+        <div className="portal-roster-search-wrap">
+          <label htmlFor="portal-roster-search" className="portal-roster-search-label">
+            Search students
+          </label>
+          <input
+            id="portal-roster-search"
+            type="search"
+            className="portal-roster-search-input"
+            placeholder="Name, AESOP ID, or email"
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.target.value)}
+            autoComplete="off"
+          />
+          {normalizedSearch ? (
+            <div className="portal-roster-search-results" role="listbox" aria-label="Search results">
+              {searchResults.length === 0 ? (
+                <p className="portal-roster-status">No students match your search.</p>
+              ) : (
+                searchResults.map((result) => (
+                  <button
+                    key={result.rowKey}
+                    type="button"
+                    className="portal-roster-search-result"
+                    role="option"
+                    onClick={() => jumpToSearchResult(result)}
+                  >
+                    <span className="portal-roster-search-result-name">
+                      {result.student.name || result.student.email}
+                    </span>
+                    <span className="portal-roster-search-result-meta">
+                      {result.student.userId ? `${result.student.userId} · ` : ''}
+                      {result.classLabel} · {result.student.grade || '—'}
+                    </span>
+                  </button>
+                ))
+              )}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
       {status === 'loading' ? (
         <p className="portal-roster-status">Loading your roster…</p>
       ) : null}
@@ -230,40 +590,50 @@ function PortalTeacherRoster({ isTeacher }) {
       {status === 'ready' && classes.length === 0 ? (
         <p className="portal-roster-status">No active classes found for your account.</p>
       ) : null}
-      {status === 'ready'
-        ? classes.map((cls) => (
-            <div className="portal-roster-class" key={cls.label}>
-              <div className="portal-roster-class-head">
-                <span className="portal-roster-class-name">{cls.label}</span>
-                <span className="portal-roster-class-count">
-                  {cls.students.length} {cls.students.length === 1 ? 'student' : 'students'}
-                </span>
+      {status === 'ready' && classes.length > 0 ? (
+        <div className="portal-class-accordion" aria-label="Class list">
+          {classes.map((cls) => {
+            const tabId = classTabId(cls.label);
+            const isOpen = openClassLabel === cls.label;
+            return (
+              <div className="portal-class-accordion-item" key={cls.label}>
+                <button
+                  type="button"
+                  id={tabId}
+                  className={`portal-class-accordion-tab${isOpen ? ' is-active' : ''}`}
+                  aria-expanded={isOpen}
+                  aria-controls={`${tabId}-panel`}
+                  onClick={() => toggleClassPanel(cls.label)}
+                >
+                  <span className="portal-class-accordion-label">{cls.label}</span>
+                  <span className="portal-class-accordion-meta">
+                    {cls.students.length} {cls.students.length === 1 ? 'student' : 'students'}
+                  </span>
+                  <span className="portal-class-accordion-chevron" aria-hidden="true">
+                    {isOpen ? '▼' : '▶'}
+                  </span>
+                </button>
+                {isOpen ? (
+                  <div
+                    id={`${tabId}-panel`}
+                    className="portal-class-accordion-panel"
+                    role="region"
+                    aria-labelledby={tabId}
+                  >
+                    <PortalTeacherStudentList
+                      classLabel={cls.label}
+                      students={cls.students}
+                      openStudentKey={openStudentKey}
+                      onToggleStudent={toggleStudentPanel}
+                      searchQuery={normalizedSearch}
+                    />
+                  </div>
+                ) : null}
               </div>
-              {cls.students.length > 0 ? (
-                <table className="portal-roster-table">
-                  <thead>
-                    <tr>
-                      <th scope="col">Name</th>
-                      <th scope="col">Email</th>
-                      <th scope="col">Grade</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {cls.students.map((s) => (
-                      <tr key={s.email}>
-                        <td>{s.name || '—'}</td>
-                        <td className="portal-roster-email">{s.email}</td>
-                        <td className="portal-roster-grade">{s.grade || '—'}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              ) : (
-                <p className="portal-roster-status">No students enrolled yet.</p>
-              )}
-            </div>
-          ))
-        : null}
+            );
+          })}
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -469,6 +839,7 @@ function VerifyMagicLinkApp() {
           const gradeFromApi =
             typeof data.calculatedGrade === 'string' ? data.calculatedGrade.trim() : '';
           const isTeacherFromApi = data.isTeacher === true;
+          const isAdminFromApi = data.isAdmin === true;
           const teachingFromApi =
             typeof data.teacherClasses === 'string' ? data.teacherClasses.trim() : '';
           if (nameFromApi) {
@@ -511,6 +882,11 @@ function VerifyMagicLinkApp() {
           } else {
             sessionStorage.removeItem('studentPortalIsTeacher');
           }
+          if (isAdminFromApi) {
+            sessionStorage.setItem('studentPortalIsAdmin', '1');
+          } else {
+            sessionStorage.removeItem('studentPortalIsAdmin');
+          }
           if (teachingFromApi) {
             sessionStorage.setItem('studentPortalTeacherClasses', teachingFromApi);
           } else {
@@ -549,7 +925,11 @@ function VerifyMagicLinkApp() {
  * Role pill adapted from the AESOP Dashboard's RoleNav badge. Shows Teacher or
  * Student only when the role is known (from the Classroom sync / sheets).
  */
-function PortalRoleBadge({ isTeacher, hasStudentCategory, className }) {
+function PortalRoleBadge({ isTeacher, hasStudentCategory, isAdmin, className }) {
+  if (isAdmin) {
+    const classes = ['portal-role-badge', 'portal-role-badge--admin', className].filter(Boolean).join(' ');
+    return <span className={classes}>Admin</span>;
+  }
   if (!isTeacher && !hasStudentCategory) {
     return null;
   }
@@ -564,7 +944,7 @@ function PortalLayout({ children }) {
   const fullName = readSessionField('studentPortalName').trim();
   const aesopId = readSessionField('studentPortalUserId').trim();
   const headerEmail = readSessionField('studentPortalEmail').trim();
-  const { studentClass, studentGrade, isTeacher, teacherClasses } = usePortalClassGrade();
+  const { studentClass, studentGrade, isTeacher, teacherClasses, isAdmin } = usePortalClassGrade();
 
   const dash = '—';
   const fullNameDisplay = fullName || dash;
@@ -632,8 +1012,12 @@ function PortalLayout({ children }) {
                   <dd className="portal-header-id-value">{teachingDisplay}</dd>
                   <dt className="portal-header-id-label">Category</dt>
                   <dd className="portal-header-id-value">
-                    {isTeacher || hasStudentCategory ? (
-                      <PortalRoleBadge isTeacher={isTeacher} hasStudentCategory={hasStudentCategory} />
+                    {isTeacher || hasStudentCategory || isAdmin ? (
+                      <PortalRoleBadge
+                        isTeacher={isTeacher}
+                        hasStudentCategory={hasStudentCategory}
+                        isAdmin={isAdmin}
+                      />
                     ) : (
                       categoryDisplay
                     )}
@@ -661,7 +1045,7 @@ function PortalLayout({ children }) {
   );
 }
 
-function PortalSectionLinks({ current }) {
+function PortalSectionLinks({ current, isAdmin }) {
   const hubHref = portalHubHref();
   return (
     <nav className="portal-section-links" aria-label="Portal navigation">
@@ -674,6 +1058,16 @@ function PortalSectionLinks({ current }) {
       <a href="/profile" className={current === 'profile' ? 'is-current' : undefined}>
         Edit Ding
       </a>
+      {isAdmin ? (
+        <>
+          <span className="portal-section-links-sep" aria-hidden="true">
+            ·
+          </span>
+          <a href="/admin" className={current === 'admin' ? 'is-current' : undefined}>
+            Admin
+          </a>
+        </>
+      ) : null}
       <span className="portal-section-links-sep" aria-hidden="true">
         ·
       </span>
@@ -728,7 +1122,7 @@ function PortalIntentNotice({ intent }) {
 
 function PortalHubPage() {
   const { studentName, studentUserId, studentEmail, studentPhone, newDingNumber } = usePortalStudentRecord();
-  const { studentClass, studentGrade, isTeacher, teacherClasses } = usePortalClassGrade();
+  const { studentClass, studentGrade, isTeacher, teacherClasses, isAdmin } = usePortalClassGrade();
   const signedIn = isPortalSessionCompleteSync();
   const hasStudentCategory =
     !isTeacher &&
@@ -750,12 +1144,13 @@ function PortalHubPage() {
       <div className="portal-card portal-content portal-hub-card">
         {signedIn ? (
           <>
-            <PortalSectionLinks current="hub" />
+            <PortalSectionLinks current="hub" isAdmin={isAdmin} />
             <h2 className="portal-welcome">
               {`Welcome, ${studentName || 'Student'}!`}
               <PortalRoleBadge
                 isTeacher={isTeacher}
                 hasStudentCategory={hasStudentCategory}
+                isAdmin={isAdmin}
                 className="portal-welcome-role"
               />
             </h2>
@@ -803,8 +1198,12 @@ function PortalHubPage() {
                     isTeacher || hasStudentCategory ? '' : ' portal-hub-meta-empty'
                   }`}
                 >
-                  {isTeacher || hasStudentCategory ? (
-                    <PortalRoleBadge isTeacher={isTeacher} hasStudentCategory={hasStudentCategory} />
+                  {isTeacher || hasStudentCategory || isAdmin ? (
+                    <PortalRoleBadge
+                      isTeacher={isTeacher}
+                      hasStudentCategory={hasStudentCategory}
+                      isAdmin={isAdmin}
+                    />
                   ) : (
                     '—'
                   )}
@@ -817,7 +1216,13 @@ function PortalHubPage() {
                 </div>
               ) : null}
             </dl>
-            <PortalTeacherRoster isTeacher={isTeacher} />
+            {isTeacher || isAdmin ? (
+              <PortalTeacherRoster
+                rosterEnabled={isTeacher || isAdmin}
+                isAdminView={isAdmin && !isTeacher}
+              />
+            ) : null}
+            {!isTeacher && signedIn ? <PortalStudentGrades isStudent={!isTeacher} /> : null}
             <section className="portal-hub-purpose portal-hub-purpose-collapsible" aria-label="About this portal">
               <button
                 type="button"
@@ -850,7 +1255,7 @@ function PortalHubPage() {
         ) : (
           <>
             <PortalIntentNotice intent={intent} />
-            <PortalSectionLinks current="hub" />
+            <PortalSectionLinks current="hub" isAdmin={isAdmin} />
             <h2 className="portal-welcome portal-welcome-signout">Student Portal</h2>
             <div id="portal-magic-link-form" className="portal-signin-panel">
               <h3 className="portal-signin-heading">Connect with your AESOP ID</h3>
@@ -906,6 +1311,7 @@ function PortalHubPage() {
 
 function PortalGuestProfilePage() {
   const intent = typeof window !== 'undefined' ? getPortalUrlIntent() : '';
+  const { isAdmin } = usePortalClassGrade();
 
   useEffect(() => {
     if (intent === 'profile') {
@@ -916,7 +1322,7 @@ function PortalGuestProfilePage() {
   return (
     <PortalLayout>
       <div className="portal-card portal-content portal-hub-card">
-        <PortalSectionLinks current="profile" />
+        <PortalSectionLinks current="profile" isAdmin={isAdmin} />
         {intent === 'profile' ? <PortalIntentNotice intent="profile" /> : null}
         <p className="portal-hub-intro">
           Sign in with your magic link to update your Afghanistan Ding number, view history, or request help with a
@@ -943,10 +1349,12 @@ function PortalGuestProfilePage() {
 }
 
 function PortalFaqPage() {
+  const { isAdmin } = usePortalClassGrade();
+
   return (
     <PortalLayout>
       <div className="portal-card portal-content portal-faq-card">
-        <PortalSectionLinks current="faq" />
+        <PortalSectionLinks current="faq" isAdmin={isAdmin} />
         <p className="faq-kicker">AESOP Afghanistan</p>
         <h2 className="faq-title">Frequently asked questions</h2>
         <p className="faq-placeholder">
@@ -958,6 +1366,485 @@ function PortalFaqPage() {
           Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est
           laborum.
         </p>
+      </div>
+    </PortalLayout>
+  );
+}
+
+function PortalAdminPage() {
+  const { isAdmin } = usePortalClassGrade();
+  const signedIn = isPortalSessionCompleteSync();
+  const [activeTab, setActiveTab] = useState('overview');
+  const [dashboard, setDashboard] = useState(null);
+  const [dashboardError, setDashboardError] = useState('');
+  const [dashboardLoading, setDashboardLoading] = useState(false);
+
+  const [lookupQuery, setLookupQuery] = useState('');
+  const [lookupLoading, setLookupLoading] = useState(false);
+  const [lookupError, setLookupError] = useState('');
+  const [lookupResult, setLookupResult] = useState(null);
+
+  const [highGrades, setHighGrades] = useState([]);
+  const [highGradesThreshold, setHighGradesThreshold] = useState(null);
+  const [highGradesLoading, setHighGradesLoading] = useState(false);
+  const [highGradesError, setHighGradesError] = useState('');
+
+  const [exportPreview, setExportPreview] = useState(null);
+  const [exportLoading, setExportLoading] = useState(false);
+  const [exportError, setExportError] = useState('');
+  const [exportDownloading, setExportDownloading] = useState(false);
+
+  useEffect(() => {
+    if (!signedIn || !isAdmin || activeTab !== 'overview') {
+      return undefined;
+    }
+    let cancelled = false;
+    setDashboardLoading(true);
+    setDashboardError('');
+    adminApiPost('/api/portal-admin/dashboard')
+      .then((data) => {
+        if (!cancelled) {
+          setDashboard(data.dashboard || null);
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setDashboardError(err.message || 'Could not load dashboard.');
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setDashboardLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [signedIn, isAdmin, activeTab]);
+
+  useEffect(() => {
+    if (!signedIn || !isAdmin || activeTab !== 'high-grades') {
+      return undefined;
+    }
+    let cancelled = false;
+    setHighGradesLoading(true);
+    setHighGradesError('');
+    adminApiPost('/api/portal-admin/high-grades')
+      .then((data) => {
+        if (!cancelled) {
+          setHighGrades(Array.isArray(data.students) ? data.students : []);
+          setHighGradesThreshold(typeof data.threshold === 'number' ? data.threshold : null);
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setHighGradesError(err.message || 'Could not load students.');
+          setHighGrades([]);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setHighGradesLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [signedIn, isAdmin, activeTab]);
+
+  useEffect(() => {
+    if (!signedIn || !isAdmin || activeTab !== 'dingconnect') {
+      return undefined;
+    }
+    let cancelled = false;
+    setExportLoading(true);
+    setExportError('');
+    adminApiPost('/api/portal-admin/dingconnect-export')
+      .then((data) => {
+        if (!cancelled) {
+          setExportPreview(data);
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setExportError(err.message || 'Could not load export preview.');
+          setExportPreview(null);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setExportLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [signedIn, isAdmin, activeTab]);
+
+  const runLookup = async () => {
+    const query = lookupQuery.trim();
+    if (query.length < 2) {
+      setLookupError('Enter at least 2 characters to search.');
+      setLookupResult(null);
+      return;
+    }
+    setLookupLoading(true);
+    setLookupError('');
+    setLookupResult(null);
+    try {
+      const data = await adminApiPost('/api/portal-admin/lookup', { query });
+      setLookupResult(data);
+    } catch (err) {
+      setLookupError(err.message || 'Lookup failed.');
+    } finally {
+      setLookupLoading(false);
+    }
+  };
+
+  const handleDownloadCsv = async () => {
+    setExportDownloading(true);
+    setExportError('');
+    try {
+      await downloadAdminDingConnectCsv();
+    } catch (err) {
+      setExportError(err.message || 'Download failed.');
+    } finally {
+      setExportDownloading(false);
+    }
+  };
+
+  if (!signedIn) {
+    return (
+      <PortalLayout>
+        <div className="portal-card portal-content portal-admin-card">
+          <PortalSectionLinks current="admin" isAdmin={false} />
+          <div className="portal-session-banner" role="status">
+            <p className="portal-session-banner-title">Sign in required</p>
+            <p className="portal-session-banner-text">
+              Admin tools require a portal session.{' '}
+              <a href={portalHubHref()}>Sign in on Profile</a> with your magic link first.
+            </p>
+          </div>
+        </div>
+      </PortalLayout>
+    );
+  }
+
+  if (!isAdmin) {
+    return (
+      <PortalLayout>
+        <div className="portal-card portal-content portal-admin-card">
+          <PortalSectionLinks current="admin" isAdmin={false} />
+          <div className="portal-session-banner" role="status">
+            <p className="portal-session-banner-title">Access denied</p>
+            <p className="portal-session-banner-text">
+              Your account is not on the admin allowlist. Contact operations if you need access.
+            </p>
+          </div>
+        </div>
+      </PortalLayout>
+    );
+  }
+
+  const thresholdLabel =
+    highGradesThreshold != null
+      ? highGradesThreshold
+      : dashboard?.gradeThreshold != null
+        ? dashboard.gradeThreshold
+        : 65;
+
+  return (
+    <PortalLayout>
+      <div className="portal-card portal-content portal-admin-card">
+        <PortalSectionLinks current="admin" isAdmin={isAdmin} />
+        <h2 className="portal-admin-title">
+          Admin
+          <PortalRoleBadge isAdmin className="portal-welcome-role" />
+        </h2>
+        <p className="portal-admin-lead">
+          Sync status, student lookup, high-grade rewards, and DingConnect+ bulk top-up export.
+        </p>
+
+        <nav className="portal-admin-tabs" aria-label="Admin sections">
+          {[
+            { id: 'overview', label: 'Overview' },
+            { id: 'lookup', label: 'Student lookup' },
+            { id: 'high-grades', label: `Grades above ${thresholdLabel}%` },
+            { id: 'dingconnect', label: 'DingConnect+ CSV' },
+          ].map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              className={`portal-admin-tab${activeTab === tab.id ? ' is-active' : ''}`}
+              aria-selected={activeTab === tab.id}
+              onClick={() => setActiveTab(tab.id)}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </nav>
+
+        {activeTab === 'overview' ? (
+          <section className="portal-admin-panel" aria-label="Overview">
+            {dashboardLoading ? <p className="portal-admin-status">Loading dashboard…</p> : null}
+            {dashboardError ? (
+              <p className="portal-admin-status portal-admin-status--error" role="alert">
+                {dashboardError}
+              </p>
+            ) : null}
+            {dashboard && !dashboardLoading ? (
+              <dl className="portal-admin-stats">
+                <div className="portal-admin-stat-row">
+                  <dt>Classroom sync</dt>
+                  <dd>{dashboard.classroomEnabled ? 'Enabled' : 'Disabled'}</dd>
+                </div>
+                <div className="portal-admin-stat-row">
+                  <dt>{dashboard.rolesTab || 'Classroom Roles'} rows</dt>
+                  <dd>{dashboard.rolesRows ?? '—'}</dd>
+                </div>
+                <div className="portal-admin-stat-row">
+                  <dt>{dashboard.gradesTab || 'Classroom Grades'} rows</dt>
+                  <dd>{dashboard.gradesRows ?? '—'}</dd>
+                </div>
+                <div className="portal-admin-stat-row">
+                  <dt>Grade reward threshold</dt>
+                  <dd>&gt; {dashboard.gradeThreshold ?? 65}%</dd>
+                </div>
+                <div className="portal-admin-stat-row">
+                  <dt>DingConnect+ amount</dt>
+                  <dd>{dashboard.dingConnectTopUpAmount || '—'}</dd>
+                </div>
+                <div className="portal-admin-stat-row">
+                  <dt>DingConnect+ SKU</dt>
+                  <dd className="portal-admin-mono">{dashboard.dingConnectTopUpSku || '—'}</dd>
+                </div>
+              </dl>
+            ) : null}
+            {dashboard?.syncHint ? <p className="portal-admin-hint">{dashboard.syncHint}</p> : null}
+          </section>
+        ) : null}
+
+        {activeTab === 'lookup' ? (
+          <section className="portal-admin-panel" aria-label="Student lookup">
+            <div className="portal-admin-lookup-form">
+              <label htmlFor="portal-admin-lookup" className="portal-admin-lookup-label">
+                Search by name, AESOP ID, or email
+              </label>
+              <div className="portal-admin-lookup-row">
+                <input
+                  id="portal-admin-lookup"
+                  type="search"
+                  className="portal-admin-lookup-input"
+                  value={lookupQuery}
+                  onChange={(e) => setLookupQuery(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      runLookup();
+                    }
+                  }}
+                  placeholder="e.g. student name or AESOP ID"
+                  autoComplete="off"
+                />
+                <button
+                  type="button"
+                  className="portal-admin-action"
+                  onClick={runLookup}
+                  disabled={lookupLoading}
+                >
+                  {lookupLoading ? 'Searching…' : 'Search'}
+                </button>
+              </div>
+            </div>
+            {lookupError ? (
+              <p className="portal-admin-status portal-admin-status--error" role="alert">
+                {lookupError}
+              </p>
+            ) : null}
+            {lookupResult?.matches?.length > 1 ? (
+              <p className="portal-admin-hint">
+                Showing detail for the best match ({lookupResult.matches.length} found).
+              </p>
+            ) : null}
+            {lookupResult?.detail ? (
+              <div className="portal-admin-lookup-detail">
+                <h3 className="portal-admin-subheading">{lookupResult.detail.name || 'Student'}</h3>
+                <dl className="portal-admin-stats">
+                  <div className="portal-admin-stat-row">
+                    <dt>AESOP ID</dt>
+                    <dd className="portal-admin-mono">{lookupResult.detail.id || '—'}</dd>
+                  </div>
+                  <div className="portal-admin-stat-row">
+                    <dt>Email</dt>
+                    <dd>{lookupResult.detail.email || '—'}</dd>
+                  </div>
+                  <div className="portal-admin-stat-row">
+                    <dt>Ding number</dt>
+                    <dd className="portal-admin-mono">{lookupResult.detail.dingNumber || '—'}</dd>
+                  </div>
+                  <div className="portal-admin-stat-row">
+                    <dt>Role</dt>
+                    <dd>{lookupResult.detail.role || '—'}</dd>
+                  </div>
+                  <div className="portal-admin-stat-row">
+                    <dt>Class</dt>
+                    <dd>{lookupResult.detail.classSection || '—'}</dd>
+                  </div>
+                  <div className="portal-admin-stat-row">
+                    <dt>Grade</dt>
+                    <dd>{lookupResult.detail.calculatedGrade || '—'}</dd>
+                  </div>
+                </dl>
+                {lookupResult.detail.dingHistory?.length > 0 ? (
+                  <div className="portal-admin-lookup-section">
+                    <h4 className="portal-admin-subheading-sm">Recent Ding changes</h4>
+                    <table className="portal-admin-table">
+                      <thead>
+                        <tr>
+                          <th scope="col">When</th>
+                          <th scope="col">Ding number</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {lookupResult.detail.dingHistory.map((row, i) => (
+                          <tr key={`${row.atMs}-${row.dingNumber}-${i}`}>
+                            <td>{formatPortalDingHistoryAt(row.atMs)}</td>
+                            <td className="portal-admin-mono">{row.dingNumber}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : null}
+                {lookupResult.detail.liveClasses?.length > 0 ? (
+                  <div className="portal-admin-lookup-section">
+                    <h4 className="portal-admin-subheading-sm">Live assignment grades</h4>
+                    {lookupResult.detail.liveClasses.map((cls) => (
+                      <div key={cls.label || cls.courseId} className="portal-admin-live-class">
+                        <p className="portal-admin-live-class-name">{cls.label}</p>
+                        <PortalAssignmentTable assignments={cls.assignments || []} />
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+            {lookupResult && !lookupResult.detail && !lookupLoading && !lookupError ? (
+              <p className="portal-admin-status">No students matched that search.</p>
+            ) : null}
+          </section>
+        ) : null}
+
+        {activeTab === 'high-grades' ? (
+          <section className="portal-admin-panel" aria-label="High grade students">
+            <p className="portal-admin-hint">
+              Students with a calculated grade strictly above {thresholdLabel}% from the Classroom Grades sheet.
+            </p>
+            {highGradesLoading ? <p className="portal-admin-status">Loading students…</p> : null}
+            {highGradesError ? (
+              <p className="portal-admin-status portal-admin-status--error" role="alert">
+                {highGradesError}
+              </p>
+            ) : null}
+            {!highGradesLoading && !highGradesError && highGrades.length === 0 ? (
+              <p className="portal-admin-status">No students above the threshold right now.</p>
+            ) : null}
+            {!highGradesLoading && highGrades.length > 0 ? (
+              <div className="portal-admin-table-wrap">
+                <table className="portal-admin-table">
+                  <thead>
+                    <tr>
+                      <th scope="col">Name</th>
+                      <th scope="col">Ding number</th>
+                      <th scope="col">Grade</th>
+                      <th scope="col">Class</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {highGrades.map((student) => (
+                      <tr key={student.email || student.userId || student.name}>
+                        <td>{student.name || '—'}</td>
+                        <td className="portal-admin-mono">{student.dingNumber || '—'}</td>
+                        <td>{student.calculatedGrade || '—'}</td>
+                        <td>{student.classSection || '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : null}
+          </section>
+        ) : null}
+
+        {activeTab === 'dingconnect' ? (
+          <section className="portal-admin-panel" aria-label="DingConnect plus export">
+            <p className="portal-admin-hint">
+              Download a CSV with columns <strong>Number</strong>, <strong>Amount</strong>, and <strong>Sku</strong>{' '}
+              for eligible students (grade &gt; {thresholdLabel}% with a Ding number on file).
+            </p>
+            {exportLoading ? <p className="portal-admin-status">Loading export preview…</p> : null}
+            {exportError ? (
+              <p className="portal-admin-status portal-admin-status--error" role="alert">
+                {exportError}
+              </p>
+            ) : null}
+            {exportPreview && !exportLoading ? (
+              <>
+                <dl className="portal-admin-stats portal-admin-stats--compact">
+                  <div className="portal-admin-stat-row">
+                    <dt>Rows in CSV</dt>
+                    <dd>{exportPreview.rowCount ?? 0}</dd>
+                  </div>
+                  <div className="portal-admin-stat-row">
+                    <dt>Skipped (no Ding)</dt>
+                    <dd>{exportPreview.skippedWithoutDing ?? 0}</dd>
+                  </div>
+                  <div className="portal-admin-stat-row">
+                    <dt>Amount</dt>
+                    <dd>{exportPreview.amount || '—'}</dd>
+                  </div>
+                  <div className="portal-admin-stat-row">
+                    <dt>SKU</dt>
+                    <dd className="portal-admin-mono">{exportPreview.sku || '—'}</dd>
+                  </div>
+                </dl>
+                <div className="portal-admin-actions">
+                  <button
+                    type="button"
+                    className="portal-admin-action portal-admin-action--primary"
+                    onClick={handleDownloadCsv}
+                    disabled={exportDownloading || !(exportPreview.rowCount > 0)}
+                  >
+                    {exportDownloading ? 'Downloading…' : 'Download CSV'}
+                  </button>
+                </div>
+                {exportPreview.students?.length > 0 ? (
+                  <div className="portal-admin-table-wrap">
+                    <h4 className="portal-admin-subheading-sm">Preview</h4>
+                    <table className="portal-admin-table">
+                      <thead>
+                        <tr>
+                          <th scope="col">Number</th>
+                          <th scope="col">Amount</th>
+                          <th scope="col">Sku</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {exportPreview.students.map((row) => (
+                          <tr key={row.userId || row.dingNumber || row.name}>
+                            <td className="portal-admin-mono">{row.dingNumber}</td>
+                            <td>{exportPreview.amount}</td>
+                            <td className="portal-admin-mono">{exportPreview.sku}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : null}
+              </>
+            ) : null}
+          </section>
+        ) : null}
       </div>
     </PortalLayout>
   );
@@ -1005,6 +1892,9 @@ function PortalShellApp() {
   if (segment === 'faq') {
     return <PortalFaqPage />;
   }
+  if (segment === 'admin') {
+    return <PortalAdminPage />;
+  }
   if (segment === 'profile') {
     if (signedIn) {
       return <PortalProfilePage />;
@@ -1024,6 +1914,7 @@ function PortalProfilePage() {
     setNewDingNumber,
     canUpdateDing,
   } = usePortalStudentRecord();
+  const { isTeacher, isAdmin } = usePortalClassGrade();
 
   /** Single open accordion panel on Edit Ding (others close automatically). */
   const [activeDingPanel, setActiveDingPanel] = useState(null); // null | 'update' | 'history' | 'help'
@@ -1245,7 +2136,7 @@ function PortalProfilePage() {
   return (
     <PortalLayout>
       <div className="portal-card portal-content">
-        <PortalSectionLinks current="profile" />
+        <PortalSectionLinks current="profile" isAdmin={isAdmin} />
         {!canUpdateDing ? (
           <div className="portal-session-banner" role="status">
             <p className="portal-session-banner-title">Session incomplete</p>
@@ -1255,6 +2146,14 @@ function PortalProfilePage() {
             </p>
           </div>
         ) : null}
+
+        {canUpdateDing && (isTeacher || isAdmin) ? (
+          <PortalTeacherRoster
+            rosterEnabled={isTeacher || isAdmin}
+            isAdminView={isAdmin && !isTeacher}
+          />
+        ) : null}
+        {canUpdateDing && !isTeacher ? <PortalStudentGrades isStudent /> : null}
 
         {canUpdateDing ? (
           <section className="portal-ding-section" aria-label="Your number on file">

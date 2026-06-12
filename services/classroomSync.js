@@ -1,6 +1,6 @@
 const { google } = require("googleapis");
 const config = require("../config/secrets");
-const { replaceTabData, resolveColumnIndex } = require("./googleSheets");
+const { replaceTabData, resolveColumnIndex, loadEmailToPeopleProfileMap } = require("./googleSheets");
 const { formatErrorForLog } = require("../utils/errorLogging");
 
 /**
@@ -330,7 +330,17 @@ async function mapWithConcurrency(items, limit, fn) {
   return results;
 }
 
-/** Build the student roster (with per-class grades) for one course. */
+function formatAssignmentGrade(grade, maxPoints) {
+  if (grade != null && maxPoints != null) {
+    return `${grade}/${maxPoints}`;
+  }
+  if (grade != null) {
+    return String(grade);
+  }
+  return "";
+}
+
+/** Build the student roster (with per-class grades and assignments) for one course. */
 async function buildCourseRoster(classroom, course) {
   const students = await paginate(async (pageToken) => {
     const res = await classroom.courses.students.list({
@@ -343,7 +353,7 @@ async function buildCourseRoster(classroom, course) {
 
   /** Classroom userId -> email (for joining submissions) */
   const userIdToEmail = new Map();
-  /** email -> { name, earned, possible } */
+  /** email -> { name, earned, possible, assignments } */
   const studentInfo = new Map();
   for (const s of students) {
     const email = normalizeEmail(s.profile?.emailAddress);
@@ -357,6 +367,7 @@ async function buildCourseRoster(classroom, course) {
       name: s.profile?.name?.fullName || "",
       earned: 0,
       possible: 0,
+      assignments: [],
     });
   }
 
@@ -368,10 +379,13 @@ async function buildCourseRoster(classroom, course) {
     });
     return { items: res.data.courseWork ?? [], next: res.data.nextPageToken ?? undefined };
   });
-  const maxPointsByWork = new Map();
+  const workById = new Map();
   for (const cw of courseWork) {
     if (cw.id) {
-      maxPointsByWork.set(cw.id, typeof cw.maxPoints === "number" ? cw.maxPoints : null);
+      workById.set(cw.id, {
+        title: (cw.title || "").trim() || "Untitled assignment",
+        maxPoints: typeof cw.maxPoints === "number" ? cw.maxPoints : null,
+      });
     }
   }
 
@@ -396,26 +410,58 @@ async function buildCourseRoster(classroom, course) {
     if (!email) {
       continue;
     }
+    const work = workById.get(sub.courseWorkId);
+    if (!work) {
+      continue;
+    }
     const grade = sub.assignedGrade ?? sub.draftGrade ?? null;
-    const maxPoints = maxPointsByWork.get(sub.courseWorkId) ?? null;
+    const maxPoints = work.maxPoints;
+    const acc = studentInfo.get(email);
+    if (!acc) {
+      continue;
+    }
+    acc.assignments.push({
+      title: work.title,
+      grade: grade != null ? grade : null,
+      maxPoints,
+      display: formatAssignmentGrade(grade, maxPoints) || "—",
+    });
     if (grade != null && maxPoints != null) {
-      const acc = studentInfo.get(email);
-      if (acc) {
-        acc.earned += grade;
-        acc.possible += maxPoints;
-      }
+      acc.earned += grade;
+      acc.possible += maxPoints;
     }
   }
 
-  const studentRows = Array.from(studentInfo.entries()).map(([email, info]) => ({
-    email,
-    name: info.name,
-    grade: info.possible > 0 ? `${((info.earned / info.possible) * 100).toFixed(1)}%` : "",
-  }));
+  const studentRows = Array.from(studentInfo.entries()).map(([email, info]) => {
+    info.assignments.sort((a, b) => a.title.localeCompare(b.title));
+    return {
+      email,
+      name: info.name,
+      userId: "",
+      grade: info.possible > 0 ? `${((info.earned / info.possible) * 100).toFixed(1)}%` : "",
+      assignments: info.assignments,
+    };
+  });
   studentRows.sort((a, b) => (a.name || a.email).localeCompare(b.name || b.email));
 
   return { label: courseLabel(course), students: studentRows };
 }
+
+async function enrichStudentsWithPeopleIds(classes) {
+  const profileMap = await loadEmailToPeopleProfileMap();
+  for (const cls of classes) {
+    for (const student of cls.students) {
+      const profile = profileMap.get(normalizeEmail(student.email));
+      student.userId = profile?.id || "";
+      if (!student.name && profile?.name) {
+        student.name = profile.name;
+      }
+    }
+  }
+}
+
+/** Bump when roster payload shape changes (invalidates stale in-memory cache). */
+const ROSTER_CACHE_VERSION = 2;
 
 /** In-memory cache for teacher rosters: email -> { at: number, data }. */
 const TEACHER_ROSTER_TTL_MS = 5 * 60 * 1000;
@@ -444,7 +490,11 @@ async function getTeacherRoster(teacherEmail, options = {}) {
 
   if (!options.force) {
     const cached = teacherRosterCache.get(target);
-    if (cached && Date.now() - cached.at < TEACHER_ROSTER_TTL_MS) {
+    if (
+      cached &&
+      cached.version === ROSTER_CACHE_VERSION &&
+      Date.now() - cached.at < TEACHER_ROSTER_TTL_MS
+    ) {
       return cached.data;
     }
   }
@@ -482,8 +532,88 @@ async function getTeacherRoster(teacherEmail, options = {}) {
   );
   classes.sort((a, b) => a.label.localeCompare(b.label));
 
+  await enrichStudentsWithPeopleIds(classes);
+
   const data = { classes };
-  teacherRosterCache.set(target, { at: Date.now(), data });
+  teacherRosterCache.set(target, { at: Date.now(), version: ROSTER_CACHE_VERSION, data });
+  return data;
+}
+
+/** Bump when student grades payload shape changes. */
+const STUDENT_GRADES_CACHE_VERSION = 2;
+
+/** In-memory cache for student grade detail: email -> { at, data }. */
+const STUDENT_GRADES_TTL_MS = 5 * 60 * 1000;
+const studentGradesCache = new Map();
+
+/**
+ * Live per-class assignment grades for a single enrolled student.
+ * @param {string} studentEmail
+ * @param {{ force?: boolean }} [options]
+ * @returns {Promise<{ classes: Array<{ label: string, grade: string, assignments: Array<{ title: string, display: string }> }> }>}
+ */
+async function getStudentGrades(studentEmail, options = {}) {
+  const target = normalizeEmail(studentEmail);
+  if (!target) {
+    throw new Error("getStudentGrades requires a student email.");
+  }
+
+  if (!options.force) {
+    const cached = studentGradesCache.get(target);
+    if (
+      cached &&
+      cached.version === STUDENT_GRADES_CACHE_VERSION &&
+      Date.now() - cached.at < STUDENT_GRADES_TTL_MS
+    ) {
+      return cached.data;
+    }
+  }
+
+  const classroom = await buildClassroomClient();
+
+  const courses = await paginate(async (pageToken) => {
+    const res = await classroom.courses.list({
+      courseStates: ["ACTIVE"],
+      pageSize: 100,
+      pageToken,
+    });
+    return { items: res.data.courses ?? [], next: res.data.nextPageToken ?? undefined };
+  });
+
+  const withId = courses.filter((c) => c.id);
+
+  const enrolledFlags = await mapWithConcurrency(withId, 8, async (course) => {
+    const students = await paginate(async (pageToken) => {
+      const res = await classroom.courses.students.list({
+        courseId: course.id,
+        pageSize: 100,
+        pageToken,
+      });
+      return { items: res.data.students ?? [], next: res.data.nextPageToken ?? undefined };
+    });
+    return students.some((s) => normalizeEmail(s.profile?.emailAddress) === target);
+  });
+  const myCourses = withId.filter((_, i) => enrolledFlags[i]);
+
+  const rosters = await mapWithConcurrency(myCourses, 6, (course) => buildCourseRoster(classroom, course));
+
+  const classes = rosters
+    .map((roster) => {
+      const student = roster.students.find((s) => normalizeEmail(s.email) === target);
+      if (!student) {
+        return null;
+      }
+      return {
+        label: roster.label,
+        grade: student.grade,
+        assignments: student.assignments,
+      };
+    })
+    .filter(Boolean);
+  classes.sort((a, b) => a.label.localeCompare(b.label));
+
+  const data = { classes };
+  studentGradesCache.set(target, { at: Date.now(), version: STUDENT_GRADES_CACHE_VERSION, data });
   return data;
 }
 
@@ -491,6 +621,7 @@ module.exports = {
   runClassroomSync,
   buildClassroomClient,
   getTeacherRoster,
+  getStudentGrades,
 };
 
 // Allow running directly: `node services/classroomSync.js`.
