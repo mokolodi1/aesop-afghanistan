@@ -20,10 +20,10 @@ setInterval(() => {
  * @param {number} options.max - Maximum number of requests per window
  * @returns {Function} Express middleware
  */
-function createRateLimiter({ windowMs = 15 * 60 * 1000, max = 5 }) {
+function createRateLimiter({ windowMs = 15 * 60 * 1000, max = 5, name = 'default' }) {
   return (req, res, next) => {
-    // Use IP address as key (in production, consider using a more reliable method)
-    const key = req.ip || req.connection.remoteAddress || 'unknown';
+    const ip = req.ip || req.connection.remoteAddress || 'unknown';
+    const key = `${name}:${ip}`;
     const now = Date.now();
 
     const record = rateLimitStore.get(key);

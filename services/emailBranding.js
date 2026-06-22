@@ -41,14 +41,21 @@ function escapeHtml(value) {
 /**
  * Shared layout: paper background, white card, top accent bar, org footer.
  * @param {string} innerHtml — table cell content only
- * @param {{ title?: string }} [options]
+ * @param {{ title?: string, showContactFooter?: boolean }} [options]
  * @returns {string}
  */
 function wrapAesopEmail(innerHtml, options = {}) {
   const { ink, muted, line, paper, card, accent } = AESOP_EMAIL;
+  const showContactFooter = options.showContactFooter !== false;
   const titleTag = options.title
     ? `<title>${escapeHtml(options.title)}</title>`
     : '<title>AESOP Afghanistan</title>';
+  const contactFooter = showContactFooter
+    ? `<br />
+          <a href="tel:${AESOP_CONTACT.phoneTel}" style="color:${muted};text-decoration:none;">${AESOP_CONTACT.phoneDisplay}</a>
+          <span style="color:${line};">&nbsp;·&nbsp;</span>
+          <a href="mailto:${AESOP_CONTACT.email}" style="color:${accent};font-weight:600;text-decoration:none;">${AESOP_CONTACT.email}</a>`
+    : '';
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -73,10 +80,7 @@ function wrapAesopEmail(innerHtml, options = {}) {
         </table>
         <p style="margin:20px 0 0;font-family:${FONT_STACK};font-size:12px;line-height:1.55;color:${muted};max-width:560px;">
           Afghan Education Student Outreach Project (AESOP)<br />
-          <a href="https://aesopafghanistan.org/" style="color:${accent};font-weight:600;text-decoration:none;">aesopafghanistan.org</a><br />
-          <a href="tel:${AESOP_CONTACT.phoneTel}" style="color:${muted};text-decoration:none;">${AESOP_CONTACT.phoneDisplay}</a>
-          <span style="color:${line};">&nbsp;·&nbsp;</span>
-          <a href="mailto:${AESOP_CONTACT.email}" style="color:${accent};font-weight:600;text-decoration:none;">${AESOP_CONTACT.email}</a>
+          <a href="https://aesopafghanistan.org/" style="color:${accent};font-weight:600;text-decoration:none;">aesopafghanistan.org</a>${contactFooter}
         </p>
       </td>
     </tr>

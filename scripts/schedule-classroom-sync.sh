@@ -30,16 +30,17 @@ fi
 # Resolve the app's current image when not provided explicitly.
 if [ -z "$IMAGE" ]; then
   echo "Resolving current image for app '$APP'..."
-  info="$(fly image show -a "$APP" 2>/dev/null || true)"
-  reg="$(printf '%s\n' "$info" | awk -F'= ' '/Registry/{print $2}'  | tr -d '[:space:]')"
-  repo="$(printf '%s\n' "$info" | awk -F'= ' '/Repository/{print $2}' | tr -d '[:space:]')"
-  tag="$(printf '%s\n' "$info" | awk -F'= ' '/Tag/{print $2}'        | tr -d '[:space:]')"
-  if [ -z "$reg" ] || [ -z "$repo" ] || [ -z "$tag" ]; then
+  IMAGE="$(fly image show -a "$APP" --json 2>/dev/null | node -e "
+    const rows = JSON.parse(require('fs').readFileSync(0, 'utf8'));
+    const row = rows.find((entry) => entry.Registry && entry.Repository && entry.Tag) || rows[0];
+    if (!row || !row.Registry || !row.Repository || !row.Tag) process.exit(1);
+    process.stdout.write(row.Registry + '/' + row.Repository + ':' + row.Tag);
+  " || true)"
+  if [ -z "$IMAGE" ]; then
     echo "Error: could not resolve the deployed image automatically." >&2
     echo "Run 'fly image show -a $APP' and pass the image ref as the first argument." >&2
     exit 1
   fi
-  IMAGE="$reg/$repo:$tag"
 fi
 
 echo "App:      $APP"

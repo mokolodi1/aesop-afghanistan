@@ -4,7 +4,6 @@ const {
   AESOP_EMAIL,
   FONT_HEADING,
   FONT_STACK,
-  AESOP_CONTACT,
   escapeHtml,
   wrapAesopEmail,
 } = require('./emailBranding');
@@ -67,16 +66,15 @@ async function verifyMagicLink(token) {
     return { valid: false };
   }
 
-  // Check if already used
-  if (linkData.used) {
-    return { valid: false };
-  }
-
-  // Check if expired
   const now = new Date();
-  if (now > linkData.expiresAt) {
-    magicLinkStore.delete(token);
-    return { valid: false };
+  const expired = now > linkData.expiresAt;
+
+  // Allow resend for used or expired links while token data is still in memory
+  if (linkData.used || expired) {
+    return {
+      valid: false,
+      canResend: !!(linkData.email && linkData.userId),
+    };
   }
 
   // Mark as used
@@ -148,7 +146,7 @@ async function sendMagicLinkEmail(email, token) {
         If you did not request this email, you may disregard it.
       </p>
   `;
-  const emailHtml = wrapAesopEmail(innerHtml, { title: emailSubject });
+  const emailHtml = wrapAesopEmail(innerHtml, { title: emailSubject, showContactFooter: false });
 
   const emailText = [
     'AESOP Afghanistan — Student portal',
@@ -158,8 +156,7 @@ async function sendMagicLinkEmail(email, token) {
     '',
     'If you did not request this email, you may disregard it.',
     '',
-    `AESOP · ${AESOP_CONTACT.phoneDisplay} · ${AESOP_CONTACT.email}`,
-    'https://aesopafghanistan.org/',
+    'AESOP · https://aesopafghanistan.org/',
   ].join('\n');
 
   await sendEmail({
@@ -170,8 +167,38 @@ async function sendMagicLinkEmail(email, token) {
   });
 }
 
+/**
+ * Issue a fresh magic link using data from an expired or used token.
+ * @param {string} token - Previous magic link token
+ * @returns {Promise<{success: boolean, message?: string, error?: string}>}
+ */
+async function resendMagicLinkByToken(token) {
+  if (!token || typeof token !== 'string' || token.length !== 64) {
+    return { success: false, error: 'Invalid token format.' };
+  }
+
+  const linkData = magicLinkStore.get(token);
+  if (!linkData?.email || !linkData.userId) {
+    return {
+      success: false,
+      error: 'This link can no longer be used. Enter your AESOP ID below to request a new link.',
+    };
+  }
+
+  const { email, userId } = linkData;
+  magicLinkStore.delete(token);
+  const { token: newToken } = await generateAndStoreMagicLink(email, userId);
+  await sendMagicLinkEmail(email, newToken);
+
+  return {
+    success: true,
+    message: 'A new magic link has been sent to your registered email.',
+  };
+}
+
 module.exports = {
   generateAndStoreMagicLink,
   verifyMagicLink,
-  sendMagicLinkEmail
+  sendMagicLinkEmail,
+  resendMagicLinkByToken,
 };

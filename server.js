@@ -2,7 +2,7 @@ const express = require('express');
 const path = require('path');
 const config = require('./config/secrets');
 const { checkIdAndSendMagicLink } = require('./services/auth');
-const { verifyMagicLink } = require('./services/magicLink');
+const { verifyMagicLink, resendMagicLinkByToken } = require('./services/magicLink');
 const {
   findProfileByEmail,
   findProfileById,
@@ -16,12 +16,20 @@ const {
   getClassGradeByEmail,
 } = require('./services/googleSheets');
 const { getTeacherRoster, getStudentGrades } = require('./services/classroomSync');
+const { isDatabaseEnabled, checkDatabaseHealth } = require('./db/index');
+const { getRoleByEmailFromDb, getGradesByEmailFromDb } = require('./services/classroomDb');
 const {
-  isAdminEmail,
+  isPortalAdmin,
   getAdminDashboard,
   getHighGradeStudents,
   buildDingConnectTopUpCsv,
   lookupStudentForAdmin,
+  searchAdminStudents,
+  getAdminClassList,
+  getAdminClassRoster,
+  getAdminAllClassesRoster,
+  getAdminViewAsStudent,
+  getAdminViewAsTeacher,
 } = require('./services/adminPortal');
 const {
   sanitizeEmail,
@@ -69,28 +77,47 @@ function resolvePortalContactEmail() {
  * tabs so existing data keeps working during the transition.
  *
  * @param {{ userId: string, email: string, name: string }} params
- * @returns {Promise<{ isTeacher: boolean, teacherClasses: string, classSection: string, calculatedGrade: string }>}
+ * @returns {Promise<{ isTeacher: boolean, teacherClasses: string, classSection: string, calculatedGrade: string, classGrades: Array<{ classSection: string, calculatedGrade: string }> }>}
  */
 async function resolvePortalRoleAndGrade({ userId, email, name }) {
   let isTeacher = false;
   let teacherClasses = '';
   let classSection = '';
   let calculatedGrade = '';
+  let classGrades = [];
 
   const classroomEnabled = !!config.classroom?.enabled;
   const emailKey = email && isValidEmail(email) ? sanitizeEmail(email) : '';
 
   if (classroomEnabled && emailKey) {
     try {
-      const role = await getRoleByEmail(emailKey);
-      if (role.found) {
-        isTeacher = role.isTeacher;
-        teacherClasses = role.teacherClasses;
-      }
-      const grade = await getClassGradeByEmail(emailKey);
-      if (grade.found) {
-        classSection = grade.classSection;
-        calculatedGrade = grade.calculatedGrade;
+      if (isDatabaseEnabled()) {
+        const role = await getRoleByEmailFromDb(emailKey);
+        if (role.found) {
+          isTeacher = role.isTeacher;
+          teacherClasses = role.teacherClasses;
+        }
+        const grades = await getGradesByEmailFromDb(emailKey);
+        if (grades.length > 0) {
+          classGrades = grades.map((row) => ({
+            classSection: row.classSection,
+            calculatedGrade: row.calculatedGrade,
+          }));
+          classSection = classGrades.map((row) => row.classSection).filter(Boolean).join(', ');
+          calculatedGrade = classGrades.length === 1 ? classGrades[0].calculatedGrade : '';
+        }
+      } else {
+        const role = await getRoleByEmail(emailKey);
+        if (role.found) {
+          isTeacher = role.isTeacher;
+          teacherClasses = role.teacherClasses;
+        }
+        const grade = await getClassGradeByEmail(emailKey);
+        if (grade.found) {
+          classSection = grade.classSection;
+          calculatedGrade = grade.calculatedGrade;
+          classGrades = Array.isArray(grade.classGrades) ? grade.classGrades : [];
+        }
       }
     } catch (error) {
       console.warn('Classroom role/grade lookup failed; using legacy tabs:', formatErrorForLog(error));
@@ -111,12 +138,12 @@ async function resolvePortalRoleAndGrade({ userId, email, name }) {
     calculatedGrade = cg.calculatedGrade;
   }
 
-  return { isTeacher, teacherClasses, classSection, calculatedGrade };
+  return { isTeacher, teacherClasses, classSection, calculatedGrade, classGrades };
 }
 
 /**
  * Verify portal session body (userId + email) against the People sheet.
- * @returns {Promise<{ id: string, name: string, email: string, phone: string }|null>}
+ * @returns {Promise<{ id: string, name: string, email: string, phone: string, portalRole: string }|null>}
  */
 async function verifyPortalSessionBody(userId, email) {
   const idKey = sanitizeIdentifier(userId);
@@ -134,7 +161,7 @@ async function verifyPortalSessionBody(userId, email) {
 /**
  * @param {import('express').Response} res
  * @param {{ userId: string, email: string }} body
- * @returns {Promise<{ id: string, name: string, email: string, phone: string }|null>}
+ * @returns {Promise<{ id: string, name: string, email: string, phone: string, portalRole: string }|null>}
  */
 async function requirePortalAdmin(res, body) {
   const profile = await verifyPortalSessionBody(body.userId, body.email);
@@ -142,8 +169,7 @@ async function requirePortalAdmin(res, body) {
     res.status(403).json({ error: 'Unable to continue. Please sign in again from the magic link.' });
     return null;
   }
-  const emailSan = sanitizeEmail(profile.email);
-  if (!isAdminEmail(emailSan)) {
+  if (!isPortalAdmin(profile)) {
     res.status(403).json({ error: 'Admin access required.' });
     return null;
   }
@@ -218,7 +244,7 @@ app.get('/health', (req, res) => {
 });
 
 // Rate limiter for magic link requests (5 requests per 15 minutes per IP)
-const magicLinkRateLimiter = createRateLimiter({ windowMs: 15 * 60 * 1000, max: 5 });
+const magicLinkRateLimiter = createRateLimiter({ name: 'magic-link', windowMs: 15 * 60 * 1000, max: 5 });
 
 // Request magic link
 app.post('/api/request-magic-link', magicLinkRateLimiter, async (req, res) => {
@@ -268,8 +294,33 @@ app.post('/api/request-magic-link', magicLinkRateLimiter, async (req, res) => {
   }
 });
 
+// Resend magic link for an expired or used token (same rate limit as new requests)
+app.post('/api/resend-magic-link', magicLinkRateLimiter, async (req, res) => {
+  try {
+    const { token } = req.body;
+
+    if (!token || typeof token !== 'string') {
+      return res.status(400).json({ error: 'Token is required' });
+    }
+
+    if (!isValidToken(token)) {
+      return res.status(400).json({ error: 'Invalid token format' });
+    }
+
+    const result = await resendMagicLinkByToken(token);
+    if (!result.success) {
+      return res.status(400).json({ error: result.error || 'Unable to resend magic link.' });
+    }
+
+    res.json({ success: true, message: result.message });
+  } catch (error) {
+    console.error('Error resending magic link:', formatErrorForLog(error));
+    res.status(500).json({ error: 'An error occurred sending the link.' });
+  }
+});
+
 // Rate limiter for token verification (10 attempts per 15 minutes per IP)
-const verifyRateLimiter = createRateLimiter({ windowMs: 15 * 60 * 1000, max: 10 });
+const verifyRateLimiter = createRateLimiter({ name: 'verify-magic-link', windowMs: 15 * 60 * 1000, max: 10 });
 
 // Verify magic link (changed to POST to prevent token exposure in URLs/logs)
 app.post('/api/verify-magic-link', verifyRateLimiter, async (req, res) => {
@@ -319,13 +370,13 @@ app.post('/api/verify-magic-link', verifyRateLimiter, async (req, res) => {
         }
       }
 
-      const { isTeacher, teacherClasses, classSection, calculatedGrade } =
+      const { isTeacher, teacherClasses, classSection, calculatedGrade, classGrades } =
         await resolvePortalRoleAndGrade({
           userId: studentUserId,
           email: emailFromSheet,
           name: studentName,
         });
-      const isAdmin = isAdminEmail(emailFromSheet);
+      const isAdmin = isPortalAdmin({ email: emailFromSheet, portalRole: profile?.portalRole });
 
       res.json({
         success: true,
@@ -336,13 +387,17 @@ app.post('/api/verify-magic-link', verifyRateLimiter, async (req, res) => {
         newDingNumber,
         classSection,
         calculatedGrade,
+        classGrades,
         isTeacher,
         teacherClasses,
         isAdmin,
         message: 'Magic link verified successfully',
       });
     } else {
-      res.status(401).json({ error: 'Invalid or expired magic link' });
+      res.status(401).json({
+        error: 'Invalid or expired magic link.',
+        canResend: result.canResend === true,
+      });
     }
   } catch (error) {
     // Log error but don't expose details to client
@@ -352,19 +407,19 @@ app.post('/api/verify-magic-link', verifyRateLimiter, async (req, res) => {
 });
 
 // Rate limiter for updating ding number from the portal
-const dingUpdateRateLimiter = createRateLimiter({ windowMs: 15 * 60 * 1000, max: 20 });
+const dingUpdateRateLimiter = createRateLimiter({ name: 'update-ding', windowMs: 15 * 60 * 1000, max: 20 });
 
-const portalDingHelpRateLimiter = createRateLimiter({ windowMs: 15 * 60 * 1000, max: 8 });
+const portalDingHelpRateLimiter = createRateLimiter({ name: 'portal-ding-help', windowMs: 15 * 60 * 1000, max: 8 });
 
-const portalDingHistoryRateLimiter = createRateLimiter({ windowMs: 15 * 60 * 1000, max: 40 });
+const portalDingHistoryRateLimiter = createRateLimiter({ name: 'portal-ding-history', windowMs: 15 * 60 * 1000, max: 40 });
 
-const portalClassGradeRateLimiter = createRateLimiter({ windowMs: 15 * 60 * 1000, max: 40 });
+const portalClassGradeRateLimiter = createRateLimiter({ name: 'portal-class-grade', windowMs: 15 * 60 * 1000, max: 40 });
 
-const portalTeacherRosterRateLimiter = createRateLimiter({ windowMs: 15 * 60 * 1000, max: 20 });
+const portalTeacherRosterRateLimiter = createRateLimiter({ name: 'portal-teacher-roster', windowMs: 15 * 60 * 1000, max: 20 });
 
-const portalStudentGradesRateLimiter = createRateLimiter({ windowMs: 15 * 60 * 1000, max: 20 });
+const portalStudentGradesRateLimiter = createRateLimiter({ name: 'portal-student-grades', windowMs: 15 * 60 * 1000, max: 20 });
 
-const portalAdminRateLimiter = createRateLimiter({ windowMs: 15 * 60 * 1000, max: 40 });
+const portalAdminRateLimiter = createRateLimiter({ name: 'portal-admin', windowMs: 15 * 60 * 1000, max: 200 });
 
 app.post('/api/update-ding-number', dingUpdateRateLimiter, async (req, res) => {
   try {
@@ -599,18 +654,19 @@ app.post('/api/portal-class-grade', portalClassGradeRateLimiter, async (req, res
 
     const studentName = typeof profile.name === 'string' ? profile.name : '';
     const profileEmail = profile?.email ? sanitizeEmail(profile.email) : emailSan;
-    const { isTeacher, teacherClasses, classSection, calculatedGrade } =
+    const { isTeacher, teacherClasses, classSection, calculatedGrade, classGrades } =
       await resolvePortalRoleAndGrade({
         userId,
         email: profileEmail,
         name: studentName,
       });
-    const isAdmin = isAdminEmail(profileEmail);
+    const isAdmin = isPortalAdmin({ email: profileEmail, portalRole: profile?.portalRole });
 
     res.json({
       success: true,
       classSection,
       calculatedGrade,
+      classGrades,
       isTeacher,
       teacherClasses,
       isAdmin,
@@ -697,7 +753,7 @@ app.post('/api/portal-teacher-roster', portalTeacherRosterRateLimiter, async (re
 
     // Teachers and admins may pull class rosters.
     const role = await getRoleByEmail(profileEmail);
-    if (!isAdminEmail(profileEmail) && (!role.found || !role.isTeacher)) {
+    if (!isPortalAdmin({ email: profileEmail, portalRole: profile?.portalRole }) && (!role.found || !role.isTeacher)) {
       return res.status(403).json({ error: 'Only teachers can view class rosters.' });
     }
 
@@ -738,7 +794,31 @@ app.post('/api/portal-admin/lookup', portalAdminRateLimiter, async (req, res) =>
     res.json({ success: true, ...result });
   } catch (error) {
     console.error('Error in admin student lookup:', formatErrorForLog(error));
-    res.status(500).json({ error: 'Could not complete lookup.' });
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Could not complete lookup.',
+    });
+  }
+});
+
+app.post('/api/portal-admin/search-students', portalAdminRateLimiter, async (req, res) => {
+  try {
+    const profile = await requirePortalAdmin(res, req.body);
+    if (!profile) {
+      return;
+    }
+    const query = typeof req.body.query === 'string' ? req.body.query.trim() : '';
+    if (query.length < 2) {
+      return res.status(400).json({ success: false, error: 'Enter at least 2 characters to search.' });
+    }
+    const data = await searchAdminStudents(query);
+    res.json({ success: true, ...data });
+  } catch (error) {
+    console.error('Error in admin student search:', formatErrorForLog(error));
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Could not search students.',
+    });
   }
 });
 
@@ -759,6 +839,149 @@ app.post('/api/portal-admin/high-grades', portalAdminRateLimiter, async (req, re
     console.error('Error loading high-grade students:', formatErrorForLog(error));
     res.status(500).json({ error: 'Could not load high-grade students.' });
   }
+});
+
+app.post('/api/portal-admin/all-classes', portalAdminRateLimiter, async (req, res) => {
+  try {
+    const profile = await requirePortalAdmin(res, req.body);
+    if (!profile) {
+      return;
+    }
+    if (!config.classroom?.enabled) {
+      return res.status(503).json({ success: false, error: 'Classroom data is not enabled.' });
+    }
+    const data = await getAdminClassList();
+    res.json({ success: true, ...data });
+  } catch (error) {
+    console.error('Error loading admin class list:', formatErrorForLog(error));
+    res.status(500).json({ success: false, error: 'Could not load classes from Google Classroom.' });
+  }
+});
+
+app.post('/api/portal-admin/class-roster', portalAdminRateLimiter, async (req, res) => {
+  try {
+    const profile = await requirePortalAdmin(res, req.body);
+    if (!profile) {
+      return;
+    }
+    if (!config.classroom?.enabled) {
+      return res.status(503).json({ success: false, error: 'Classroom data is not enabled.' });
+    }
+    const courseId = typeof req.body.courseId === 'string' ? req.body.courseId.trim() : '';
+    if (!courseId) {
+      return res.status(400).json({ success: false, error: 'courseId is required.' });
+    }
+    const live = req.body.live === true;
+    const roster = await getAdminClassRoster(courseId, { live });
+    res.json({ success: true, ...roster });
+  } catch (error) {
+    console.error('Error loading admin class roster:', formatErrorForLog(error));
+    const message =
+      error && error.message && String(error.message).includes('not found')
+        ? 'That class could not be loaded.'
+        : 'Could not load this class from Google Classroom.';
+    res.status(500).json({ success: false, error: message });
+  }
+});
+
+app.post('/api/portal-admin/view/student', portalAdminRateLimiter, async (req, res) => {
+  try {
+    const profile = await requirePortalAdmin(res, req.body);
+    if (!profile) {
+      return;
+    }
+    const targetUserId = sanitizeIdentifier(req.body.targetUserId);
+    if (!targetUserId) {
+      return res.status(400).json({ success: false, error: 'targetUserId is required.' });
+    }
+    const data = await getAdminViewAsStudent(targetUserId, { live: req.body.live === true });
+    res.json({ success: true, ...data });
+  } catch (error) {
+    console.error('Error in admin view-as student:', formatErrorForLog(error));
+    res.status(500).json({ success: false, error: error.message || 'Could not load student view.' });
+  }
+});
+
+app.post('/api/portal-admin/view/teacher', portalAdminRateLimiter, async (req, res) => {
+  try {
+    const profile = await requirePortalAdmin(res, req.body);
+    if (!profile) {
+      return;
+    }
+    const targetUserId = sanitizeIdentifier(req.body.targetUserId);
+    if (!targetUserId) {
+      return res.status(400).json({ success: false, error: 'targetUserId is required.' });
+    }
+    const data = await getAdminViewAsTeacher(targetUserId, { live: req.body.live === true });
+    res.json({ success: true, ...data });
+  } catch (error) {
+    console.error('Error in admin view-as teacher:', formatErrorForLog(error));
+    res.status(500).json({ success: false, error: error.message || 'Could not load teacher view.' });
+  }
+});
+
+app.post('/api/portal-admin/impersonate', portalAdminRateLimiter, async (req, res) => {
+  try {
+    const profile = await requirePortalAdmin(res, req.body);
+    if (!profile) {
+      return;
+    }
+    const targetUserId = sanitizeIdentifier(req.body.targetUserId);
+    if (!targetUserId) {
+      return res.status(400).json({ success: false, error: 'targetUserId is required.' });
+    }
+    const viewRole = req.body.viewRole === 'teacher' ? 'teacher' : 'student';
+    const targetProfile = await findProfileById(targetUserId);
+    if (!targetProfile) {
+      return res.status(404).json({ success: false, error: 'Person not found for that AESOP ID.' });
+    }
+    const emailFromSheet = sanitizeEmail(targetProfile.email);
+    if (!emailFromSheet) {
+      return res.status(404).json({ success: false, error: 'Person not found for that AESOP ID.' });
+    }
+    const studentName = typeof targetProfile.name === 'string' ? targetProfile.name : '';
+    const studentPhone = typeof targetProfile.phone === 'string' ? targetProfile.phone.trim() : '';
+    let newDingNumber = '';
+    const ding = await findLatestDingNumberById(targetUserId);
+    if (ding != null && String(ding).trim() !== '') {
+      newDingNumber = String(ding).trim();
+    }
+    const { isTeacher, teacherClasses, classSection, calculatedGrade, classGrades } =
+      await resolvePortalRoleAndGrade({
+        userId: targetUserId,
+        email: emailFromSheet,
+        name: studentName,
+      });
+    const effectiveIsTeacher = viewRole === 'teacher';
+    res.json({
+      success: true,
+      email: emailFromSheet,
+      name: studentName,
+      phone: studentPhone,
+      userId: targetUserId,
+      newDingNumber,
+      classSection,
+      calculatedGrade,
+      classGrades,
+      isTeacher: effectiveIsTeacher,
+      teacherClasses: effectiveIsTeacher ? teacherClasses : '',
+      isAdmin: false,
+      viewRole,
+      actualIsTeacher: isTeacher,
+    });
+  } catch (error) {
+    console.error('Error in admin impersonate:', formatErrorForLog(error));
+    res.status(500).json({ success: false, error: error.message || 'Could not start impersonation.' });
+  }
+});
+
+app.get('/api/health', async (_req, res) => {
+  const db = await checkDatabaseHealth();
+  res.json({
+    ok: true,
+    database: db,
+    classroomEnabled: !!config.classroom?.enabled,
+  });
 });
 
 app.post('/api/portal-admin/dingconnect-export', portalAdminRateLimiter, async (req, res) => {
@@ -787,6 +1010,15 @@ app.post('/api/portal-admin/dingconnect-export', portalAdminRateLimiter, async (
   }
 });
 
-app.listen(PORT, '0.0.0.0', () => {
+app.listen(PORT, '0.0.0.0', async () => {
   console.log(`Server running on port ${PORT}`);
+  if (process.env.DATABASE_AUTO_MIGRATE === 'true' && isDatabaseEnabled()) {
+    try {
+      const { runMigrations } = require('./db/migrate');
+      await runMigrations();
+      console.log('[db] auto-migrate complete');
+    } catch (error) {
+      console.error('[db] auto-migrate failed:', formatErrorForLog(error));
+    }
+  }
 });

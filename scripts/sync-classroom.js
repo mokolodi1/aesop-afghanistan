@@ -13,10 +13,21 @@
  */
 
 require("../config/secrets");
+const { runMigrations } = require("../db/migrate");
 const { runClassroomSync } = require("../services/classroomSync");
 const { formatErrorForLog } = require("../utils/errorLogging");
+const { isDatabaseEnabled } = require("../db/index");
 
-runClassroomSync()
+async function main() {
+  if (isDatabaseEnabled()) {
+    await runMigrations();
+  } else {
+    console.warn("[sync:classroom] DATABASE_URL not set; skipping DB migrate/persist.");
+  }
+  return runClassroomSync();
+}
+
+main()
   .then((summary) => {
     console.log(
       `Classroom sync complete: ${summary.courses} course(s), ${summary.teachers} teacher(s), ` +

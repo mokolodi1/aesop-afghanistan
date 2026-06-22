@@ -29,6 +29,10 @@ function buildGoogleSheetsConfig(fileSection) {
     nameColumn: envOr("GOOGLE_NAME_COLUMN", "nameColumn", "C"),
     emailColumn: envOr("GOOGLE_EMAIL_COLUMN", "emailColumn", "D"),
     phoneColumn: envOr("GOOGLE_PHONE_COLUMN", "phoneColumn", "E"),
+    /** People sheet column for manual portal role (e.g. Admin). Blank or OFF disables. */
+    peopleRoleColumn: envOr("GOOGLE_PEOPLE_ROLE_COLUMN", "peopleRoleColumn", "F"),
+    /** Header label on People sheet for manual admin flag (used with loadHeaderRow). */
+    peopleRoleHeader: envOr("GOOGLE_PEOPLE_ROLE_COLUMN_HEADER", "peopleRoleHeader", "Admins"),
     dingChangesSheetName: envOr(
       "GOOGLE_DING_CHANGES_SHEET_NAME",
       "dingChangesSheetName",
@@ -214,6 +218,50 @@ function buildAdminConfig(fileSection) {
   };
 }
 
+function buildDatabaseConfig(fileSection) {
+  const f = fileSection && typeof fileSection === "object" ? fileSection : {};
+  const envOr = (envKey, fileKey, fallback = "") => {
+    const fromEnv = process.env[envKey];
+    if (fromEnv != null && String(fromEnv).trim() !== "") {
+      return String(fromEnv).trim();
+    }
+    const fromFile = f[fileKey];
+    if (fromFile != null && String(fromFile).trim() !== "") {
+      return String(fromFile).trim();
+    }
+    return fallback;
+  };
+  return {
+    url: envOr("DATABASE_URL", "url", ""),
+  };
+}
+
+function buildBackupConfig(fileSection) {
+  const f = fileSection && typeof fileSection === "object" ? fileSection : {};
+  const envOr = (envKey, fileKey, fallback = "") => {
+    const fromEnv = process.env[envKey];
+    if (fromEnv != null && String(fromEnv).trim() !== "") {
+      return String(fromEnv).trim();
+    }
+    const fromFile = f[fileKey];
+    if (fromFile != null && String(fromFile).trim() !== "") {
+      return String(fromFile).trim();
+    }
+    return fallback;
+  };
+  return {
+    enabled: envOr("BACKUP_EXPORT_ENABLED", "enabled", "true"),
+    provider: envOr("BACKUP_EXPORT_PROVIDER", "provider", "local"),
+    bucket: envOr("BACKUP_S3_BUCKET", "bucket", ""),
+    prefix: envOr("BACKUP_S3_PREFIX", "prefix", "classroom-sync"),
+    region: envOr("BACKUP_S3_REGION", "region", "auto"),
+    endpoint: envOr("BACKUP_S3_ENDPOINT", "endpoint", ""),
+    accessKeyId: envOr("BACKUP_S3_ACCESS_KEY_ID", "accessKeyId", ""),
+    secretAccessKey: envOr("BACKUP_S3_SECRET_ACCESS_KEY", "secretAccessKey", ""),
+    localDir: envOr("BACKUP_LOCAL_DIR", "localDir", ""),
+  };
+}
+
 /**
  * Optional inbox for portal “contact us” Ding help requests. `PORTAL_CONTACT_EMAIL` overrides file value.
  * @param {Record<string, unknown>} target
@@ -251,6 +299,8 @@ function loadSecretsFromSecretsJsonEnv() {
     parsed.googleSheets = buildGoogleSheetsConfig(parsed.googleSheets);
     parsed.classroom = buildClassroomConfig(parsed.classroom, parsed.email);
     parsed.admin = buildAdminConfig(parsed.admin);
+    parsed.database = buildDatabaseConfig(parsed.database);
+    parsed.backup = buildBackupConfig(parsed.backup);
     mergePortalContactEmail(parsed);
     return parsed;
   } catch (error) {
@@ -282,6 +332,8 @@ function loadSecrets() {
       secrets.googleSheets = buildGoogleSheetsConfig(secrets.googleSheets);
       secrets.classroom = buildClassroomConfig(secrets.classroom, secrets.email);
       secrets.admin = buildAdminConfig(secrets.admin);
+      secrets.database = buildDatabaseConfig(secrets.database);
+      secrets.backup = buildBackupConfig(secrets.backup);
       mergePortalContactEmail(secrets);
       return secrets;
     } catch (error) {
@@ -294,6 +346,8 @@ function loadSecrets() {
     googleSheets: buildGoogleSheetsConfig(undefined),
     classroom: buildClassroomConfig(undefined, emailFromEnv),
     admin: buildAdminConfig(undefined),
+    database: buildDatabaseConfig(undefined),
+    backup: buildBackupConfig(undefined),
     email: emailFromEnv,
     portalContactEmail: "",
   };

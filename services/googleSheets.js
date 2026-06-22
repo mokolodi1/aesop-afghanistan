@@ -109,6 +109,82 @@ function resolveColumnIndex(columnRef) {
   return index - 1;
 }
 
+function resolvePeopleRoleColumnIndex() {
+  const columnRef = config.googleSheets.peopleRoleColumn;
+  if (columnRef == null || String(columnRef).trim() === "" || String(columnRef).trim().toUpperCase() === "OFF") {
+    return null;
+  }
+  try {
+    return resolveColumnIndex(String(columnRef).trim());
+  } catch {
+    return null;
+  }
+}
+
+function readPeoplePortalRole(rowData, roleColumnIndex) {
+  if (roleColumnIndex === null) {
+    return "";
+  }
+  return String(rowData[roleColumnIndex] ?? "").trim();
+}
+
+function peopleRoleHeaderCandidates() {
+  const configured = config.googleSheets.peopleRoleHeader;
+  const fromConfig = configured != null && String(configured).trim() !== "" ? [String(configured).trim()] : [];
+  return [...fromConfig, "Admins", "Admin", "Role", "Portal Role", "PortalRole"];
+}
+
+/**
+ * Read portal admin flag from a People row. Prefer header-based lookup (column X may
+ * extend past the trailing edge of row._rawData when earlier columns end at E).
+ * @param {import("google-spreadsheet").GoogleSpreadsheetRow | null | undefined} row
+ * @param {string[]} rowData
+ * @param {number | null} roleColumnIndex
+ */
+function readPeoplePortalRoleFromRow(row, rowData, roleColumnIndex) {
+  if (row && typeof row.get === "function") {
+    for (const header of peopleRoleHeaderCandidates()) {
+      try {
+        const value = row.get(header);
+        if (value != null && String(value).trim() !== "") {
+          return String(value).trim();
+        }
+      } catch {
+        // Header not registered on this worksheet.
+      }
+    }
+  }
+  return readPeoplePortalRole(rowData, roleColumnIndex);
+}
+
+const peopleHeaderLoaded = new Set();
+
+/** @param {import("google-spreadsheet").GoogleSpreadsheetWorksheet} worksheet */
+async function preparePeopleWorksheet(worksheet) {
+  const key = worksheet.title || "People";
+  if (peopleHeaderLoaded.has(key)) {
+    return;
+  }
+  await worksheet.loadHeaderRow(1);
+  peopleHeaderLoaded.add(key);
+}
+
+/** @param {string} role */
+function isPeopleSheetAdminRole(role) {
+  const normalized = String(role || "").trim().toLowerCase();
+  if (!normalized) {
+    return false;
+  }
+  return (
+    normalized === "admin" ||
+    normalized === "admins" ||
+    normalized === "yes" ||
+    normalized === "y" ||
+    normalized === "true" ||
+    normalized === "1"
+  );
+}
+
 /** Match portal Ding history: 12-hour + comma after date (stored value is still a serial number). */
 const DING_TIMESTAMP_NUMBER_FORMAT = {
   type: "DATE_TIME",
@@ -135,7 +211,7 @@ function googleSheetPlainText(value) {
 /**
  * Find name and email for the row where the id column matches userId.
  * @param {string} userId - User ID to lookup (pre-sanitized)
- * @returns {Promise<{ name: string, email: string, id: string, phone: string }|null>}
+ * @returns {Promise<{ name: string, email: string, id: string, phone: string, portalRole: string }|null>}
  */
 async function findProfileById(userId) {
   try {
@@ -146,6 +222,7 @@ async function findProfileById(userId) {
       throw new Error(`Sheet "${sheetName}" not found.`);
     }
 
+    await preparePeopleWorksheet(worksheet);
     const rows = await worksheet.getRows();
     const idColumnIndex = resolveColumnIndex(config.googleSheets.idColumn || "B");
     const nameColumnIndex = resolveColumnIndex(config.googleSheets.nameColumn || "C");
@@ -161,6 +238,7 @@ async function findProfileById(userId) {
         phoneColumnIndex = null;
       }
     }
+    const roleColumnIndex = resolvePeopleRoleColumnIndex();
     const normalizedId = userId.trim().toLowerCase();
 
     for (const row of rows) {
@@ -179,6 +257,7 @@ async function findProfileById(userId) {
           email: String(rowData[emailColumnIndex] || "").trim(),
           id: String(rowData[idColumnIndex] || "").trim(),
           phone: phoneRaw,
+          portalRole: readPeoplePortalRoleFromRow(row, rowData, roleColumnIndex),
         };
       } catch (rowError) {
         continue;
@@ -209,7 +288,7 @@ async function findEmailById(userId) {
 /**
  * Find name and email (per configured columns) for a user row matching email.
  * @param {string} email - Email to lookup (pre-sanitized)
- * @returns {Promise<{ name: string, email: string, id: string, phone: string }|null>}
+ * @returns {Promise<{ name: string, email: string, id: string, phone: string, portalRole: string }|null>}
  */
 async function findProfileByEmail(email) {
   try {
@@ -220,6 +299,7 @@ async function findProfileByEmail(email) {
       throw new Error(`Sheet "${sheetName}" not found.`);
     }
 
+    await preparePeopleWorksheet(worksheet);
     const rows = await worksheet.getRows();
     const idColumnIndex = resolveColumnIndex(config.googleSheets.idColumn || "B");
     const emailColumnIndex = resolveColumnIndex(config.googleSheets.emailColumn || "D");
@@ -235,6 +315,7 @@ async function findProfileByEmail(email) {
         phoneColumnIndex = null;
       }
     }
+    const roleColumnIndex = resolvePeopleRoleColumnIndex();
     const emailLower = email.toLowerCase().trim();
 
     for (const row of rows) {
@@ -249,6 +330,7 @@ async function findProfileByEmail(email) {
           email: String(rowData[emailColumnIndex] || "").trim(),
           id: String(rowData[idColumnIndex] || "").trim(),
           phone: phoneRaw,
+          portalRole: readPeoplePortalRoleFromRow(row, rowData, roleColumnIndex),
         };
       }
     }
@@ -1140,15 +1222,74 @@ async function getRoleByEmail(email) {
 }
 
 /**
- * Classroom Grades tab lookup by email (populated by the Classroom sync).
- * @param {string} email
- * @returns {Promise<{ found: boolean, classSection: string, calculatedGrade: string }>}
+ * All rows from the Classroom Roles tab (sync output).
+ * @returns {Promise<Array<{ email: string, role: string, teacherClasses: string }>>}
  */
-async function getClassGradeByEmail(email) {
+async function listAllClassroomRoleRows() {
+  try {
+    const sheet = await initGoogleSheets();
+    const cr = config.classroom || {};
+    const tabTitle = cr.rolesSheetName || "Classroom Roles";
+    const worksheet = sheet.sheetsByTitle[tabTitle];
+    if (!worksheet) {
+      return [];
+    }
+
+    const emailIdx = resolveColumnIndex(cr.rolesEmailColumn || "A");
+    const roleIdx = resolveColumnIndex(cr.rolesRoleColumn || "B");
+    const classesIdx = resolveColumnIndex(cr.rolesClassesColumn || "C");
+
+    const rows = await worksheet.getRows();
+    const out = [];
+    for (const row of rows) {
+      const rowData = Array.isArray(row._rawData) ? row._rawData : [];
+      const email = String(rowData[emailIdx] ?? "").trim().toLowerCase();
+      if (!email) {
+        continue;
+      }
+      out.push({
+        email,
+        role: String(rowData[roleIdx] ?? "").trim(),
+        teacherClasses: String(rowData[classesIdx] ?? "").trim(),
+      });
+    }
+    return out;
+  } catch (error) {
+    console.warn("listAllClassroomRoleRows:", formatGoogleSheetsOperationError(error));
+    return [];
+  }
+}
+
+/**
+ * Expand a grade row into per-course entries (handles legacy combined rows).
+ * @param {{ classSection: string, calculatedGrade: string }} row
+ * @returns {Array<{ classSection: string, calculatedGrade: string }>}
+ */
+function expandClassGradeRow(row) {
+  const section = row?.classSection ? String(row.classSection).trim() : "";
+  const calculatedGrade = row?.calculatedGrade ? String(row.calculatedGrade).trim() : "";
+  if (!section) {
+    return calculatedGrade ? [{ classSection: "", calculatedGrade }] : [];
+  }
+  const sections = section
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean);
+  if (sections.length <= 1) {
+    return [{ classSection: section, calculatedGrade }];
+  }
+  return sections.map((classSection) => ({ classSection, calculatedGrade }));
+}
+
+/**
+ * All Classroom Grades rows for one student email (one entry per course).
+ * @param {string} email
+ * @returns {Promise<Array<{ classSection: string, calculatedGrade: string }>>}
+ */
+async function getAllClassGradesByEmail(email) {
   const normalized = typeof email === "string" ? email.trim().toLowerCase() : "";
-  const empty = { found: false, classSection: "", calculatedGrade: "" };
   if (!normalized) {
-    return empty;
+    return [];
   }
 
   try {
@@ -1157,7 +1298,7 @@ async function getClassGradeByEmail(email) {
     const tabTitle = cr.gradesSheetName || "Classroom Grades";
     const worksheet = sheet.sheetsByTitle[tabTitle];
     if (!worksheet) {
-      return empty;
+      return [];
     }
 
     const emailIdx = resolveColumnIndex(cr.gradesEmailColumn || "A");
@@ -1165,25 +1306,60 @@ async function getClassGradeByEmail(email) {
     const gradeIdx = resolveColumnIndex(cr.gradesGradeColumn || "D");
 
     const rows = await worksheet.getRows();
+    const out = [];
     for (const row of rows) {
       const rowData = Array.isArray(row._rawData) ? row._rawData : [];
       const rowEmail = String(rowData[emailIdx] ?? "").trim().toLowerCase();
       if (rowEmail !== normalized) {
         continue;
       }
-      return {
-        found: true,
-        classSection: String(rowData[sectionIdx] ?? "").trim(),
-        calculatedGrade: String(rowData[gradeIdx] ?? "").trim(),
-      };
+      out.push(
+        ...expandClassGradeRow({
+          classSection: String(rowData[sectionIdx] ?? "").trim(),
+          calculatedGrade: String(rowData[gradeIdx] ?? "").trim(),
+        }),
+      );
     }
 
-    return empty;
+    out.sort((a, b) => a.classSection.localeCompare(b.classSection));
+    return out;
   } catch (error) {
     const formattedError = formatGoogleSheetsOperationError(error);
-    console.warn("getClassGradeByEmail:", formattedError);
+    console.warn("getAllClassGradesByEmail:", formattedError);
+    return [];
+  }
+}
+
+/**
+ * Classroom Grades tab lookup by email (populated by the Classroom sync).
+ * @param {string} email
+ * @returns {Promise<{ found: boolean, classSection: string, calculatedGrade: string, classGrades: Array<{ classSection: string, calculatedGrade: string }> }>}
+ */
+async function getClassGradeByEmail(email) {
+  const normalized = typeof email === "string" ? email.trim().toLowerCase() : "";
+  const empty = { found: false, classSection: "", calculatedGrade: "", classGrades: [] };
+  if (!normalized) {
     return empty;
   }
+
+  const classGrades = await getAllClassGradesByEmail(normalized);
+  if (classGrades.length === 0) {
+    return empty;
+  }
+
+  const classSection = classGrades
+    .map((row) => row.classSection)
+    .filter(Boolean)
+    .join(", ");
+  const calculatedGrade =
+    classGrades.length === 1 ? classGrades[0].calculatedGrade : "";
+
+  return {
+    found: true,
+    classSection,
+    calculatedGrade,
+    classGrades,
+  };
 }
 
 /**
@@ -1200,6 +1376,7 @@ async function getUserData(email) {
       throw new Error(`Sheet "${sheetName}" not found.`);
     }
 
+    await preparePeopleWorksheet(worksheet);
     const rows = await worksheet.getRows();
 
     const emailColumnIndex = resolveColumnIndex(config.googleSheets.emailColumn || "D");
@@ -1242,6 +1419,7 @@ async function loadEmailToPeopleProfileMap() {
     const idColumnIndex = resolveColumnIndex(config.googleSheets.idColumn || "B");
     const nameColumnIndex = resolveColumnIndex(config.googleSheets.nameColumn || "C");
     const emailColumnIndex = resolveColumnIndex(config.googleSheets.emailColumn || "D");
+    const roleColumnIndex = resolvePeopleRoleColumnIndex();
 
     for (const row of rows) {
       const rowData = Array.isArray(row._rawData) ? row._rawData : [];
@@ -1254,6 +1432,7 @@ async function loadEmailToPeopleProfileMap() {
       map.set(email, {
         id: String(rowData[idColumnIndex] ?? "").trim(),
         name: String(rowData[nameColumnIndex] ?? "").trim(),
+        portalRole: readPeoplePortalRoleFromRow(row, rowData, roleColumnIndex),
       });
     }
   } catch (error) {
@@ -1448,12 +1627,16 @@ module.exports = {
   getClassroomTabStats,
   loadEmailToPeopleProfileMap,
   listAllClassroomGradeRows,
+  listAllClassroomRoleRows,
   searchPeopleProfiles,
   getPortalDingChangeHistory,
   getPortalClassGradeByStudentName,
   getPortalTeacherByUserId,
   getRoleByEmail,
+  isPeopleSheetAdminRole,
   getClassGradeByEmail,
+  getAllClassGradesByEmail,
+  expandClassGradeRow,
   getUserData,
   initGoogleSheets,
   replaceTabData,

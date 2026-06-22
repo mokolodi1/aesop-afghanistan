@@ -1,7 +1,22 @@
 const { google } = require("googleapis");
 const config = require("../config/secrets");
-const { replaceTabData, resolveColumnIndex, loadEmailToPeopleProfileMap } = require("./googleSheets");
+const {
+  replaceTabData,
+  resolveColumnIndex,
+  loadEmailToPeopleProfileMap,
+  listAllClassroomGradeRows,
+  isPeopleSheetAdminRole,
+} = require("./googleSheets");
 const { formatErrorForLog } = require("../utils/errorLogging");
+const { isDatabaseEnabled } = require("../db/index");
+const {
+  persistClassroomSync,
+  updateSyncRunBackupKey,
+  getStudentGradesFromDb,
+  getTeacherRosterFromDb,
+} = require("./classroomDb");
+const { exportSyncBackup } = require("./backupExport");
+const { mirrorPeopleAndDingFromSheets } = require("./peopleMirror");
 
 /**
  * Read-only Classroom scopes used by the unattended sync. The service account
@@ -63,6 +78,9 @@ async function paginate(fetchPage) {
   return out;
 }
 
+/** Delimiter for multi-class lists in Classroom Roles (course names may contain commas). */
+const CLASS_LIST_DELIMITER = " | ";
+
 /**
  * Human-friendly class label for a course (name plus section when present).
  * @param {import('googleapis').classroom_v1.Schema$Course} course
@@ -109,8 +127,15 @@ async function runClassroomSync() {
   const emailToName = new Map();
   /** email -> Set(class labels enrolled) */
   const studentSections = new Map();
-  /** email -> { earned, possible } */
+  /** `${email}\0${courseLabel}` -> { email, label, earned, possible } */
   const studentGrades = new Map();
+  /** DB payload collectors */
+  const dbCourses = [];
+  const dbAssignments = [];
+  const dbAssignmentGrades = [];
+  const dbEnrollments = [];
+
+  const gradeKey = (email, courseLabel) => `${email}\0${courseLabel}`;
 
   const addToMapSet = (map, key, value) => {
     if (!map.has(key)) {
@@ -126,6 +151,12 @@ async function runClassroomSync() {
       continue;
     }
     const label = courseLabel(course);
+    dbCourses.push({
+      classroomCourseId: course.id,
+      label,
+      section: (course.section || "").trim(),
+      state: course.courseState || "ACTIVE",
+    });
 
     // The impersonated user is not a member of every course in the org. Reading
     // a course they can't access throws 403; skip those instead of aborting the
@@ -164,6 +195,7 @@ async function runClassroomSync() {
         continue;
       }
       addToMapSet(teacherClasses, email, label);
+      dbEnrollments.push({ email, classroomCourseId: course.id, role: "teacher" });
       const name = t.profile?.name?.fullName;
       if (name && !emailToName.has(email)) {
         emailToName.set(email, name);
@@ -181,12 +213,14 @@ async function runClassroomSync() {
         userIdToEmail.set(s.userId, email);
       }
       addToMapSet(studentSections, email, label);
+      dbEnrollments.push({ email, classroomCourseId: course.id, role: "student" });
       const name = s.profile?.name?.fullName;
       if (name && !emailToName.has(email)) {
         emailToName.set(email, name);
       }
-      if (!studentGrades.has(email)) {
-        studentGrades.set(email, { earned: 0, possible: 0 });
+      const key = gradeKey(email, label);
+      if (!studentGrades.has(key)) {
+        studentGrades.set(key, { email, label, earned: 0, possible: 0 });
       }
     }
 
@@ -201,9 +235,17 @@ async function runClassroomSync() {
         return { items: res.data.courseWork ?? [], next: res.data.nextPageToken ?? undefined };
       });
       const maxPointsByWork = new Map();
+      const titleByWork = new Map();
       for (const cw of courseWork) {
         if (cw.id) {
           maxPointsByWork.set(cw.id, typeof cw.maxPoints === "number" ? cw.maxPoints : null);
+          titleByWork.set(cw.id, (cw.title || "").trim() || "Untitled assignment");
+          dbAssignments.push({
+            classroomCourseId: course.id,
+            classroomWorkId: cw.id,
+            title: titleByWork.get(cw.id),
+            maxPoints: maxPointsByWork.get(cw.id),
+          });
         }
       }
 
@@ -230,11 +272,21 @@ async function runClassroomSync() {
         }
         const grade = sub.assignedGrade ?? sub.draftGrade ?? null;
         const maxPoints = maxPointsByWork.get(sub.courseWorkId) ?? null;
+        if (grade != null) {
+          dbAssignmentGrades.push({
+            email,
+            classroomCourseId: course.id,
+            classroomWorkId: sub.courseWorkId,
+            earned: grade,
+            display: formatAssignmentGrade(grade, maxPoints) || "—",
+          });
+        }
         if (grade != null && maxPoints != null) {
-          const acc = studentGrades.get(email) || { earned: 0, possible: 0 };
+          const key = gradeKey(email, label);
+          const acc = studentGrades.get(key) || { email, label, earned: 0, possible: 0 };
           acc.earned += grade;
           acc.possible += maxPoints;
-          studentGrades.set(email, acc);
+          studentGrades.set(key, acc);
         }
       }
     } catch (gradeErr) {
@@ -258,31 +310,36 @@ async function runClassroomSync() {
       [rolesEmailIdx]: email,
       [rolesRoleIdx]: isTeacher ? "Teacher" : "Student",
       [rolesClassesIdx]: isTeacher
-        ? Array.from(teacherClasses.get(email)).sort().join(", ")
+        ? Array.from(teacherClasses.get(email)).sort().join(CLASS_LIST_DELIMITER)
         : "",
     });
   }
   rolesRows.sort((a, b) => String(a[rolesEmailIdx]).localeCompare(String(b[rolesEmailIdx])));
 
-  // Build the Classroom Grades rows (one per enrolled student).
+  // Build the Classroom Grades rows (one per student per course).
   const gradesEmailIdx = resolveColumnIndex(cr.gradesEmailColumn || "A");
   const gradesNameIdx = resolveColumnIndex(cr.gradesNameColumn || "B");
   const gradesSectionIdx = resolveColumnIndex(cr.gradesSectionColumn || "C");
   const gradesGradeIdx = resolveColumnIndex(cr.gradesGradeColumn || "D");
 
   const gradesRows = [];
-  for (const email of studentSections.keys()) {
-    const acc = studentGrades.get(email) || { earned: 0, possible: 0 };
+  for (const acc of studentGrades.values()) {
     const percent =
       acc.possible > 0 ? `${((acc.earned / acc.possible) * 100).toFixed(1)}%` : "";
     gradesRows.push({
-      [gradesEmailIdx]: email,
-      [gradesNameIdx]: emailToName.get(email) || "",
-      [gradesSectionIdx]: Array.from(studentSections.get(email)).sort().join(", "),
+      [gradesEmailIdx]: acc.email,
+      [gradesNameIdx]: emailToName.get(acc.email) || "",
+      [gradesSectionIdx]: acc.label,
       [gradesGradeIdx]: percent,
     });
   }
-  gradesRows.sort((a, b) => String(a[gradesEmailIdx]).localeCompare(String(b[gradesEmailIdx])));
+  gradesRows.sort((a, b) => {
+    const byEmail = String(a[gradesEmailIdx]).localeCompare(String(b[gradesEmailIdx]));
+    if (byEmail !== 0) {
+      return byEmail;
+    }
+    return String(a[gradesSectionIdx]).localeCompare(String(b[gradesSectionIdx]));
+  });
 
   const rolesHeader = {
     [rolesEmailIdx]: "Email",
@@ -296,15 +353,111 @@ async function runClassroomSync() {
     [gradesGradeIdx]: "Calculated Grade",
   };
 
-  await replaceTabData(cr.rolesSheetName || "Classroom Roles", rolesHeader, rolesRows);
-  await replaceTabData(cr.gradesSheetName || "Classroom Grades", gradesHeader, gradesRows);
+  const dualWriteSheets =
+    process.env.CLASSROOM_SHEET_DUAL_WRITE == null ||
+    String(process.env.CLASSROOM_SHEET_DUAL_WRITE).trim().toLowerCase() !== "false";
 
-  return {
+  if (dualWriteSheets) {
+    await replaceTabData(cr.rolesSheetName || "Classroom Roles", rolesHeader, rolesRows);
+    await replaceTabData(cr.gradesSheetName || "Classroom Grades", gradesHeader, gradesRows);
+  }
+
+  const summary = {
     courses: courses.length,
     teachers: teacherClasses.size,
     students: studentSections.size,
     gradeRows: gradesRows.length,
   };
+
+  if (isDatabaseEnabled()) {
+    try {
+      const profileMap = await loadEmailToPeopleProfileMap();
+      const peopleEmails = new Set([...teacherClasses.keys(), ...studentSections.keys()]);
+      for (const row of dbEnrollments) {
+        peopleEmails.add(row.email);
+      }
+      for (const row of dbAssignmentGrades) {
+        peopleEmails.add(row.email);
+      }
+      for (const acc of studentGrades.values()) {
+        peopleEmails.add(acc.email);
+      }
+      const dbPeople = [];
+      for (const email of peopleEmails) {
+        const profile = profileMap.get(email);
+        const isTeacher = teacherClasses.has(email);
+        const sheetPortalRole = profile?.portalRole || "";
+        const portalRole = isPeopleSheetAdminRole(sheetPortalRole)
+          ? "Admin"
+          : isTeacher
+            ? "Teacher"
+            : "Student";
+        dbPeople.push({
+          email,
+          aesopId: profile?.id || "",
+          name: emailToName.get(email) || profile?.name || "",
+          phone: profile?.phone || "",
+          portalRole,
+          teacherClasses: isTeacher
+            ? Array.from(teacherClasses.get(email)).sort().join(CLASS_LIST_DELIMITER)
+            : "",
+        });
+      }
+
+      const dbCourseGrades = [];
+      for (const acc of studentGrades.values()) {
+        const courseEntry = dbCourses.find((entry) => entry.label === acc.label);
+        if (!courseEntry) {
+          continue;
+        }
+        dbCourseGrades.push({
+          email: acc.email,
+          classroomCourseId: courseEntry.classroomCourseId,
+          calculatedPercent:
+            acc.possible > 0 ? `${((acc.earned / acc.possible) * 100).toFixed(1)}%` : "",
+          earned: acc.earned,
+          possible: acc.possible,
+        });
+      }
+
+      const { syncRunId } = await persistClassroomSync({
+        courses: dbCourses,
+        people: dbPeople,
+        enrollments: dbEnrollments,
+        courseGrades: dbCourseGrades,
+        assignments: dbAssignments,
+        assignmentGrades: dbAssignmentGrades,
+        summary,
+      });
+
+      try {
+        const mirrorResult = await mirrorPeopleAndDingFromSheets();
+        console.log(
+          `[classroom-sync] mirrored People/Ding: people=${mirrorResult.people}, dingNumbers=${mirrorResult.dingNumbers}, dingHistory=${mirrorResult.dingHistory}`,
+        );
+      } catch (mirrorErr) {
+        console.warn("[classroom-sync] People/Ding mirror failed:", mirrorErr.message);
+      }
+
+      try {
+        const backupResult = await exportSyncBackup(syncRunId);
+        if (backupResult.manifestKey) {
+          await updateSyncRunBackupKey(syncRunId, backupResult.manifestKey);
+        }
+        console.log("[classroom-sync] backup export:", JSON.stringify(backupResult));
+      } catch (backupErr) {
+        console.warn("[classroom-sync] backup export failed:", backupErr.message);
+      }
+    } catch (dbErr) {
+      console.error("[classroom-sync] database persist failed:", formatErrorForLog(dbErr));
+      if (!dualWriteSheets) {
+        throw dbErr;
+      }
+      console.warn("[classroom-sync] continuing because sheet dual-write succeeded");
+    }
+  }
+
+  return summary;
 }
 
 /**
@@ -341,7 +494,24 @@ function formatAssignmentGrade(grade, maxPoints) {
 }
 
 /** Build the student roster (with per-class grades and assignments) for one course. */
-async function buildCourseRoster(classroom, course) {
+function gradeRowMatchesCourseLabel(gradeRow, label) {
+  const section = gradeRow?.classSection ? String(gradeRow.classSection).trim() : "";
+  if (!section || !label) {
+    return false;
+  }
+  if (section === label) {
+    return true;
+  }
+  // Legacy rows may still list multiple courses in one cell.
+  return section
+    .split(",")
+    .map((part) => part.trim())
+    .includes(label);
+}
+
+async function buildCourseRoster(classroom, course, options = {}) {
+  const includeAssignments = options.includeAssignments !== false;
+  const useSheetGrades = options.useSheetGrades === true;
   const students = await paginate(async (pageToken) => {
     const res = await classroom.courses.students.list({
       courseId: course.id,
@@ -369,6 +539,44 @@ async function buildCourseRoster(classroom, course) {
       possible: 0,
       assignments: [],
     });
+  }
+
+  if (useSheetGrades) {
+    const label = courseLabel(course);
+    const gradeRows = options.gradeRows || (await listAllClassroomGradeRows());
+    const gradeByEmail = new Map();
+    for (const row of gradeRows) {
+      if (!gradeRowMatchesCourseLabel(row, label)) {
+        continue;
+      }
+      const email = normalizeEmail(row.email);
+      if (!email) {
+        continue;
+      }
+      if (String(row.classSection).trim() === label) {
+        gradeByEmail.set(email, row.calculatedGrade || "");
+      }
+    }
+    for (const row of gradeRows) {
+      if (!gradeRowMatchesCourseLabel(row, label)) {
+        continue;
+      }
+      const email = normalizeEmail(row.email);
+      if (!email || gradeByEmail.has(email)) {
+        continue;
+      }
+      gradeByEmail.set(email, row.calculatedGrade || "");
+    }
+
+    const studentRows = Array.from(studentInfo.entries()).map(([email, info]) => ({
+      email,
+      name: info.name,
+      userId: "",
+      grade: gradeByEmail.get(email) || "",
+      assignments: [],
+    }));
+    studentRows.sort((a, b) => (a.name || a.email).localeCompare(b.name || b.email));
+    return { label, students: studentRows };
   }
 
   const courseWork = await paginate(async (pageToken) => {
@@ -420,12 +628,14 @@ async function buildCourseRoster(classroom, course) {
     if (!acc) {
       continue;
     }
-    acc.assignments.push({
-      title: work.title,
-      grade: grade != null ? grade : null,
-      maxPoints,
-      display: formatAssignmentGrade(grade, maxPoints) || "—",
-    });
+    if (includeAssignments) {
+      acc.assignments.push({
+        title: work.title,
+        grade: grade != null ? grade : null,
+        maxPoints,
+        display: formatAssignmentGrade(grade, maxPoints) || "—",
+      });
+    }
     if (grade != null && maxPoints != null) {
       acc.earned += grade;
       acc.possible += maxPoints;
@@ -433,13 +643,15 @@ async function buildCourseRoster(classroom, course) {
   }
 
   const studentRows = Array.from(studentInfo.entries()).map(([email, info]) => {
-    info.assignments.sort((a, b) => a.title.localeCompare(b.title));
+    if (includeAssignments) {
+      info.assignments.sort((a, b) => a.title.localeCompare(b.title));
+    }
     return {
       email,
       name: info.name,
       userId: "",
       grade: info.possible > 0 ? `${((info.earned / info.possible) * 100).toFixed(1)}%` : "",
-      assignments: info.assignments,
+      assignments: includeAssignments ? info.assignments : [],
     };
   });
   studentRows.sort((a, b) => (a.name || a.email).localeCompare(b.name || b.email));
@@ -486,6 +698,17 @@ async function getTeacherRoster(teacherEmail, options = {}) {
   const target = normalizeEmail(teacherEmail);
   if (!target) {
     throw new Error("getTeacherRoster requires a teacher email.");
+  }
+
+  if (!options.force && isDatabaseEnabled()) {
+    try {
+      const fromDb = await getTeacherRosterFromDb(target);
+      if (fromDb && fromDb.classes.length > 0) {
+        return fromDb;
+      }
+    } catch (dbErr) {
+      console.warn("[classroom] teacher roster DB read failed; falling back to live API:", dbErr.message);
+    }
   }
 
   if (!options.force) {
@@ -558,6 +781,17 @@ async function getStudentGrades(studentEmail, options = {}) {
     throw new Error("getStudentGrades requires a student email.");
   }
 
+  if (!options.force && isDatabaseEnabled()) {
+    try {
+      const fromDb = await getStudentGradesFromDb(target);
+      if (fromDb && fromDb.classes.length > 0) {
+        return fromDb;
+      }
+    } catch (dbErr) {
+      console.warn("[classroom] student grades DB read failed; falling back to live API:", dbErr.message);
+    }
+  }
+
   if (!options.force) {
     const cached = studentGradesCache.get(target);
     if (
@@ -617,11 +851,136 @@ async function getStudentGrades(studentEmail, options = {}) {
   return data;
 }
 
+/** Bump when admin all-classes roster payload shape changes. */
+const ALL_CLASSES_ROSTER_CACHE_VERSION = 1;
+
+/** In-memory cache for the org-wide admin roster (single entry, not per-user). */
+const ALL_CLASSES_ROSTER_TTL_MS = 5 * 60 * 1000;
+const allClassesRosterCache = { at: 0, version: 0, data: null };
+
+/**
+ * Live per-class rosters for every accessible ACTIVE course (admin view).
+ * Uses the impersonated Workspace user to list all courses, then builds each
+ * roster with current Google Classroom grades. Inaccessible courses are skipped.
+ *
+ * @param {{ force?: boolean }} [options]
+ * @returns {Promise<{ classes: Array<{ label: string, students: Array<object> }>, skippedCourses: number }>}
+ */
+async function getAllClassesRoster(options = {}) {
+  if (!options.force) {
+    const cached = allClassesRosterCache;
+    if (
+      cached.data &&
+      cached.version === ALL_CLASSES_ROSTER_CACHE_VERSION &&
+      Date.now() - cached.at < ALL_CLASSES_ROSTER_TTL_MS
+    ) {
+      return cached.data;
+    }
+  }
+
+  const classroom = await buildClassroomClient();
+
+  const courses = await paginate(async (pageToken) => {
+    const res = await classroom.courses.list({
+      courseStates: ["ACTIVE"],
+      pageSize: 100,
+      pageToken,
+    });
+    return { items: res.data.courses ?? [], next: res.data.nextPageToken ?? undefined };
+  });
+
+  const withId = courses.filter((c) => c.id);
+
+  const rosterResults = await mapWithConcurrency(withId, 6, async (course) => {
+    try {
+      return await buildCourseRoster(classroom, course);
+    } catch (courseErr) {
+      console.warn(
+        `[classroom] skipping course "${courseLabel(course)}" (roster unavailable): ${courseErr.message}`,
+      );
+      return null;
+    }
+  });
+
+  const classes = rosterResults.filter(Boolean);
+  classes.sort((a, b) => a.label.localeCompare(b.label));
+  await enrichStudentsWithPeopleIds(classes);
+
+  const data = { classes, skippedCourses: withId.length - classes.length };
+  allClassesRosterCache.at = Date.now();
+  allClassesRosterCache.version = ALL_CLASSES_ROSTER_CACHE_VERSION;
+  allClassesRosterCache.data = data;
+  return data;
+}
+
+/** In-memory cache for single-class rosters: courseId -> { at, data }. */
+const CLASS_ROSTER_BY_ID_TTL_MS = 5 * 60 * 1000;
+const classRosterByIdCache = new Map();
+
+/**
+ * List ACTIVE courses visible to the impersonated user (fast — no rosters).
+ * @returns {Promise<Array<{ courseId: string, label: string }>>}
+ */
+async function listActiveCourses() {
+  const classroom = await buildClassroomClient();
+  const courses = await paginate(async (pageToken) => {
+    const res = await classroom.courses.list({
+      courseStates: ["ACTIVE"],
+      pageSize: 100,
+      pageToken,
+    });
+    return { items: res.data.courses ?? [], next: res.data.nextPageToken ?? undefined };
+  });
+  return courses
+    .filter((c) => c.id)
+    .map((c) => ({ courseId: c.id, label: courseLabel(c) }))
+    .sort((a, b) => a.label.localeCompare(b.label));
+}
+
+/**
+ * Live roster for one course (grades from Classroom; assignments optional).
+ * @param {string} courseId
+ * @param {{ force?: boolean, includeAssignments?: boolean }} [options]
+ */
+async function getClassRosterByCourseId(courseId, options = {}) {
+  const id = typeof courseId === "string" ? courseId.trim() : "";
+  if (!id) {
+    throw new Error("getClassRosterByCourseId requires a courseId.");
+  }
+  const includeAssignments = options.includeAssignments === true;
+  const useSheetGrades = options.useSheetGrades !== false && !includeAssignments;
+  const cacheKey = `${id}:${includeAssignments ? "full" : useSheetGrades ? "sheet" : "summary"}`;
+
+  if (!options.force) {
+    const cached = classRosterByIdCache.get(cacheKey);
+    if (cached && Date.now() - cached.at < CLASS_ROSTER_BY_ID_TTL_MS) {
+      return cached.data;
+    }
+  }
+
+  const classroom = await buildClassroomClient();
+  const courseRes = await classroom.courses.get({ id });
+  const course = courseRes.data;
+  if (!course?.id) {
+    throw new Error("Course not found.");
+  }
+
+  const roster = await buildCourseRoster(classroom, course, { includeAssignments, useSheetGrades });
+  await enrichStudentsWithPeopleIds([roster]);
+
+  const data = { courseId: id, label: roster.label, students: roster.students };
+  classRosterByIdCache.set(cacheKey, { at: Date.now(), data });
+  return data;
+}
+
 module.exports = {
   runClassroomSync,
   buildClassroomClient,
   getTeacherRoster,
   getStudentGrades,
+  getAllClassesRoster,
+  listActiveCourses,
+  getClassRosterByCourseId,
 };
 
 // Allow running directly: `node services/classroomSync.js`.
