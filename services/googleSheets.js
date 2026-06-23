@@ -3,6 +3,8 @@ const { GoogleAuth, JWT } = require("google-auth-library");
 const config = require("../config/secrets");
 const { formatGoogleSheetsOperationError } = require("../utils/errorLogging");
 const { dateToGoogleSheetsSerial, sheetDatetimeCellTextToUtcMillis } = require("../utils/dingSheetTime");
+const { isDatabaseEnabled } = require("../db/index");
+const { getPersonByAesopId } = require("./classroomDb");
 
 let doc = null;
 let initPromise = null;
@@ -128,6 +130,95 @@ function readPeoplePortalRole(rowData, roleColumnIndex) {
   return String(rowData[roleColumnIndex] ?? "").trim();
 }
 
+function resolvePeopleStatusColumnIndex() {
+  const columnRef = config.googleSheets.peopleStatusColumn;
+  if (columnRef == null || String(columnRef).trim() === "" || String(columnRef).trim().toUpperCase() === "OFF") {
+    return null;
+  }
+  try {
+    return resolveColumnIndex(String(columnRef).trim());
+  } catch {
+    return null;
+  }
+}
+
+function peopleStatusHeaderCandidates() {
+  const configured = config.googleSheets.peopleStatusHeader;
+  const fromConfig = configured != null && String(configured).trim() !== "" ? [String(configured).trim()] : [];
+  return [...fromConfig, "Status"];
+}
+
+function readPeopleStatus(rowData, statusColumnIndex) {
+  if (statusColumnIndex === null) {
+    return "";
+  }
+  return String(rowData[statusColumnIndex] ?? "").trim();
+}
+
+/**
+ * Read applicant/participant status from People column X (header "Status").
+ * @param {import("google-spreadsheet").GoogleSpreadsheetRow | null | undefined} row
+ * @param {string[]} rowData
+ * @param {number | null} statusColumnIndex
+ */
+function readPeopleStatusFromRow(row, rowData, statusColumnIndex) {
+  if (row && typeof row.get === "function") {
+    for (const header of peopleStatusHeaderCandidates()) {
+      try {
+        const value = row.get(header);
+        if (value != null && String(value).trim() !== "") {
+          return String(value).trim();
+        }
+      } catch {
+        // Header not registered on this worksheet.
+      }
+    }
+  }
+  return readPeopleStatus(rowData, statusColumnIndex);
+}
+
+/** AESOP applicant IDs use the 262 prefix; empty Status defaults to "applied". */
+function isAppliedAesopId(aesopId) {
+  return String(aesopId || "").trim().startsWith("262");
+}
+
+function resolvePeopleStatus(aesopId, rawStatus) {
+  const trimmed = String(rawStatus || "").trim();
+  if (trimmed) {
+    return trimmed;
+  }
+  if (isAppliedAesopId(aesopId)) {
+    return "applied";
+  }
+  return "";
+}
+
+function isAppliedPeopleStatus(status) {
+  return String(status || "").trim().toLowerCase() === "applied";
+}
+
+function resolvePeopleLastLoginColumnIndex() {
+  const columnRef = config.googleSheets.peopleLastLoginColumn;
+  if (columnRef == null || String(columnRef).trim() === "" || String(columnRef).trim().toUpperCase() === "OFF") {
+    return null;
+  }
+  try {
+    return resolveColumnIndex(String(columnRef).trim());
+  } catch {
+    return null;
+  }
+}
+
+function peopleLastLoginHeaderCandidates() {
+  const configured = config.googleSheets.peopleLastLoginHeader;
+  const fromConfig = configured != null && String(configured).trim() !== "" ? [String(configured).trim()] : [];
+  return [...fromConfig, "Last Login", "Last Login "];
+}
+
+function isPeopleLastLoginSyncEnabled() {
+  return resolvePeopleLastLoginColumnIndex() !== null;
+}
+
 function peopleRoleHeaderCandidates() {
   const configured = config.googleSheets.peopleRoleHeader;
   const fromConfig = configured != null && String(configured).trim() !== "" ? [String(configured).trim()] : [];
@@ -165,8 +256,45 @@ async function preparePeopleWorksheet(worksheet) {
   if (peopleHeaderLoaded.has(key)) {
     return;
   }
-  await worksheet.loadHeaderRow(1);
+  try {
+    await worksheet.loadHeaderRow(1);
+  } catch (error) {
+    const msg = error?.message ? String(error.message) : String(error);
+    if (msg.includes("Duplicate header")) {
+      console.warn(
+        `People sheet has duplicate headers; continuing with configured column letters: ${msg}`,
+      );
+    } else {
+      throw error;
+    }
+  }
   peopleHeaderLoaded.add(key);
+}
+
+async function findProfileByIdFromDb(userId) {
+  if (!isDatabaseEnabled()) {
+    return null;
+  }
+  try {
+    const person = await getPersonByAesopId(userId);
+    if (!person?.email) {
+      return null;
+    }
+    return {
+      name: person.name || "",
+      email: person.email,
+      id: person.aesopId || userId,
+      phone: person.phone || "",
+      portalRole: person.portalRole || "",
+      peopleStatus:
+        String(person.portalRole || "").trim().toLowerCase() === "applied"
+          ? "applied"
+          : resolvePeopleStatus(person.aesopId || userId, ""),
+    };
+  } catch (error) {
+    console.warn("Profile DB lookup failed:", error.message);
+    return null;
+  }
 }
 
 /** @param {string} role */
@@ -239,6 +367,7 @@ async function findProfileById(userId) {
       }
     }
     const roleColumnIndex = resolvePeopleRoleColumnIndex();
+    const statusColumnIndex = resolvePeopleStatusColumnIndex();
     const normalizedId = userId.trim().toLowerCase();
 
     for (const row of rows) {
@@ -252,12 +381,17 @@ async function findProfileById(userId) {
         const phoneRaw =
           phoneColumnIndex !== null ? String(rowData[phoneColumnIndex] ?? "").trim() : "";
 
+        const aesopId = String(rowData[idColumnIndex] || "").trim();
         return {
           name: String(rowData[nameColumnIndex] || "").trim(),
           email: String(rowData[emailColumnIndex] || "").trim(),
-          id: String(rowData[idColumnIndex] || "").trim(),
+          id: aesopId,
           phone: phoneRaw,
           portalRole: readPeoplePortalRoleFromRow(row, rowData, roleColumnIndex),
+          peopleStatus: resolvePeopleStatus(
+            aesopId,
+            readPeopleStatusFromRow(row, rowData, statusColumnIndex),
+          ),
         };
       } catch (rowError) {
         continue;
@@ -268,6 +402,10 @@ async function findProfileById(userId) {
   } catch (error) {
     const formattedError = formatGoogleSheetsOperationError(error);
     console.error("Error finding profile by ID in Google Sheet:", formattedError);
+    const fromDb = await findProfileByIdFromDb(userId);
+    if (fromDb) {
+      return fromDb;
+    }
     throw new Error(formattedError, { cause: error });
   }
 }
@@ -316,6 +454,7 @@ async function findProfileByEmail(email) {
       }
     }
     const roleColumnIndex = resolvePeopleRoleColumnIndex();
+    const statusColumnIndex = resolvePeopleStatusColumnIndex();
     const emailLower = email.toLowerCase().trim();
 
     for (const row of rows) {
@@ -325,12 +464,17 @@ async function findProfileByEmail(email) {
       if (rowEmail === emailLower) {
         const phoneRaw =
           phoneColumnIndex !== null ? String(rowData[phoneColumnIndex] ?? "").trim() : "";
+        const aesopId = String(rowData[idColumnIndex] || "").trim();
         return {
           name: String(rowData[nameColumnIndex] || "").trim(),
           email: String(rowData[emailColumnIndex] || "").trim(),
-          id: String(rowData[idColumnIndex] || "").trim(),
+          id: aesopId,
           phone: phoneRaw,
           portalRole: readPeoplePortalRoleFromRow(row, rowData, roleColumnIndex),
+          peopleStatus: resolvePeopleStatus(
+            aesopId,
+            readPeopleStatusFromRow(row, rowData, statusColumnIndex),
+          ),
         };
       }
     }
@@ -788,6 +932,99 @@ async function syncPastDingNumbersToPeople(userId) {
   const cell = peopleSheet.getCell(gridRowIdx, pastColIdx);
   cell.value = summary;
   await peopleSheet.saveUpdatedCells();
+  return true;
+}
+
+/**
+ * Record a successful portal sign-in on the People sheet (column Y by default).
+ * Stores a Google Sheets datetime serial formatted like Ding change timestamps.
+ * @param {string} userId - AESOP ID (People id column)
+ * @param {Date} [loginAt]
+ * @returns {Promise<boolean>}
+ */
+async function recordPeopleLastLogin(userId, loginAt = new Date()) {
+  if (!isPeopleLastLoginSyncEnabled()) {
+    return false;
+  }
+
+  const idKey = typeof userId === "string" ? userId.trim() : "";
+  if (!idKey) {
+    return false;
+  }
+
+  let lastLoginColIdx;
+  try {
+    lastLoginColIdx = resolvePeopleLastLoginColumnIndex();
+    if (lastLoginColIdx === null) {
+      return false;
+    }
+  } catch (error) {
+    console.warn("recordPeopleLastLogin: invalid column config:", error.message);
+    return false;
+  }
+
+  const when = loginAt instanceof Date ? loginAt : new Date(loginAt);
+  const tsSerial = dateToGoogleSheetsSerial(when);
+  if (!Number.isFinite(tsSerial)) {
+    return false;
+  }
+
+  const doc = await initGoogleSheets();
+  const peopleName = config.googleSheets.sheetName || "People";
+  const peopleSheet = doc.sheetsByTitle[peopleName];
+  if (!peopleSheet) {
+    throw new Error(`Sheet "${peopleName}" not found.`);
+  }
+
+  await preparePeopleWorksheet(peopleSheet);
+  const idColIdx = resolveColumnIndex(config.googleSheets.idColumn || "B");
+  const rows = await peopleSheet.getRows();
+  const nid = idKey.toLowerCase();
+  let targetRowNum = null;
+
+  for (const row of rows) {
+    const rowData = Array.isArray(row._rawData) ? row._rawData : [];
+    const rowId = String(rowData[idColIdx] || "").trim().toLowerCase();
+    if (rowId !== nid) {
+      continue;
+    }
+    targetRowNum = row.rowNumber;
+    break;
+  }
+
+  if (targetRowNum == null) {
+    console.warn("recordPeopleLastLogin: no People row matched id", idKey);
+    return false;
+  }
+
+  const gridRowIdx = targetRowNum - 1;
+  await peopleSheet.loadCells({
+    startRowIndex: gridRowIdx,
+    endRowIndex: gridRowIdx + 1,
+    startColumnIndex: lastLoginColIdx,
+    endColumnIndex: lastLoginColIdx + 1,
+  });
+
+  const cell = peopleSheet.getCell(gridRowIdx, lastLoginColIdx);
+  cell.value = tsSerial;
+  await peopleSheet.saveUpdatedCells();
+
+  await peopleSheet._makeSingleUpdateRequest("repeatCell", {
+    range: {
+      sheetId: peopleSheet.sheetId,
+      startRowIndex: gridRowIdx,
+      endRowIndex: gridRowIdx + 1,
+      startColumnIndex: lastLoginColIdx,
+      endColumnIndex: lastLoginColIdx + 1,
+    },
+    cell: {
+      userEnteredFormat: {
+        numberFormat: DING_TIMESTAMP_NUMBER_FORMAT,
+      },
+    },
+    fields: "userEnteredFormat.numberFormat",
+  });
+
   return true;
 }
 
@@ -1415,11 +1652,13 @@ async function loadEmailToPeopleProfileMap() {
       return map;
     }
 
+    await preparePeopleWorksheet(worksheet);
     const rows = await worksheet.getRows();
     const idColumnIndex = resolveColumnIndex(config.googleSheets.idColumn || "B");
     const nameColumnIndex = resolveColumnIndex(config.googleSheets.nameColumn || "C");
     const emailColumnIndex = resolveColumnIndex(config.googleSheets.emailColumn || "D");
     const roleColumnIndex = resolvePeopleRoleColumnIndex();
+    const statusColumnIndex = resolvePeopleStatusColumnIndex();
 
     for (const row of rows) {
       const rowData = Array.isArray(row._rawData) ? row._rawData : [];
@@ -1429,10 +1668,15 @@ async function loadEmailToPeopleProfileMap() {
       if (!email) {
         continue;
       }
+      const aesopId = String(rowData[idColumnIndex] ?? "").trim();
       map.set(email, {
-        id: String(rowData[idColumnIndex] ?? "").trim(),
+        id: aesopId,
         name: String(rowData[nameColumnIndex] ?? "").trim(),
         portalRole: readPeoplePortalRoleFromRow(row, rowData, roleColumnIndex),
+        peopleStatus: resolvePeopleStatus(
+          aesopId,
+          readPeopleStatusFromRow(row, rowData, statusColumnIndex),
+        ),
       });
     }
   } catch (error) {
@@ -1572,6 +1816,7 @@ async function searchPeopleProfiles(query, limit = 25) {
     }
 
     const matches = [];
+    const statusColumnIndex = resolvePeopleStatusColumnIndex();
     for (const row of rows) {
       const rowData = Array.isArray(row._rawData) ? row._rawData : [];
       const id = String(rowData[idColumnIndex] ?? "").trim();
@@ -1583,7 +1828,13 @@ async function searchPeopleProfiles(query, limit = 25) {
       if (!haystack.includes(q)) {
         continue;
       }
-      matches.push({ id, name, email, phone });
+      matches.push({
+        id,
+        name,
+        email,
+        phone,
+        peopleStatus: resolvePeopleStatus(id, readPeopleStatusFromRow(row, rowData, statusColumnIndex)),
+      });
       if (matches.length >= limit) {
         break;
       }
@@ -1593,6 +1844,66 @@ async function searchPeopleProfiles(query, limit = 25) {
     console.warn("searchPeopleProfiles:", formatGoogleSheetsOperationError(error));
     return [];
   }
+}
+
+/**
+ * Write "applied" to People Status (column X) for 262-prefix IDs when the cell is blank.
+ * @returns {Promise<{ updated: number }>}
+ */
+async function backfillAppliedStatusOnPeopleSheet() {
+  const statusColIdx = resolvePeopleStatusColumnIndex();
+  if (statusColIdx === null) {
+    return { updated: 0 };
+  }
+
+  const doc = await initGoogleSheets();
+  const peopleName = config.googleSheets.sheetName || "People";
+  const peopleSheet = doc.sheetsByTitle[peopleName];
+  if (!peopleSheet) {
+    throw new Error(`Sheet "${peopleName}" not found.`);
+  }
+
+  await preparePeopleWorksheet(peopleSheet);
+  peopleSheet.resetLocalCache(true);
+  const rows = await peopleSheet.getRows();
+  const idColIdx = resolveColumnIndex(config.googleSheets.idColumn || "B");
+
+  /** @type {{ gridRowIdx: number }[]} */
+  const pending = [];
+
+  for (const row of rows) {
+    const rowData = Array.isArray(row._rawData) ? row._rawData : [];
+    const aesopId = String(rowData[idColIdx] ?? "").trim();
+    if (!isAppliedAesopId(aesopId)) {
+      continue;
+    }
+    const rawStatus = readPeopleStatusFromRow(row, rowData, statusColIdx);
+    if (String(rawStatus || "").trim()) {
+      continue;
+    }
+    pending.push({ gridRowIdx: row.rowNumber - 1 });
+  }
+
+  if (pending.length === 0) {
+    return { updated: 0 };
+  }
+
+  const minRow = Math.min(...pending.map((entry) => entry.gridRowIdx));
+  const maxRow = Math.max(...pending.map((entry) => entry.gridRowIdx)) + 1;
+  await peopleSheet.loadCells({
+    startRowIndex: minRow,
+    endRowIndex: maxRow,
+    startColumnIndex: statusColIdx,
+    endColumnIndex: statusColIdx + 1,
+  });
+
+  for (const entry of pending) {
+    const cell = peopleSheet.getCell(entry.gridRowIdx, statusColIdx);
+    cell.value = "applied";
+  }
+
+  await peopleSheet.saveUpdatedCells();
+  return { updated: pending.length };
 }
 
 /**
@@ -1624,6 +1935,7 @@ module.exports = {
   findNameByEmail,
   findProfileByEmail,
   findProfileById,
+  recordPeopleLastLogin,
   getClassroomTabStats,
   loadEmailToPeopleProfileMap,
   listAllClassroomGradeRows,
@@ -1634,6 +1946,9 @@ module.exports = {
   getPortalTeacherByUserId,
   getRoleByEmail,
   isPeopleSheetAdminRole,
+  isAppliedPeopleStatus,
+  isAppliedAesopId,
+  resolvePeopleStatus,
   getClassGradeByEmail,
   getAllClassGradesByEmail,
   expandClassGradeRow,
@@ -1643,4 +1958,5 @@ module.exports = {
   resolveColumnIndex,
   syncAllPeoplePastDingColumns,
   syncPastDingNumbersToPeople,
+  backfillAppliedStatusOnPeopleSheet,
 };

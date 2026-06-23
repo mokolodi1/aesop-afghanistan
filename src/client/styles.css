@@ -2035,6 +2035,12 @@ button:disabled {
   border: 1px solid rgba(26, 86, 184, 0.22);
 }
 
+.portal-role-badge--applied {
+  background: #fff7ed;
+  color: #c2410c;
+  border: 1px solid rgba(194, 65, 12, 0.24);
+}
+
 .portal-role-badge--admin {
   background: #fef3c7;
   color: #92400e;
@@ -2109,6 +2115,19 @@ button:disabled {
 
 .portal-admin-panel {
   margin-top: 4px;
+}
+
+.portal-admin-view-as-pinned {
+  margin-top: 1.25rem;
+  margin-bottom: 0.75rem;
+  padding: 1.1rem 1.25rem;
+  border: 1px solid rgba(15, 118, 110, 0.22);
+  border-radius: var(--aesop-radius-md);
+  background: rgba(240, 253, 250, 0.65);
+}
+
+.portal-admin-view-as-pinned .portal-admin-hint {
+  margin-top: 0;
 }
 
 .portal-admin-subheading {

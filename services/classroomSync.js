@@ -6,6 +6,8 @@ const {
   loadEmailToPeopleProfileMap,
   listAllClassroomGradeRows,
   isPeopleSheetAdminRole,
+  isAppliedPeopleStatus,
+  resolvePeopleStatus,
 } = require("./googleSheets");
 const { formatErrorForLog } = require("../utils/errorLogging");
 const { isDatabaseEnabled } = require("../db/index");
@@ -14,6 +16,7 @@ const {
   updateSyncRunBackupKey,
   getStudentGradesFromDb,
   getTeacherRosterFromDb,
+  getAdminClassRosterFromDb,
 } = require("./classroomDb");
 const { exportSyncBackup } = require("./backupExport");
 const { mirrorPeopleAndDingFromSheets } = require("./peopleMirror");
@@ -387,11 +390,14 @@ async function runClassroomSync() {
         const profile = profileMap.get(email);
         const isTeacher = teacherClasses.has(email);
         const sheetPortalRole = profile?.portalRole || "";
-        const portalRole = isPeopleSheetAdminRole(sheetPortalRole)
-          ? "Admin"
-          : isTeacher
-            ? "Teacher"
-            : "Student";
+        const peopleStatus = resolvePeopleStatus(profile?.id, profile?.peopleStatus);
+        const portalRole = isAppliedPeopleStatus(peopleStatus)
+          ? "Applied"
+          : isPeopleSheetAdminRole(sheetPortalRole)
+            ? "Admin"
+            : isTeacher
+              ? "Teacher"
+              : "Student";
         dbPeople.push({
           email,
           aesopId: profile?.id || "",
@@ -703,12 +709,14 @@ async function getTeacherRoster(teacherEmail, options = {}) {
   if (!options.force && isDatabaseEnabled()) {
     try {
       const fromDb = await getTeacherRosterFromDb(target);
-      if (fromDb && fromDb.classes.length > 0) {
+      if (fromDb) {
         return fromDb;
       }
     } catch (dbErr) {
-      console.warn("[classroom] teacher roster DB read failed; falling back to live API:", dbErr.message);
+      console.warn("[classroom] teacher roster DB read failed:", dbErr.message);
+      return { classes: [] };
     }
+    return { classes: [] };
   }
 
   if (!options.force) {
@@ -784,12 +792,14 @@ async function getStudentGrades(studentEmail, options = {}) {
   if (!options.force && isDatabaseEnabled()) {
     try {
       const fromDb = await getStudentGradesFromDb(target);
-      if (fromDb && fromDb.classes.length > 0) {
+      if (fromDb) {
         return fromDb;
       }
     } catch (dbErr) {
-      console.warn("[classroom] student grades DB read failed; falling back to live API:", dbErr.message);
+      console.warn("[classroom] student grades DB read failed:", dbErr.message);
+      return { classes: [] };
     }
+    return { classes: [] };
   }
 
   if (!options.force) {
@@ -950,6 +960,20 @@ async function getClassRosterByCourseId(courseId, options = {}) {
   const includeAssignments = options.includeAssignments === true;
   const useSheetGrades = options.useSheetGrades !== false && !includeAssignments;
   const cacheKey = `${id}:${includeAssignments ? "full" : useSheetGrades ? "sheet" : "summary"}`;
+
+  if (!options.force && isDatabaseEnabled()) {
+    try {
+      const fromDb = await getAdminClassRosterFromDb(id);
+      if (fromDb) {
+        const data = { courseId: id, label: fromDb.label, students: fromDb.students };
+        classRosterByIdCache.set(cacheKey, { at: Date.now(), data });
+        return data;
+      }
+    } catch (dbErr) {
+      console.warn("[classroom] class roster DB read failed:", dbErr.message);
+      throw dbErr;
+    }
+  }
 
   if (!options.force) {
     const cached = classRosterByIdCache.get(cacheKey);

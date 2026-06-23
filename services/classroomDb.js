@@ -99,11 +99,13 @@ async function getRoleByEmailFromDb(email) {
     return { found: false, role: "", isTeacher: false, teacherClasses: "" };
   }
   const role = person.portalRole || "";
+  const normalizedRole = String(role).toLowerCase();
   return {
     found: !!role,
     role,
-    isTeacher: String(role).toLowerCase() === "teacher",
-    isAdmin: String(role).toLowerCase() === "admin",
+    isTeacher: normalizedRole === "teacher",
+    isApplied: normalizedRole === "applied",
+    isAdmin: normalizedRole === "admin",
     teacherClasses: person.teacherClasses || "",
   };
 }
@@ -433,6 +435,35 @@ async function getAdminClassRosterFromDb(courseId) {
     liveFromClassroom: false,
     source: "database",
   };
+}
+
+/**
+ * All synced course grade rows (same shape as listAllClassroomGradeRows from Sheets).
+ * @returns {Promise<Array<{ email: string, name: string, classSection: string, calculatedGrade: string }>|null>}
+ */
+async function listAllClassroomGradeRowsFromDb() {
+  const db = getDb();
+  if (!db) {
+    return null;
+  }
+
+  const rows = await db
+    .select({
+      email: people.email,
+      name: people.name,
+      classSection: courses.label,
+      calculatedGrade: courseGrades.calculatedPercent,
+    })
+    .from(courseGrades)
+    .innerJoin(people, eq(courseGrades.personId, people.id))
+    .innerJoin(courses, eq(courseGrades.courseId, courses.id));
+
+  return rows.map((row) => ({
+    email: normalizeEmail(row.email),
+    name: row.name || "",
+    classSection: row.classSection || "",
+    calculatedGrade: row.calculatedGrade || "",
+  }));
 }
 
 async function getHighGradeStudentsFromDb(threshold) {
@@ -816,6 +847,7 @@ module.exports = {
   getTeacherRosterFromDb,
   getAdminClassListFromDb,
   getAdminClassRosterFromDb,
+  listAllClassroomGradeRowsFromDb,
   getHighGradeStudentsFromDb,
   lookupPersonGradesAndRoleFromDb,
   getDingHistoryFromDb,

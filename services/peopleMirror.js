@@ -5,6 +5,10 @@ const {
   loadEmailToPeopleProfileMap,
   buildLatestDingNumberByUserIdMap,
   getPortalDingChangeHistory,
+  isAppliedPeopleStatus,
+  resolvePeopleStatus,
+  isPeopleSheetAdminRole,
+  backfillAppliedStatusOnPeopleSheet,
 } = require("./googleSheets");
 
 async function upsertPersonFromSheetProfile(profile, syncedAt = new Date()) {
@@ -13,10 +17,16 @@ async function upsertPersonFromSheetProfile(profile, syncedAt = new Date()) {
     return null;
   }
   const email = profile.email.trim().toLowerCase();
-  const portalRole =
+  const peopleStatus = resolvePeopleStatus(profile.id, profile.peopleStatus);
+  let portalRole =
     profile.portalRole && String(profile.portalRole).trim()
       ? String(profile.portalRole).trim()
       : null;
+  if (isAppliedPeopleStatus(peopleStatus)) {
+    portalRole = "Applied";
+  } else if (isPeopleSheetAdminRole(portalRole)) {
+    portalRole = "Admin";
+  }
   const updateSet = {
     aesopId: sql`COALESCE(EXCLUDED.aesop_id, ${people.aesopId})`,
     name: sql`COALESCE(EXCLUDED.name, ${people.name})`,
@@ -160,6 +170,15 @@ async function mirrorDingHistoryFromSheets(options = {}) {
 }
 
 async function mirrorPeopleAndDingFromSheets() {
+  try {
+    const statusBackfill = await backfillAppliedStatusOnPeopleSheet();
+    if (statusBackfill.updated > 0) {
+      console.log(`[people-mirror] backfilled Applied status on ${statusBackfill.updated} People row(s).`);
+    }
+  } catch (error) {
+    console.warn("[people-mirror] Applied status backfill failed:", error.message);
+  }
+
   const peopleResult = await mirrorAllPeopleFromSheets();
   const dingResult = await mirrorDingNumbersFromSheets();
   const historyResult = await mirrorDingHistoryFromSheets();

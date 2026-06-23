@@ -166,6 +166,21 @@ const dingChangeHistory = pgTable(
   }),
 );
 
+const magicLinks = pgTable(
+  "magic_links",
+  {
+    token: varchar("token", { length: 64 }).primaryKey(),
+    email: varchar("email", { length: 320 }).notNull(),
+    userId: varchar("user_id", { length: 64 }),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    used: boolean("used").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+  },
+  (table) => ({
+    expiresAtIdx: index("magic_links_expires_at_idx").on(table.expiresAt),
+  }),
+);
+
 const dingTopups = pgTable(
   "ding_topups",
   {
@@ -199,5 +214,6 @@ module.exports = {
   assignmentGrades,
   dingNumbers,
   dingChangeHistory,
+  magicLinks,
   dingTopups,
 };

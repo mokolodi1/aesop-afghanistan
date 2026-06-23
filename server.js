@@ -7,6 +7,7 @@ const {
   findProfileByEmail,
   findProfileById,
   findLatestDingNumberById,
+  recordPeopleLastLogin,
   appendDingChangeRow,
   syncPastDingNumbersToPeople,
   getPortalDingChangeHistory,
@@ -14,10 +15,12 @@ const {
   getPortalTeacherByUserId,
   getRoleByEmail,
   getClassGradeByEmail,
+  resolvePeopleStatus,
+  isAppliedPeopleStatus,
 } = require('./services/googleSheets');
 const { getTeacherRoster, getStudentGrades } = require('./services/classroomSync');
 const { isDatabaseEnabled, checkDatabaseHealth } = require('./db/index');
-const { getRoleByEmailFromDb, getGradesByEmailFromDb } = require('./services/classroomDb');
+const { getRoleByEmailFromDb, getGradesByEmailFromDb, getPersonByAesopId } = require('./services/classroomDb');
 const {
   isPortalAdmin,
   getAdminDashboard,
@@ -71,15 +74,27 @@ function resolvePortalContactEmail() {
 /**
  * Resolve a signed-in user's role, class/section, and calculated grade.
  *
- * When the Google Classroom sync is enabled, the email-keyed Classroom Roles /
- * Classroom Grades tabs are the source of truth. Anything not found there falls
- * back to the legacy Teachers (by AESOP ID) and Import: Google Grades (by name)
- * tabs so existing data keeps working during the transition.
+ * When the Google Classroom sync is enabled and Postgres is configured, Classroom
+ * roles and grades come from the database (daily sync). People profile, Ding data,
+ * and legacy tabs remain on Google Sheets.
  *
- * @param {{ userId: string, email: string, name: string }} params
- * @returns {Promise<{ isTeacher: boolean, teacherClasses: string, classSection: string, calculatedGrade: string, classGrades: Array<{ classSection: string, calculatedGrade: string }> }>}
+ * @param {{ userId: string, email: string, name: string, peopleStatus?: string }} params
+ * @returns {Promise<{ isTeacher: boolean, teacherClasses: string, classSection: string, calculatedGrade: string, classGrades: Array<{ classSection: string, calculatedGrade: string }>, isApplied: boolean, peopleStatus: string }>}
  */
-async function resolvePortalRoleAndGrade({ userId, email, name }) {
+async function resolvePortalRoleAndGrade({ userId, email, name, peopleStatus = '' }) {
+  const resolvedStatus = resolvePeopleStatus(userId, peopleStatus);
+  if (isAppliedPeopleStatus(resolvedStatus)) {
+    return {
+      isTeacher: false,
+      teacherClasses: '',
+      classSection: '',
+      calculatedGrade: '',
+      classGrades: [],
+      isApplied: true,
+      peopleStatus: resolvedStatus,
+    };
+  }
+
   let isTeacher = false;
   let teacherClasses = '';
   let classSection = '';
@@ -138,7 +153,15 @@ async function resolvePortalRoleAndGrade({ userId, email, name }) {
     calculatedGrade = cg.calculatedGrade;
   }
 
-  return { isTeacher, teacherClasses, classSection, calculatedGrade, classGrades };
+  return {
+    isTeacher,
+    teacherClasses,
+    classSection,
+    calculatedGrade,
+    classGrades,
+    isApplied: false,
+    peopleStatus: resolvedStatus,
+  };
 }
 
 /**
@@ -342,14 +365,38 @@ app.post('/api/verify-magic-link', verifyRateLimiter, async (req, res) => {
     if (result.valid) {
       const sanitizedEmail = sanitizeEmail(result.email);
       let profile = null;
-      if (result.userId) {
-        const idKey = sanitizeIdentifier(result.userId);
-        if (idKey) {
-          profile = await findProfileById(idKey);
+      try {
+        if (result.userId) {
+          const idKey = sanitizeIdentifier(result.userId);
+          if (idKey) {
+            profile = await findProfileById(idKey);
+          }
         }
+        if (!profile) {
+          profile = await findProfileByEmail(sanitizedEmail);
+        }
+      } catch (profileError) {
+        console.warn('Profile sheet lookup failed during verify; using token/DB fallback:', formatErrorForLog(profileError));
       }
-      if (!profile) {
-        profile = await findProfileByEmail(sanitizedEmail);
+      if (!profile && result.userId && isDatabaseEnabled()) {
+        try {
+          const fromDb = await getPersonByAesopId(result.userId);
+          if (fromDb) {
+            profile = {
+              id: fromDb.aesopId || result.userId,
+              name: fromDb.name || '',
+              email: fromDb.email || sanitizedEmail,
+              phone: fromDb.phone || '',
+              portalRole: fromDb.portalRole || '',
+              peopleStatus:
+                String(fromDb.portalRole || '').trim().toLowerCase() === 'applied'
+                  ? 'applied'
+                  : resolvePeopleStatus(fromDb.aesopId || result.userId, ''),
+            };
+          }
+        } catch (dbError) {
+          console.warn('Profile DB lookup failed during verify:', formatErrorForLog(dbError));
+        }
       }
       const emailFromSheet = profile?.email ? sanitizeEmail(profile.email) : sanitizedEmail;
       const studentName = profile?.name || '';
@@ -370,13 +417,20 @@ app.post('/api/verify-magic-link', verifyRateLimiter, async (req, res) => {
         }
       }
 
-      const { isTeacher, teacherClasses, classSection, calculatedGrade, classGrades } =
+      const { isTeacher, teacherClasses, classSection, calculatedGrade, classGrades, isApplied, peopleStatus } =
         await resolvePortalRoleAndGrade({
           userId: studentUserId,
           email: emailFromSheet,
           name: studentName,
+          peopleStatus: profile?.peopleStatus,
         });
       const isAdmin = isPortalAdmin({ email: emailFromSheet, portalRole: profile?.portalRole });
+
+      if (studentUserId) {
+        recordPeopleLastLogin(studentUserId).catch((loginErr) => {
+          console.warn('Last login sheet update failed:', formatErrorForLog(loginErr));
+        });
+      }
 
       res.json({
         success: true,
@@ -391,6 +445,8 @@ app.post('/api/verify-magic-link', verifyRateLimiter, async (req, res) => {
         isTeacher,
         teacherClasses,
         isAdmin,
+        isApplied,
+        peopleStatus,
         message: 'Magic link verified successfully',
       });
     } else {
@@ -654,11 +710,12 @@ app.post('/api/portal-class-grade', portalClassGradeRateLimiter, async (req, res
 
     const studentName = typeof profile.name === 'string' ? profile.name : '';
     const profileEmail = profile?.email ? sanitizeEmail(profile.email) : emailSan;
-    const { isTeacher, teacherClasses, classSection, calculatedGrade, classGrades } =
+    const { isTeacher, teacherClasses, classSection, calculatedGrade, classGrades, isApplied, peopleStatus } =
       await resolvePortalRoleAndGrade({
         userId,
         email: profileEmail,
         name: studentName,
+        peopleStatus: profile?.peopleStatus,
       });
     const isAdmin = isPortalAdmin({ email: profileEmail, portalRole: profile?.portalRole });
 
@@ -670,6 +727,8 @@ app.post('/api/portal-class-grade', portalClassGradeRateLimiter, async (req, res
       isTeacher,
       teacherClasses,
       isAdmin,
+      isApplied,
+      peopleStatus,
     });
   } catch (error) {
     console.error('Error loading portal class/grade:', formatErrorForLog(error));
@@ -752,7 +811,9 @@ app.post('/api/portal-teacher-roster', portalTeacherRosterRateLimiter, async (re
     const profileEmail = profile?.email ? sanitizeEmail(profile.email) : emailSan;
 
     // Teachers and admins may pull class rosters.
-    const role = await getRoleByEmail(profileEmail);
+    const role = isDatabaseEnabled()
+      ? await getRoleByEmailFromDb(profileEmail)
+      : await getRoleByEmail(profileEmail);
     if (!isPortalAdmin({ email: profileEmail, portalRole: profile?.portalRole }) && (!role.found || !role.isTeacher)) {
       return res.status(403).json({ error: 'Only teachers can view class rosters.' });
     }
@@ -946,13 +1007,21 @@ app.post('/api/portal-admin/impersonate', portalAdminRateLimiter, async (req, re
     if (ding != null && String(ding).trim() !== '') {
       newDingNumber = String(ding).trim();
     }
-    const { isTeacher, teacherClasses, classSection, calculatedGrade, classGrades } =
-      await resolvePortalRoleAndGrade({
-        userId: targetUserId,
-        email: emailFromSheet,
-        name: studentName,
-      });
-    const effectiveIsTeacher = viewRole === 'teacher';
+    const {
+      isTeacher,
+      teacherClasses,
+      classSection,
+      calculatedGrade,
+      classGrades,
+      isApplied,
+      peopleStatus,
+    } = await resolvePortalRoleAndGrade({
+      userId: targetUserId,
+      email: emailFromSheet,
+      name: studentName,
+      peopleStatus: targetProfile.peopleStatus,
+    });
+    const effectiveIsTeacher = !isApplied && viewRole === 'teacher';
     res.json({
       success: true,
       email: emailFromSheet,
@@ -960,12 +1029,14 @@ app.post('/api/portal-admin/impersonate', portalAdminRateLimiter, async (req, re
       phone: studentPhone,
       userId: targetUserId,
       newDingNumber,
-      classSection,
-      calculatedGrade,
-      classGrades,
+      classSection: isApplied ? '' : classSection,
+      calculatedGrade: isApplied ? '' : calculatedGrade,
+      classGrades: isApplied ? [] : classGrades,
       isTeacher: effectiveIsTeacher,
       teacherClasses: effectiveIsTeacher ? teacherClasses : '',
       isAdmin: false,
+      isApplied,
+      peopleStatus,
       viewRole,
       actualIsTeacher: isTeacher,
     });

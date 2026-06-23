@@ -5,6 +5,7 @@ const {
   getHighGradeStudentsFromDb,
   getAdminClassListFromDb,
   getAdminClassRosterFromDb,
+  listAllClassroomGradeRowsFromDb,
   getRoleByEmailFromDb,
   getGradesByEmailFromDb,
   getStudentGradesFromDb,
@@ -25,6 +26,8 @@ const {
   expandClassGradeRow,
   getPortalDingChangeHistory,
   isPeopleSheetAdminRole,
+  isAppliedPeopleStatus,
+  resolvePeopleStatus,
 } = require("./googleSheets");
 const { listActiveCourses, getClassRosterByCourseId, getStudentGrades, getTeacherRoster } = require("./classroomSync");
 
@@ -150,6 +153,25 @@ function attachDingNumbers(students, dingByUserId) {
   }
 }
 
+async function getClassroomGradeRowsForAdmin() {
+  if (isDatabaseEnabled()) {
+    try {
+      const fromDb = await listAllClassroomGradeRowsFromDb();
+      if (fromDb) {
+        return fromDb;
+      }
+    } catch (dbErr) {
+      console.warn("[admin] classroom grade rows DB read failed:", dbErr.message);
+    }
+  }
+  return getCachedGradeRows();
+}
+
+async function attachSheetsDingNumbers(students) {
+  const dingByUserId = await getCachedDingNumberMap();
+  attachDingNumbers(students, dingByUserId);
+}
+
 /**
  * @param {string|{ email?: string, portalRole?: string }} emailOrProfile
  * @returns {boolean}
@@ -258,11 +280,13 @@ async function getHighGradeStudents(threshold) {
     try {
       const fromDb = await getHighGradeStudentsFromDb(minGrade);
       if (fromDb) {
+        await attachSheetsDingNumbers(fromDb.students);
         return fromDb;
       }
     } catch (dbErr) {
       console.warn("[admin] high grades DB read failed:", dbErr.message);
     }
+    return { threshold: minGrade, students: [] };
   }
 
   const [gradeRows, emailToProfile, dingByUserId] = await Promise.all([
@@ -354,14 +378,6 @@ async function lookupStudentForAdmin(query) {
       if (fromDb) {
         role = fromDb.role;
         classGrades = fromDb.classGrades;
-        dingHistory = fromDb.dingHistory.map((row) => ({
-          dingNumber: row.dingNumber,
-          timestamp: row.changedAt,
-          source: row.source,
-        }));
-        dingNumber = fromDb.dingNumber
-          ? normalizeAfghanistanPhoneDigits(fromDb.dingNumber) || fromDb.dingNumber
-          : "";
       }
     } catch (dbErr) {
       console.warn("[admin] lookup DB read failed:", dbErr.message);
@@ -377,7 +393,7 @@ async function lookupStudentForAdmin(query) {
     classGrades = grades;
   }
 
-  if (!dingNumber && primary.id) {
+  if (primary.id) {
     try {
       dingHistory = await getPortalDingChangeHistory(primary.id, { maxRows: 10 });
     } catch {
@@ -412,6 +428,11 @@ async function lookupStudentForAdmin(query) {
       dingNumber,
       role: role.role,
       isTeacher: role.isTeacher,
+      isApplied:
+        role.isApplied === true ||
+        isAppliedPeopleStatus(primary.peopleStatus) ||
+        isAppliedPeopleStatus(resolvePeopleStatus(primary.id, '')),
+      peopleStatus: resolvePeopleStatus(primary.id, primary.peopleStatus),
       teacherClasses: role.teacherClasses,
       classSection,
       calculatedGrade,
@@ -435,7 +456,7 @@ async function searchAdminStudents(query, limit = 25) {
 
   const [peopleMatches, gradeRows, dingByUserId] = await Promise.all([
     searchPeopleProfiles(query, limit),
-    listAllClassroomGradeRows(),
+    getClassroomGradeRowsForAdmin(),
     getCachedDingNumberMap(),
   ]);
 
@@ -496,14 +517,11 @@ async function getAdminClassList() {
   }
 
   if (isDatabaseEnabled()) {
-    try {
-      const fromDb = await getAdminClassListFromDb();
-      if (fromDb && fromDb.classes.length > 0) {
-        return fromDb;
-      }
-    } catch (dbErr) {
-      console.warn("[admin] class list DB read failed:", dbErr.message);
+    const fromDb = await getAdminClassListFromDb();
+    if (fromDb) {
+      return fromDb;
     }
+    return { classes: [], classCount: 0, liveFromClassroom: false, source: "database" };
   }
 
   const [classes, roleRows, profileMap, gradeRows] = await Promise.all([
@@ -547,16 +565,10 @@ async function getAdminClassRoster(courseId, options = {}) {
   const live = options.live === true;
 
   if (!live && isDatabaseEnabled()) {
-    try {
-      const fromDb = await getAdminClassRosterFromDb(id);
-      if (fromDb && fromDb.students.length > 0) {
-        attachDingNumbers(fromDb.students, await getCachedDingNumberMap());
-        adminRosterCache.set(id, { at: Date.now(), data: fromDb });
-        return fromDb;
-      }
-    } catch (dbErr) {
-      console.warn("[admin] class roster DB read failed:", dbErr.message);
-    }
+    const fromDb = await getAdminClassRosterFromDb(id);
+    await attachSheetsDingNumbers(fromDb.students);
+    adminRosterCache.set(id, { at: Date.now(), data: fromDb });
+    return fromDb;
   }
 
   const cached = adminRosterCache.get(id);
@@ -645,26 +657,21 @@ async function getAdminViewAsStudent(targetUserId, options = {}) {
   if (!person?.email) {
     throw new Error("Student not found for that AESOP ID.");
   }
-  if (!options.live) {
-    const fromDb = await getStudentGradesFromDb(person.email);
-    if (fromDb) {
-      return {
-        targetUserId: person.aesopId || targetUserId,
-        email: person.email,
-        name: person.name || "",
-        source: "database",
-        ...fromDb,
-      };
-    }
-  }
-  const live = await getStudentGrades(person.email, { force: true });
-  return {
+  const base = {
     targetUserId: person.aesopId || targetUserId,
     email: person.email,
     name: person.name || "",
-    source: "live",
-    ...live,
   };
+  if (options.live) {
+    const live = await getStudentGrades(person.email, { force: true });
+    return { ...base, source: "live", ...live };
+  }
+  if (isDatabaseEnabled()) {
+    const fromDb = (await getStudentGradesFromDb(person.email)) || { classes: [] };
+    return { ...base, source: "database", ...fromDb };
+  }
+  const data = await getStudentGrades(person.email);
+  return { ...base, source: "live", ...data };
 }
 
 async function getAdminViewAsTeacher(targetUserId, options = {}) {
@@ -672,26 +679,21 @@ async function getAdminViewAsTeacher(targetUserId, options = {}) {
   if (!person?.email) {
     throw new Error("Teacher not found for that AESOP ID.");
   }
-  if (!options.live) {
-    const fromDb = await getTeacherRosterFromDb(person.email);
-    if (fromDb) {
-      return {
-        targetUserId: person.aesopId || targetUserId,
-        email: person.email,
-        name: person.name || "",
-        source: "database",
-        ...fromDb,
-      };
-    }
-  }
-  const live = await getTeacherRoster(person.email, { force: true });
-  return {
+  const base = {
     targetUserId: person.aesopId || targetUserId,
     email: person.email,
     name: person.name || "",
-    source: "live",
-    ...live,
   };
+  if (options.live) {
+    const live = await getTeacherRoster(person.email, { force: true });
+    return { ...base, source: "live", ...live };
+  }
+  if (isDatabaseEnabled()) {
+    const fromDb = (await getTeacherRosterFromDb(person.email)) || { classes: [] };
+    return { ...base, source: "database", ...fromDb };
+  }
+  const data = await getTeacherRoster(person.email);
+  return { ...base, source: "live", ...data };
 }
 
 module.exports = {

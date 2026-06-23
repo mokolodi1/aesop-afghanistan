@@ -1,5 +1,8 @@
 const crypto = require('crypto');
+const { eq, lt } = require('drizzle-orm');
 const { sendEmail } = require('./email');
+const { getDb, isDatabaseEnabled } = require('../db/index');
+const { magicLinks } = require('../db/schema');
 const {
   AESOP_EMAIL,
   FONT_HEADING,
@@ -8,19 +11,123 @@ const {
   wrapAesopEmail,
 } = require('./emailBranding');
 
-// In-memory store for magic links (in production, use Redis or database)
-// Format: { token: { email, userId, expiresAt, used } }
+// Fallback when DATABASE_URL is not configured (local dev without Postgres).
 const magicLinkStore = new Map();
 
-// Magic link expiration time (15 minutes)
 const MAGIC_LINK_EXPIRY_MS = 15 * 60 * 1000;
 
-/**
- * Generate a secure random token for magic link
- * @returns {string} Random token
- */
 function generateToken() {
   return crypto.randomBytes(32).toString('hex');
+}
+
+function cleanupExpiredTokensInMemory() {
+  const now = new Date();
+  for (const [token, data] of magicLinkStore.entries()) {
+    if (now > data.expiresAt) {
+      magicLinkStore.delete(token);
+    }
+  }
+}
+
+async function cleanupExpiredTokensInDb() {
+  const db = getDb();
+  if (!db) {
+    return;
+  }
+  try {
+    await db.delete(magicLinks).where(lt(magicLinks.expiresAt, new Date()));
+  } catch (error) {
+    console.warn('[magic-link] expired token cleanup failed:', error.message);
+  }
+}
+
+async function readMagicLinkRecord(token) {
+  if (isDatabaseEnabled()) {
+    const db = getDb();
+    if (db) {
+      try {
+        const rows = await db.select().from(magicLinks).where(eq(magicLinks.token, token)).limit(1);
+        if (rows.length) {
+          const row = rows[0];
+          return {
+            email: row.email,
+            userId: row.userId || undefined,
+            expiresAt: row.expiresAt,
+            used: row.used === true,
+          };
+        }
+      } catch (error) {
+        console.error('[magic-link] DB read failed; checking memory fallback:', error.message);
+      }
+    }
+  }
+
+  return magicLinkStore.get(token) || null;
+}
+
+async function writeMagicLinkRecord(token, { email, userId, expiresAt }) {
+  if (isDatabaseEnabled()) {
+    const db = getDb();
+    if (db) {
+      try {
+        await db.insert(magicLinks).values({
+          token,
+          email,
+          userId: userId || null,
+          expiresAt,
+          used: false,
+          createdAt: new Date(),
+        });
+        if (Math.random() < 0.05) {
+          await cleanupExpiredTokensInDb();
+        }
+        return;
+      } catch (error) {
+        console.error('[magic-link] DB store failed; using memory fallback:', error.message);
+      }
+    }
+  }
+
+  magicLinkStore.set(token, {
+    email,
+    userId: userId && typeof userId === 'string' ? userId : undefined,
+    expiresAt,
+    used: false,
+    createdAt: new Date(),
+  });
+
+  if (magicLinkStore.size > 1000) {
+    cleanupExpiredTokensInMemory();
+  }
+}
+
+async function markMagicLinkUsed(token) {
+  if (isDatabaseEnabled()) {
+    const db = getDb();
+    if (!db) {
+      return;
+    }
+    await db.update(magicLinks).set({ used: true }).where(eq(magicLinks.token, token));
+    return;
+  }
+
+  const linkData = magicLinkStore.get(token);
+  if (linkData) {
+    linkData.used = true;
+  }
+}
+
+async function deleteMagicLinkRecord(token) {
+  if (isDatabaseEnabled()) {
+    const db = getDb();
+    if (!db) {
+      return;
+    }
+    await db.delete(magicLinks).where(eq(magicLinks.token, token));
+    return;
+  }
+
+  magicLinkStore.delete(token);
 }
 
 /**
@@ -32,19 +139,8 @@ function generateToken() {
 async function generateAndStoreMagicLink(email, userId) {
   const token = generateToken();
   const expiresAt = new Date(Date.now() + MAGIC_LINK_EXPIRY_MS);
-  
-  magicLinkStore.set(token, {
-    email,
-    userId: userId && typeof userId === "string" ? userId : undefined,
-    expiresAt,
-    used: false,
-    createdAt: new Date()
-  });
 
-  // Clean up expired tokens periodically (simple cleanup)
-  if (magicLinkStore.size > 1000) {
-    cleanupExpiredTokens();
-  }
+  await writeMagicLinkRecord(token, { email, userId, expiresAt });
 
   return { token, expiresAt };
 }
@@ -52,16 +148,15 @@ async function generateAndStoreMagicLink(email, userId) {
 /**
  * Verify a magic link token
  * @param {string} token - Magic link token (should be pre-validated)
- * @returns {Promise<{valid: boolean, email?: string, userId?: string}>}
+ * @returns {Promise<{valid: boolean, email?: string, userId?: string, canResend?: boolean}>}
  */
 async function verifyMagicLink(token) {
-  // Additional validation (should already be done, but double-check)
   if (!token || typeof token !== 'string' || token.length !== 64) {
     return { valid: false };
   }
 
-  const linkData = magicLinkStore.get(token);
-  
+  const linkData = await readMagicLinkRecord(token);
+
   if (!linkData) {
     return { valid: false };
   }
@@ -69,7 +164,6 @@ async function verifyMagicLink(token) {
   const now = new Date();
   const expired = now > linkData.expiresAt;
 
-  // Allow resend for used or expired links while token data is still in memory
   if (linkData.used || expired) {
     return {
       valid: false,
@@ -77,8 +171,7 @@ async function verifyMagicLink(token) {
     };
   }
 
-  // Mark as used
-  linkData.used = true;
+  await markMagicLinkUsed(token);
 
   return {
     valid: true,
@@ -87,23 +180,6 @@ async function verifyMagicLink(token) {
   };
 }
 
-/**
- * Clean up expired tokens from memory
- */
-function cleanupExpiredTokens() {
-  const now = new Date();
-  for (const [token, data] of magicLinkStore.entries()) {
-    if (now > data.expiresAt) {
-      magicLinkStore.delete(token);
-    }
-  }
-}
-
-/**
- * Send magic link email to user
- * @param {string} email - Recipient email
- * @param {string} token - Magic link token
- */
 function magicLinkSiteOrigin() {
   const raw = (
     process.env.PORTAL_BASE_URL ||
@@ -114,11 +190,9 @@ function magicLinkSiteOrigin() {
 }
 
 async function sendMagicLinkEmail(email, token) {
-  // Verify flow must run on the same browser origin where students use the portal (sessionStorage).
-  // Set PORTAL_BASE_URL=https://portal.example.org when the app lives on multiple hosts.
   const origin = magicLinkSiteOrigin();
   const magicLink = `${origin}/verify.html?token=${token}`;
-  
+
   const emailSubject = 'Sign in to your AESOP student portal';
   const { ink, muted, accent, accentDark, skyTint, line } = AESOP_EMAIL;
   const safeLinkText = escapeHtml(magicLink);
@@ -163,7 +237,7 @@ async function sendMagicLinkEmail(email, token) {
     to: email,
     subject: emailSubject,
     html: emailHtml,
-    text: emailText
+    text: emailText,
   });
 }
 
@@ -177,7 +251,7 @@ async function resendMagicLinkByToken(token) {
     return { success: false, error: 'Invalid token format.' };
   }
 
-  const linkData = magicLinkStore.get(token);
+  const linkData = await readMagicLinkRecord(token);
   if (!linkData?.email || !linkData.userId) {
     return {
       success: false,
@@ -186,7 +260,7 @@ async function resendMagicLinkByToken(token) {
   }
 
   const { email, userId } = linkData;
-  magicLinkStore.delete(token);
+  await deleteMagicLinkRecord(token);
   const { token: newToken } = await generateAndStoreMagicLink(email, userId);
   await sendMagicLinkEmail(email, newToken);
 

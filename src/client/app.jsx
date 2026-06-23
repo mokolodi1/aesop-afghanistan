@@ -64,6 +64,30 @@ function readSessionField(key) {
   return sessionStorage.getItem(key) || '';
 }
 
+function isAppliedPeopleStatus(status) {
+  return String(status || '').trim().toLowerCase() === 'applied';
+}
+
+function resolveClientPeopleStatus(aesopId, rawStatus) {
+  const trimmed = String(rawStatus || '').trim();
+  if (trimmed) {
+    return trimmed;
+  }
+  if (String(aesopId || '').trim().startsWith('262')) {
+    return 'applied';
+  }
+  return '';
+}
+
+function readPortalIsApplied() {
+  if (readSessionField('studentPortalIsApplied') === '1') {
+    return true;
+  }
+  const aesopId = readSessionField('studentPortalUserId').trim();
+  const peopleStatus = resolveClientPeopleStatus(aesopId, readSessionField('studentPortalPeopleStatus'));
+  return isAppliedPeopleStatus(peopleStatus);
+}
+
 /** Keys written when a student completes magic-link verification */
 const PORTAL_SESSION_STORAGE_KEYS = [
   'studentPortalName',
@@ -77,6 +101,8 @@ const PORTAL_SESSION_STORAGE_KEYS = [
   'studentPortalIsTeacher',
   'studentPortalTeacherClasses',
   'studentPortalIsAdmin',
+  'studentPortalIsApplied',
+  'studentPortalPeopleStatus',
 ];
 
 const PORTAL_IMPERSONATING_KEY = 'studentPortalImpersonating';
@@ -159,10 +185,12 @@ function backupCurrentPortalSessionForImpersonation() {
   sessionStorage.setItem(PORTAL_ADMIN_SESSION_BACKUP_KEY, JSON.stringify(backup));
 }
 
-function applyPortalSessionFromApi(data, { viewRole = 'student' } = {}) {
+function applyPortalSessionFromApi(data, options = {}) {
   if (typeof sessionStorage === 'undefined') {
     return;
   }
+  const viewRole = options.viewRole;
+  const allowAdmin = options.allowAdmin === true;
   const nameFromApi = typeof data.name === 'string' ? data.name.trim() : '';
   const emailFromApi = typeof data.email === 'string' ? data.email.trim() : '';
   const dingFromApi = typeof data.newDingNumber === 'string' ? data.newDingNumber.trim() : '';
@@ -179,9 +207,14 @@ function applyPortalSessionFromApi(data, { viewRole = 'student' } = {}) {
         : data.isTeacher === true
           ? 'teacher'
           : 'student';
-  const isTeacherFromApi = effectiveViewRole === 'teacher';
+  const isTeacherFromApi = effectiveViewRole === 'teacher' && data.isApplied !== true;
   const teachingFromApi =
     typeof data.teacherClasses === 'string' ? data.teacherClasses.trim() : '';
+  const peopleStatusFromApi =
+    typeof data.peopleStatus === 'string'
+      ? data.peopleStatus.trim()
+      : resolveClientPeopleStatus(userIdFromApi, '');
+  const isAppliedFromApi = data.isApplied === true || isAppliedPeopleStatus(peopleStatusFromApi);
 
   if (nameFromApi) {
     sessionStorage.setItem('studentPortalName', nameFromApi);
@@ -218,16 +251,27 @@ function applyPortalSessionFromApi(data, { viewRole = 'student' } = {}) {
   } else {
     sessionStorage.removeItem('studentPortalGrade');
   }
-  writeClassGradesToSession(classGradesFromApi);
+  writeClassGradesToSession(isAppliedFromApi ? [] : classGradesFromApi);
   if (isTeacherFromApi) {
     sessionStorage.setItem('studentPortalIsTeacher', '1');
   } else {
     sessionStorage.removeItem('studentPortalIsTeacher');
   }
-  if (data.isAdmin === true && options.allowAdmin === true) {
+  if (data.isAdmin === true && allowAdmin) {
     sessionStorage.setItem('studentPortalIsAdmin', '1');
   } else {
     sessionStorage.removeItem('studentPortalIsAdmin');
+  }
+  if (isAppliedFromApi) {
+    sessionStorage.setItem('studentPortalIsApplied', '1');
+    sessionStorage.setItem('studentPortalPeopleStatus', peopleStatusFromApi || 'applied');
+    sessionStorage.removeItem('studentPortalClass');
+    sessionStorage.removeItem('studentPortalGrade');
+    sessionStorage.removeItem('studentPortalClassGrades');
+    sessionStorage.removeItem('studentPortalTeacherClasses');
+  } else {
+    sessionStorage.removeItem('studentPortalIsApplied');
+    sessionStorage.removeItem('studentPortalPeopleStatus');
   }
   if (isTeacherFromApi && teachingFromApi) {
     sessionStorage.setItem('studentPortalTeacherClasses', teachingFromApi);
@@ -340,6 +384,8 @@ async function loadPortalClassGradeFromApi() {
       isTeacher: false,
       teacherClasses: '',
       isAdmin: false,
+      isApplied: false,
+      peopleStatus: '',
     });
   }
   if (portalClassGradeInFlight) {
@@ -357,6 +403,8 @@ async function loadPortalClassGradeFromApi() {
           isTeacher: false,
           teacherClasses: '',
           isAdmin: false,
+          isApplied: false,
+          peopleStatus: '',
         };
       }
       const response = await fetch('/api/portal-class-grade', {
@@ -373,6 +421,8 @@ async function loadPortalClassGradeFromApi() {
           isTeacher: false,
           teacherClasses: '',
           isAdmin: false,
+          isApplied: false,
+          peopleStatus: '',
         };
       }
       const classSection = typeof data.classSection === 'string' ? data.classSection.trim() : '';
@@ -383,10 +433,15 @@ async function loadPortalClassGradeFromApi() {
       const isAdmin = data.isAdmin === true;
       const teacherClasses =
         typeof data.teacherClasses === 'string' ? data.teacherClasses.trim() : '';
-      sessionStorage.setItem('studentPortalClass', classSection);
-      sessionStorage.setItem('studentPortalGrade', calculatedGrade);
-      writeClassGradesToSession(classGrades);
-      if (isTeacher) {
+      const peopleStatus =
+        typeof data.peopleStatus === 'string'
+          ? data.peopleStatus.trim()
+          : resolveClientPeopleStatus(userId, '');
+      const isApplied = data.isApplied === true || isAppliedPeopleStatus(peopleStatus);
+      sessionStorage.setItem('studentPortalClass', isApplied ? '' : classSection);
+      sessionStorage.setItem('studentPortalGrade', isApplied ? '' : calculatedGrade);
+      writeClassGradesToSession(isApplied ? [] : classGrades);
+      if (isTeacher && !isApplied) {
         sessionStorage.setItem('studentPortalIsTeacher', '1');
       } else {
         sessionStorage.removeItem('studentPortalIsTeacher');
@@ -396,12 +451,29 @@ async function loadPortalClassGradeFromApi() {
       } else {
         sessionStorage.removeItem('studentPortalIsAdmin');
       }
-      if (teacherClasses) {
-        sessionStorage.setItem('studentPortalTeacherClasses', teacherClasses);
-      } else {
+      if (isApplied) {
+        sessionStorage.setItem('studentPortalIsApplied', '1');
+        sessionStorage.setItem('studentPortalPeopleStatus', peopleStatus || 'applied');
         sessionStorage.removeItem('studentPortalTeacherClasses');
+      } else {
+        sessionStorage.removeItem('studentPortalIsApplied');
+        sessionStorage.removeItem('studentPortalPeopleStatus');
+        if (teacherClasses) {
+          sessionStorage.setItem('studentPortalTeacherClasses', teacherClasses);
+        } else {
+          sessionStorage.removeItem('studentPortalTeacherClasses');
+        }
       }
-      return { classSection, calculatedGrade, classGrades, isTeacher, teacherClasses, isAdmin };
+      return {
+        classSection: isApplied ? '' : classSection,
+        calculatedGrade: isApplied ? '' : calculatedGrade,
+        classGrades: isApplied ? [] : classGrades,
+        isTeacher: isApplied ? false : isTeacher,
+        teacherClasses: isApplied ? '' : teacherClasses,
+        isAdmin,
+        isApplied,
+        peopleStatus,
+      };
     } catch {
       return {
         classSection: '',
@@ -410,6 +482,8 @@ async function loadPortalClassGradeFromApi() {
         isTeacher: false,
         teacherClasses: '',
         isAdmin: false,
+        isApplied: false,
+        peopleStatus: '',
       };
     } finally {
       portalClassGradeInFlight = null;
@@ -424,6 +498,13 @@ function usePortalClassGrade() {
   const [classGrades, setClassGrades] = useState(() => readClassGradesFromSession());
   const [isTeacher, setIsTeacher] = useState(() => readSessionField('studentPortalIsTeacher') === '1');
   const [teacherClasses, setTeacherClasses] = useState(() => readSessionField('studentPortalTeacherClasses'));
+  const [isApplied, setIsApplied] = useState(() => readPortalIsApplied());
+  const [peopleStatus, setPeopleStatus] = useState(() =>
+    resolveClientPeopleStatus(
+      readSessionField('studentPortalUserId'),
+      readSessionField('studentPortalPeopleStatus'),
+    ),
+  );
 
   const [isAdmin, setIsAdmin] = useState(() => readSessionField('studentPortalIsAdmin') === '1');
 
@@ -437,6 +518,8 @@ function usePortalClassGrade() {
         isTeacher: tchr,
         teacherClasses: teach,
         isAdmin: adm,
+        isApplied: applied,
+        peopleStatus: status,
       }) => {
         if (cancelled) return;
         setStudentClass(classSection);
@@ -445,6 +528,8 @@ function usePortalClassGrade() {
         setIsTeacher(tchr);
         setTeacherClasses(teach);
         setIsAdmin(adm);
+        setIsApplied(applied);
+        setPeopleStatus(status);
       },
     );
     return () => {
@@ -452,7 +537,72 @@ function usePortalClassGrade() {
     };
   }, []);
 
-  return { studentClass, studentGrade, classGrades, isTeacher, teacherClasses, isAdmin };
+  return {
+    studentClass,
+    studentGrade,
+    classGrades,
+    isTeacher,
+    teacherClasses,
+    isAdmin,
+    isApplied,
+    peopleStatus,
+  };
+}
+
+function computeHasStudentCategory({ isTeacher, isApplied, aesopId, studentClass, studentGrade, classGrades }) {
+  return (
+    !isTeacher &&
+    !isApplied &&
+    aesopId !== '' &&
+    (classGrades.length > 0 || (studentClass.trim() !== '' && studentGrade.trim() !== ''))
+  );
+}
+
+/** Hide student fields (class, grade) for teachers-only; hide Teaching for students-only. */
+function usePortalProfileSections() {
+  const impersonating = isPortalImpersonating();
+  const impersonationRole = readSessionField(PORTAL_IMPERSONATION_ROLE_KEY);
+  const aesopId = readSessionField('studentPortalUserId').trim();
+  const portalClassGrade = usePortalClassGrade();
+  const { studentClass, studentGrade, classGrades, isTeacher, isApplied, peopleStatus } = portalClassGrade;
+  const hasStudentCategory = computeHasStudentCategory({
+    isTeacher,
+    isApplied,
+    aesopId,
+    studentClass,
+    studentGrade,
+    classGrades,
+  });
+
+  if (isApplied) {
+    return {
+      ...portalClassGrade,
+      showStudentFields: false,
+      showTeacherFields: false,
+      hasStudentCategory: false,
+      isApplied: true,
+      peopleStatus: peopleStatus || 'applied',
+    };
+  }
+
+  if (impersonating) {
+    const studentView = impersonationRole !== 'teacher';
+    return {
+      ...portalClassGrade,
+      showStudentFields: studentView,
+      showTeacherFields: !studentView,
+      hasStudentCategory: studentView,
+      isApplied: false,
+    };
+  }
+
+  return {
+    ...portalClassGrade,
+    showStudentFields: hasStudentCategory,
+    showTeacherFields: isTeacher,
+    hasStudentCategory,
+    isApplied: false,
+  };
 }
 
 /**
@@ -1357,13 +1507,31 @@ function VerifyMagicLinkApp() {
           body: JSON.stringify({ token }),
         });
 
-        const data = await response.json();
+        let data = {};
+        try {
+          data = await response.json();
+        } catch {
+          data = {};
+        }
         setShowSpinner(false);
 
-        if (data.success) {
+        if (response.ok && data.success) {
           setStatus('Success!');
           setMessage({ type: 'success', text: 'Magic link verified successfully. Redirecting...' });
-          applyPortalSessionFromApi(data, { allowAdmin: true });
+          try {
+            applyPortalSessionFromApi(data, { allowAdmin: true });
+          } catch (sessionError) {
+            console.error('Could not save portal session after verify:', sessionError);
+            setStatus('Error');
+            setMessage({
+              type: 'error',
+              text:
+                sessionError?.message ||
+                'Sign-in succeeded but this browser could not save your session. Try the link again or use a regular (non-private) browser window.',
+            });
+            setVerificationFailed(true);
+            return;
+          }
           window.setTimeout(() => {
             const hub =
               window.location.hostname.toLowerCase().startsWith('portal.') ? '/' : '/portal.html';
@@ -1373,13 +1541,21 @@ function VerifyMagicLinkApp() {
         }
 
         setStatus('Verification Failed');
-        setMessage({ type: 'error', text: data.error || 'Invalid or expired magic link.' });
+        setMessage({
+          type: 'error',
+          text:
+            data.error ||
+            (response.ok ? 'Invalid or expired magic link.' : `Request failed (HTTP ${response.status}). Try again.`),
+        });
         setVerificationFailed(true);
         setCanResendByToken(data.canResend === true);
       } catch (error) {
         setShowSpinner(false);
         setStatus('Error');
-        setMessage({ type: 'error', text: 'An error occurred verifying the link. Please try again.' });
+        setMessage({
+          type: 'error',
+          text: 'Could not reach the server to verify your link. Check your connection and try again.',
+        });
         setVerificationFailed(true);
       }
     };
@@ -1506,10 +1682,14 @@ function VerifyMagicLinkApp() {
  * Role pill adapted from the AESOP Dashboard's RoleNav badge. Shows Teacher or
  * Student only when the role is known (from the Classroom sync / sheets).
  */
-function PortalRoleBadge({ isTeacher, hasStudentCategory, isAdmin, className }) {
+function PortalRoleBadge({ isTeacher, hasStudentCategory, isAdmin, isApplied, className }) {
   if (isAdmin) {
     const classes = ['portal-role-badge', 'portal-role-badge--admin', className].filter(Boolean).join(' ');
     return <span className={classes}>Admin</span>;
+  }
+  if (isApplied) {
+    const classes = ['portal-role-badge', 'portal-role-badge--applied', className].filter(Boolean).join(' ');
+    return <span className={classes}>Applied</span>;
   }
   if (!isTeacher && !hasStudentCategory) {
     return null;
@@ -1643,7 +1823,8 @@ function PortalLayout({ children }) {
   const fullName = readSessionField('studentPortalName').trim();
   const aesopId = readSessionField('studentPortalUserId').trim();
   const headerEmail = readSessionField('studentPortalEmail').trim();
-  const { studentClass, studentGrade, classGrades, teacherClasses } = usePortalClassGrade();
+  const { studentClass, studentGrade, classGrades, teacherClasses, showStudentFields, showTeacherFields } =
+    usePortalProfileSections();
 
   const dash = '—';
   const fullNameDisplay = fullName || dash;
@@ -1726,7 +1907,7 @@ function PortalLayout({ children }) {
                   <dd className="portal-header-id-value portal-header-id-mono">{aesopId || dash}</dd>
                   <dt className="portal-header-id-label">Email</dt>
                   <dd className="portal-header-id-value portal-header-id-email">{headerEmail || dash}</dd>
-                  {!impersonating || impersonationRole === 'student' ? (
+                  {showStudentFields ? (
                     <>
                       <dt className="portal-header-id-label">Class</dt>
                       <dd className="portal-header-id-value">
@@ -1740,7 +1921,7 @@ function PortalLayout({ children }) {
                       <dd className="portal-header-id-value">{gradeDisplay}</dd>
                     </>
                   ) : null}
-                  {!impersonating || impersonationRole === 'teacher' ? (
+                  {showTeacherFields ? (
                     <>
                       <dt className="portal-header-id-label">Teaching</dt>
                       <dd className="portal-header-id-value">
@@ -1902,14 +2083,21 @@ function PortalAdminImpersonateActions({ targetUserId, isTeacher = false, compac
 
 function PortalHubPage() {
   const { studentName, studentUserId, studentEmail, studentPhone, newDingNumber } = usePortalStudentRecord();
-  const { studentClass, studentGrade, classGrades, isTeacher, teacherClasses, isAdmin } = usePortalClassGrade();
+  const {
+    studentClass,
+    studentGrade,
+    classGrades,
+    isTeacher,
+    teacherClasses,
+    isAdmin,
+    showStudentFields,
+    showTeacherFields,
+    hasStudentCategory,
+    isApplied,
+  } = usePortalProfileSections();
   const signedIn = isPortalSessionCompleteSync();
   const impersonating = isPortalImpersonating();
   const showAdminFeatures = isAdmin && !impersonating;
-  const hasStudentCategory =
-    !isTeacher &&
-    studentUserId.trim() !== '' &&
-    (classGrades.length > 0 || (studentClass.trim() !== '' && studentGrade.trim() !== ''));
   const intent = typeof window !== 'undefined' ? getPortalUrlIntent() : '';
   const [aboutPortalOpenSignedIn, setAboutPortalOpenSignedIn] = useState(false);
   const [aboutPortalOpenSignout, setAboutPortalOpenSignout] = useState(false);
@@ -1929,11 +2117,12 @@ function PortalHubPage() {
             <h2 className="portal-welcome">
               {impersonating
                 ? `Viewing as ${studentName || 'this person'}`
-                : `Welcome, ${studentName || 'Student'}!`}
+                : `Welcome, ${studentName || (isApplied ? 'Applicant' : 'Student')}!`}
               <PortalRoleBadge
-                isTeacher={isTeacher}
-                hasStudentCategory={hasStudentCategory}
+                isTeacher={showTeacherFields && isTeacher}
+                hasStudentCategory={showStudentFields && hasStudentCategory}
                 isAdmin={showAdminFeatures}
+                isApplied={isApplied}
                 className="portal-welcome-role"
               />
             </h2>
@@ -1954,59 +2143,60 @@ function PortalHubPage() {
                   {newDingNumber.trim() ? newDingNumber.trim() : 'Not set yet'}
                 </dd>
               </div>
-              <div className="portal-hub-meta-row">
-                <dt className="portal-hub-meta-label">Class</dt>
-                <dd
-                  className={`portal-hub-meta-value${
-                    studentClass.trim() || classGrades.length > 0 ? '' : ' portal-hub-meta-empty'
-                  }`}
-                >
-                  <PortalMultiClassList value={studentClass} classGrades={classGrades} />
-                </dd>
-              </div>
-              <div className="portal-hub-meta-row">
-                <dt className="portal-hub-meta-label">Grade</dt>
-                <dd
-                  className={`portal-hub-meta-value${
-                    classGrades.length > 0 || studentGrade.trim() ? '' : ' portal-hub-meta-empty'
-                  }`}
-                >
-                  <PortalClassGradeList
-                    classGrades={classGrades}
-                    fallbackClass={studentClass}
-                    fallbackGrade={studentGrade}
-                  />
-                </dd>
-              </div>
-              <div className="portal-hub-meta-row">
-                <dt className="portal-hub-meta-label">Teaching</dt>
-                <dd
-                  className={`portal-hub-meta-value${teacherClasses.trim() ? '' : ' portal-hub-meta-empty'}`}
-                >
-                  <PortalMultiClassList
-                    value={teacherClasses}
-                    moreAriaLabel="Additional teaching classes"
-                  />
-                </dd>
-              </div>
-              <div className="portal-hub-meta-row">
-                <dt className="portal-hub-meta-label">Category</dt>
-                <dd
-                  className={`portal-hub-meta-value${
-                    isTeacher || hasStudentCategory ? '' : ' portal-hub-meta-empty'
-                  }`}
-                >
-                  {isTeacher || hasStudentCategory || showAdminFeatures ? (
-                    <PortalRoleBadge
-                      isTeacher={isTeacher}
-                      hasStudentCategory={hasStudentCategory}
-                      isAdmin={showAdminFeatures}
+              {showStudentFields ? (
+                <div className="portal-hub-meta-row">
+                  <dt className="portal-hub-meta-label">Class</dt>
+                  <dd
+                    className={`portal-hub-meta-value${
+                      studentClass.trim() || classGrades.length > 0 ? '' : ' portal-hub-meta-empty'
+                    }`}
+                  >
+                    <PortalMultiClassList value={studentClass} classGrades={classGrades} />
+                  </dd>
+                </div>
+              ) : null}
+              {showStudentFields ? (
+                <div className="portal-hub-meta-row">
+                  <dt className="portal-hub-meta-label">Grade</dt>
+                  <dd
+                    className={`portal-hub-meta-value${
+                      classGrades.length > 0 || studentGrade.trim() ? '' : ' portal-hub-meta-empty'
+                    }`}
+                  >
+                    <PortalClassGradeList
+                      classGrades={classGrades}
+                      fallbackClass={studentClass}
+                      fallbackGrade={studentGrade}
                     />
-                  ) : (
-                    '—'
-                  )}
-                </dd>
-              </div>
+                  </dd>
+                </div>
+              ) : null}
+              {showTeacherFields ? (
+                <div className="portal-hub-meta-row">
+                  <dt className="portal-hub-meta-label">Teaching</dt>
+                  <dd
+                    className={`portal-hub-meta-value${teacherClasses.trim() ? '' : ' portal-hub-meta-empty'}`}
+                  >
+                    <PortalMultiClassList
+                      value={teacherClasses}
+                      moreAriaLabel="Additional teaching classes"
+                    />
+                  </dd>
+                </div>
+              ) : null}
+              {showStudentFields || showTeacherFields || showAdminFeatures || isApplied ? (
+                <div className="portal-hub-meta-row">
+                  <dt className="portal-hub-meta-label">Category</dt>
+                  <dd className="portal-hub-meta-value">
+                    <PortalRoleBadge
+                      isTeacher={showTeacherFields && isTeacher}
+                      hasStudentCategory={showStudentFields && hasStudentCategory}
+                      isAdmin={showAdminFeatures}
+                      isApplied={isApplied}
+                    />
+                  </dd>
+                </div>
+              ) : null}
               {studentPhone ? (
                 <div className="portal-hub-meta-row">
                   <dt className="portal-hub-meta-label">Phone on file</dt>
@@ -2020,7 +2210,7 @@ function PortalHubPage() {
                 isAdminView={showAdminFeatures && !isTeacher}
               />
             ) : null}
-            {!isTeacher && signedIn ? <PortalStudentGrades isStudent={!isTeacher} /> : null}
+            {showStudentFields && signedIn ? <PortalStudentGrades isStudent /> : null}
             <section className="portal-hub-purpose portal-hub-purpose-collapsible" aria-label="About this portal">
               <button
                 type="button"
@@ -2192,7 +2382,7 @@ function PortalAdminViewAs() {
   };
 
   return (
-    <section className="portal-admin-panel" aria-label="View as student or teacher">
+    <section className="portal-admin-panel portal-admin-view-as-pinned" aria-label="View as student or teacher">
       <p className="portal-admin-hint">
         Open the full student or teacher portal as any AESOP ID. You can review their profile, grades or
         classes, and edit their Ding number. Use <strong>Back to admin page</strong> in the header when you
@@ -2430,15 +2620,16 @@ function PortalAdminPage() {
           <PortalRoleBadge isAdmin className="portal-welcome-role" />
         </h2>
         <p className="portal-admin-lead">
-          Live Classroom rosters, student lookup, admin view-by-ID, high-grade rewards, and DingConnect+ bulk top-up export.
+          Live Classroom rosters, student lookup, high-grade rewards, and DingConnect+ bulk top-up export.
         </p>
+
+        <PortalAdminViewAs />
 
         <nav className="portal-admin-tabs" aria-label="Admin sections">
           {[
             { id: 'overview', label: 'Overview' },
             { id: 'all-classes', label: 'All classes' },
             { id: 'lookup', label: 'Student lookup' },
-            { id: 'view-as', label: 'View as' },
             { id: 'high-grades', label: `Grades above ${thresholdLabel}%` },
             { id: 'dingconnect', label: 'DingConnect+ CSV' },
           ].map((tab) => (
@@ -2650,8 +2841,6 @@ function PortalAdminPage() {
             ) : null}
           </section>
         ) : null}
-
-        {activeTab === 'view-as' ? <PortalAdminViewAs /> : null}
 
         {activeTab === 'high-grades' ? (
           <section className="portal-admin-panel" aria-label="High grade students">
