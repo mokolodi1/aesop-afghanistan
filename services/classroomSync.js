@@ -7,7 +7,8 @@ const {
   listAllClassroomGradeRows,
   isPeopleSheetAdminRole,
   isAppliedPeopleStatus,
-  resolvePeopleStatus,
+  derivePeopleSheetStatus,
+  syncPeopleStatusOnPeopleSheet,
 } = require("./googleSheets");
 const { formatErrorForLog } = require("../utils/errorLogging");
 const { isDatabaseEnabled } = require("../db/index");
@@ -365,6 +366,20 @@ async function runClassroomSync() {
     await replaceTabData(cr.gradesSheetName || "Classroom Grades", gradesHeader, gradesRows);
   }
 
+  try {
+    const statusSync = await syncPeopleStatusOnPeopleSheet({
+      teacherEmails: new Set(teacherClasses.keys()),
+      studentEmails: new Set(studentSections.keys()),
+    });
+    if (statusSync.updated > 0) {
+      console.log(
+        `[classroom-sync] People status column: updated ${statusSync.updated} row(s), skipped ${statusSync.skipped}.`,
+      );
+    }
+  } catch (statusErr) {
+    console.warn("[classroom-sync] People status sync failed:", statusErr.message);
+  }
+
   const summary = {
     courses: courses.length,
     teachers: teacherClasses.size,
@@ -390,11 +405,16 @@ async function runClassroomSync() {
         const profile = profileMap.get(email);
         const isTeacher = teacherClasses.has(email);
         const sheetPortalRole = profile?.portalRole || "";
-        const peopleStatus = resolvePeopleStatus(profile?.id, profile?.peopleStatus);
-        const portalRole = isAppliedPeopleStatus(peopleStatus)
-          ? "Applied"
-          : isPeopleSheetAdminRole(sheetPortalRole)
-            ? "Admin"
+        const isStudent = studentSections.has(email);
+        const sheetStatus = derivePeopleSheetStatus({
+          aesopId: profile?.id,
+          isTeacher,
+          isStudent,
+        });
+        const portalRole = isPeopleSheetAdminRole(sheetPortalRole)
+          ? "Admin"
+          : isAppliedPeopleStatus(sheetStatus)
+            ? "Applied"
             : isTeacher
               ? "Teacher"
               : "Student";

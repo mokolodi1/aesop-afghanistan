@@ -11,6 +11,7 @@
     "dev:client": "esbuild src/client/app.jsx --bundle --outfile=public/app.js --watch",
     "sync:past-ding-columns": "node scripts/sync-all-past-ding-columns.js",
     "sync:classroom": "node scripts/sync-classroom.js",
+    "sync:people-status": "node scripts/sync-people-status.js",
     "db:migrate": "node db/migrate.js",
     "db:mirror-people": "node scripts/mirror-people-ding.js"
   },

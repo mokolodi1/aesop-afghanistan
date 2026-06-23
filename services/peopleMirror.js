@@ -8,7 +8,8 @@ const {
   isAppliedPeopleStatus,
   resolvePeopleStatus,
   isPeopleSheetAdminRole,
-  backfillAppliedStatusOnPeopleSheet,
+  syncPeopleStatusOnPeopleSheet,
+  loadClassroomRoleEmailSetsFromSheets,
 } = require("./googleSheets");
 
 async function upsertPersonFromSheetProfile(profile, syncedAt = new Date()) {
@@ -171,12 +172,15 @@ async function mirrorDingHistoryFromSheets(options = {}) {
 
 async function mirrorPeopleAndDingFromSheets() {
   try {
-    const statusBackfill = await backfillAppliedStatusOnPeopleSheet();
-    if (statusBackfill.updated > 0) {
-      console.log(`[people-mirror] backfilled Applied status on ${statusBackfill.updated} People row(s).`);
+    const { teacherEmails, studentEmails } = await loadClassroomRoleEmailSetsFromSheets();
+    const statusSync = await syncPeopleStatusOnPeopleSheet({ teacherEmails, studentEmails });
+    if (statusSync.updated > 0) {
+      console.log(
+        `[people-mirror] People status column: updated ${statusSync.updated} row(s), skipped ${statusSync.skipped}.`,
+      );
     }
   } catch (error) {
-    console.warn("[people-mirror] Applied status backfill failed:", error.message);
+    console.warn("[people-mirror] People status sync failed:", error.message);
   }
 
   const peopleResult = await mirrorAllPeopleFromSheets();

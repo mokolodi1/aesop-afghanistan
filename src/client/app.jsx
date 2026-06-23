@@ -74,7 +74,7 @@ function resolveClientPeopleStatus(aesopId, rawStatus) {
     return trimmed;
   }
   if (String(aesopId || '').trim().startsWith('262')) {
-    return 'applied';
+    return 'Applied';
   }
   return '';
 }

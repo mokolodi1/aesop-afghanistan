@@ -2,7 +2,7 @@ const { GoogleSpreadsheet } = require("google-spreadsheet");
 const { GoogleAuth, JWT } = require("google-auth-library");
 const config = require("../config/secrets");
 const { formatGoogleSheetsOperationError } = require("../utils/errorLogging");
-const { dateToGoogleSheetsSerial, sheetDatetimeCellTextToUtcMillis } = require("../utils/dingSheetTime");
+const { dateToGoogleSheetsSerial, formatEasternSheetTimestamp, sheetDatetimeCellTextToUtcMillis } = require("../utils/dingSheetTime");
 const { isDatabaseEnabled } = require("../db/index");
 const { getPersonByAesopId } = require("./classroomDb");
 
@@ -177,9 +177,17 @@ function readPeopleStatusFromRow(row, rowData, statusColumnIndex) {
   return readPeopleStatus(rowData, statusColumnIndex);
 }
 
-/** AESOP applicant IDs use the 262 prefix; empty Status defaults to "applied". */
+/** AESOP applicant IDs use the 262 prefix; empty Status defaults to Applied. */
 function isAppliedAesopId(aesopId) {
   return String(aesopId || "").trim().startsWith("262");
+}
+
+const PEOPLE_STATUS_APPLIED = "Applied";
+const PEOPLE_STATUS_ADMITTED = "Admitted";
+const PEOPLE_STATUS_TEACHING = "Teaching";
+
+function normalizePeopleStatusValue(status) {
+  return String(status || "").trim().toLowerCase();
 }
 
 function resolvePeopleStatus(aesopId, rawStatus) {
@@ -188,13 +196,44 @@ function resolvePeopleStatus(aesopId, rawStatus) {
     return trimmed;
   }
   if (isAppliedAesopId(aesopId)) {
-    return "applied";
+    return PEOPLE_STATUS_APPLIED;
   }
   return "";
 }
 
 function isAppliedPeopleStatus(status) {
-  return String(status || "").trim().toLowerCase() === "applied";
+  return normalizePeopleStatusValue(status) === "applied";
+}
+
+function isAdmittedPeopleStatus(status) {
+  return normalizePeopleStatusValue(status) === "admitted";
+}
+
+function isTeachingPeopleStatus(status) {
+  return normalizePeopleStatusValue(status) === "teaching";
+}
+
+/**
+ * Derive People sheet Status column value from Classroom role + AESOP ID.
+ * Priority: Teaching > Admitted > Applied (262 applicants not yet in Classroom).
+ * @param {{ aesopId?: string, isTeacher?: boolean, isStudent?: boolean }} params
+ * @returns {string}
+ */
+function derivePeopleSheetStatus({ aesopId = "", isTeacher = false, isStudent = false }) {
+  if (isTeacher) {
+    return PEOPLE_STATUS_TEACHING;
+  }
+  if (isStudent) {
+    return PEOPLE_STATUS_ADMITTED;
+  }
+  if (isAppliedAesopId(aesopId)) {
+    return PEOPLE_STATUS_APPLIED;
+  }
+  return "";
+}
+
+function isPeopleStatusSyncEnabled() {
+  return resolvePeopleStatusColumnIndex() !== null;
 }
 
 function resolvePeopleLastLoginColumnIndex() {
@@ -937,7 +976,7 @@ async function syncPastDingNumbersToPeople(userId) {
 
 /**
  * Record a successful portal sign-in on the People sheet (column Y by default).
- * Stores a Google Sheets datetime serial formatted like Ding change timestamps.
+ * Stores Eastern (America/New_York) date/time text, e.g. `6/23/2026, 2:15:30 PM EDT`.
  * @param {string} userId - AESOP ID (People id column)
  * @param {Date} [loginAt]
  * @returns {Promise<boolean>}
@@ -964,8 +1003,8 @@ async function recordPeopleLastLogin(userId, loginAt = new Date()) {
   }
 
   const when = loginAt instanceof Date ? loginAt : new Date(loginAt);
-  const tsSerial = dateToGoogleSheetsSerial(when);
-  if (!Number.isFinite(tsSerial)) {
+  const displayValue = formatEasternSheetTimestamp(when);
+  if (!displayValue) {
     return false;
   }
 
@@ -1006,24 +1045,8 @@ async function recordPeopleLastLogin(userId, loginAt = new Date()) {
   });
 
   const cell = peopleSheet.getCell(gridRowIdx, lastLoginColIdx);
-  cell.value = tsSerial;
+  cell.value = displayValue;
   await peopleSheet.saveUpdatedCells();
-
-  await peopleSheet._makeSingleUpdateRequest("repeatCell", {
-    range: {
-      sheetId: peopleSheet.sheetId,
-      startRowIndex: gridRowIdx,
-      endRowIndex: gridRowIdx + 1,
-      startColumnIndex: lastLoginColIdx,
-      endColumnIndex: lastLoginColIdx + 1,
-    },
-    cell: {
-      userEnteredFormat: {
-        numberFormat: DING_TIMESTAMP_NUMBER_FORMAT,
-      },
-    },
-    fields: "userEnteredFormat.numberFormat",
-  });
 
   return true;
 }
@@ -1847,14 +1870,26 @@ async function searchPeopleProfiles(query, limit = 25) {
 }
 
 /**
- * Write "applied" to People Status (column X) for 262-prefix IDs when the cell is blank.
- * @returns {Promise<{ updated: number }>}
+ * Populate People Status (column X): Teaching, Admitted, or Applied (262 applicants).
+ * @param {{ teacherEmails?: Set<string>|string[], studentEmails?: Set<string>|string[] }} roleContext
+ * @returns {Promise<{ updated: number, skipped: number }>}
  */
-async function backfillAppliedStatusOnPeopleSheet() {
+async function syncPeopleStatusOnPeopleSheet(roleContext = {}) {
+  if (!isPeopleStatusSyncEnabled()) {
+    return { updated: 0, skipped: 0 };
+  }
+
   const statusColIdx = resolvePeopleStatusColumnIndex();
   if (statusColIdx === null) {
-    return { updated: 0 };
+    return { updated: 0, skipped: 0 };
   }
+
+  const teacherEmails = new Set(
+    [...(roleContext.teacherEmails || [])].map((email) => String(email).trim().toLowerCase()).filter(Boolean),
+  );
+  const studentEmails = new Set(
+    [...(roleContext.studentEmails || [])].map((email) => String(email).trim().toLowerCase()).filter(Boolean),
+  );
 
   const doc = await initGoogleSheets();
   const peopleName = config.googleSheets.sheetName || "People";
@@ -1867,25 +1902,42 @@ async function backfillAppliedStatusOnPeopleSheet() {
   peopleSheet.resetLocalCache(true);
   const rows = await peopleSheet.getRows();
   const idColIdx = resolveColumnIndex(config.googleSheets.idColumn || "B");
+  const emailColIdx = resolveColumnIndex(config.googleSheets.emailColumn || "D");
 
-  /** @type {{ gridRowIdx: number }[]} */
+  /** @type {{ gridRowIdx: number, value: string }[]} */
   const pending = [];
+  let skipped = 0;
 
   for (const row of rows) {
     const rowData = Array.isArray(row._rawData) ? row._rawData : [];
     const aesopId = String(rowData[idColIdx] ?? "").trim();
-    if (!isAppliedAesopId(aesopId)) {
+    const email = String(rowData[emailColIdx] ?? "")
+      .trim()
+      .toLowerCase();
+    if (!aesopId && !email) {
+      skipped += 1;
       continue;
     }
-    const rawStatus = readPeopleStatusFromRow(row, rowData, statusColIdx);
-    if (String(rawStatus || "").trim()) {
+
+    const isTeacher = email ? teacherEmails.has(email) : false;
+    const isStudent = email ? studentEmails.has(email) && !isTeacher : false;
+    const nextStatus = derivePeopleSheetStatus({ aesopId, isTeacher, isStudent });
+    if (!nextStatus) {
+      skipped += 1;
       continue;
     }
-    pending.push({ gridRowIdx: row.rowNumber - 1 });
+
+    const currentStatus = readPeopleStatusFromRow(row, rowData, statusColIdx);
+    if (normalizePeopleStatusValue(currentStatus) === normalizePeopleStatusValue(nextStatus)) {
+      skipped += 1;
+      continue;
+    }
+
+    pending.push({ gridRowIdx: row.rowNumber - 1, value: nextStatus });
   }
 
   if (pending.length === 0) {
-    return { updated: 0 };
+    return { updated: 0, skipped };
   }
 
   const minRow = Math.min(...pending.map((entry) => entry.gridRowIdx));
@@ -1899,11 +1951,51 @@ async function backfillAppliedStatusOnPeopleSheet() {
 
   for (const entry of pending) {
     const cell = peopleSheet.getCell(entry.gridRowIdx, statusColIdx);
-    cell.value = "applied";
+    cell.value = entry.value;
   }
 
   await peopleSheet.saveUpdatedCells();
-  return { updated: pending.length };
+  return { updated: pending.length, skipped };
+}
+
+/** @deprecated Use syncPeopleStatusOnPeopleSheet */
+async function backfillAppliedStatusOnPeopleSheet() {
+  return syncPeopleStatusOnPeopleSheet({ teacherEmails: [], studentEmails: [] });
+}
+
+/**
+ * Build teacher/student email sets from synced Classroom Roles + Grades tabs.
+ * @returns {Promise<{ teacherEmails: Set<string>, studentEmails: Set<string> }>}
+ */
+async function loadClassroomRoleEmailSetsFromSheets() {
+  const teacherEmails = new Set();
+  const studentEmails = new Set();
+
+  const roleRows = await listAllClassroomRoleRows();
+  for (const row of roleRows) {
+    if (!row.email) {
+      continue;
+    }
+    if (String(row.role || "").trim().toLowerCase() === "teacher") {
+      teacherEmails.add(row.email);
+    } else {
+      studentEmails.add(row.email);
+    }
+  }
+
+  const gradeRows = await listAllClassroomGradeRows();
+  for (const row of gradeRows) {
+    const email = row.email ? String(row.email).trim().toLowerCase() : "";
+    if (email) {
+      studentEmails.add(email);
+    }
+  }
+
+  for (const email of teacherEmails) {
+    studentEmails.delete(email);
+  }
+
+  return { teacherEmails, studentEmails };
 }
 
 /**
@@ -1947,7 +2039,10 @@ module.exports = {
   getRoleByEmail,
   isPeopleSheetAdminRole,
   isAppliedPeopleStatus,
+  isAdmittedPeopleStatus,
+  isTeachingPeopleStatus,
   isAppliedAesopId,
+  derivePeopleSheetStatus,
   resolvePeopleStatus,
   getClassGradeByEmail,
   getAllClassGradesByEmail,
@@ -1958,5 +2053,7 @@ module.exports = {
   resolveColumnIndex,
   syncAllPeoplePastDingColumns,
   syncPastDingNumbersToPeople,
+  syncPeopleStatusOnPeopleSheet,
+  loadClassroomRoleEmailSetsFromSheets,
   backfillAppliedStatusOnPeopleSheet,
 };
