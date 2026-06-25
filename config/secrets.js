@@ -30,15 +30,15 @@ function buildGoogleSheetsConfig(fileSection) {
     emailColumn: envOr("GOOGLE_EMAIL_COLUMN", "emailColumn", "D"),
     phoneColumn: envOr("GOOGLE_PHONE_COLUMN", "phoneColumn", "E"),
     /** People sheet column for manual portal role (e.g. Admin). Blank or OFF disables. */
-    peopleRoleColumn: envOr("GOOGLE_PEOPLE_ROLE_COLUMN", "peopleRoleColumn", "F"),
+    peopleRoleColumn: envOr("GOOGLE_PEOPLE_ROLE_COLUMN", "peopleRoleColumn", "S"),
     /** Header label on People sheet for manual admin flag (used with loadHeaderRow). */
     peopleRoleHeader: envOr("GOOGLE_PEOPLE_ROLE_COLUMN_HEADER", "peopleRoleHeader", "Admins"),
     /** People sheet column for applicant/participant status (e.g. Applied). Blank or OFF disables. */
-    peopleStatusColumn: envOr("GOOGLE_PEOPLE_STATUS_COLUMN", "peopleStatusColumn", "X"),
+    peopleStatusColumn: envOr("GOOGLE_PEOPLE_STATUS_COLUMN", "peopleStatusColumn", "T"),
     /** Header label on People sheet for status (used with loadHeaderRow). */
     peopleStatusHeader: envOr("GOOGLE_PEOPLE_STATUS_COLUMN_HEADER", "peopleStatusHeader", "Status"),
     /** People sheet column for portal last-login timestamp. Blank or OFF disables. */
-    peopleLastLoginColumn: envOr("GOOGLE_PEOPLE_LAST_LOGIN_COLUMN", "peopleLastLoginColumn", "Y"),
+    peopleLastLoginColumn: envOr("GOOGLE_PEOPLE_LAST_LOGIN_COLUMN", "peopleLastLoginColumn", "U"),
     /** Header label on People sheet for last login (used with loadHeaderRow). */
     peopleLastLoginHeader: envOr("GOOGLE_PEOPLE_LAST_LOGIN_COLUMN_HEADER", "peopleLastLoginHeader", "Last Login"),
     dingChangesSheetName: envOr(

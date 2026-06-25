@@ -552,23 +552,19 @@ app.post('/api/update-ding-number', dingUpdateRateLimiter, async (req, res) => {
       );
     }
 
-    const latest = await findLatestDingNumberById(userId);
-    const displayDing =
-      latest != null && String(latest).trim() !== '' ? String(latest).trim() : ding;
-
-    try {
-      await sendDingNumberUpdatedEmail({
-        to: emailSan,
-        displayName: greetingName || 'Student',
-        newDingNumber: displayDing,
-      });
-    } catch (emailErr) {
-      console.warn('Ding number saved but notification email failed:', formatErrorForLog(emailErr));
-    }
+    const displayDing = ding;
 
     res.json({
       success: true,
       newDingNumber: displayDing,
+    });
+
+    sendDingNumberUpdatedEmail({
+      to: emailSan,
+      displayName: greetingName || 'Student',
+      newDingNumber: displayDing,
+    }).catch((emailErr) => {
+      console.warn('Ding number saved but notification email failed:', formatErrorForLog(emailErr));
     });
   } catch (error) {
     if (isGoogleSheetsForbidden(error)) {

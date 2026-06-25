@@ -55,28 +55,7 @@ function sheetDatetimeCellTextToUtcMillis(raw) {
   for (const fmt of twelveHourFormats) {
     const dt = DateTime.fromFormat(normalized, fmt, { zone: 'utc', locale: 'en-US' });
     if (dt.isValid) {
-      const ms = dt.toMillis();
-      // #region agent log
-      fetch('http://127.0.0.1:7639/ingest/1051cd26-72b6-4ce7-82ae-d3b10c65d4b2', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'c2ebdd' },
-        body: JSON.stringify({
-          sessionId: 'c2ebdd',
-          location: 'utils/dingSheetTime.js:sheetDatetimeCellTextToUtcMillis',
-          message: 'twelve_hour_parse_utc_civil',
-          data: {
-            normalized,
-            fmt,
-            zone: 'utc',
-            parsedUtcIso: new Date(ms).toISOString(),
-            runId: 'post-fix-verify',
-          },
-          timestamp: Date.now(),
-          hypothesisId: 'H-UTC-12h',
-        }),
-      }).catch(() => {});
-      // #endregion
-      return ms;
+      return dt.toMillis();
     }
   }
 
@@ -98,6 +77,17 @@ function formatDingChangeTimestamp(date = new Date()) {
     .toFormat('M/d/yyyy h:mm:ss a ZZZZ');
 }
 
+/** People Last Login column: Eastern wall-clock text (e.g. `6/23/2026, 2:15:30 PM EDT`). */
+function formatEasternSheetTimestamp(date = new Date()) {
+  const d = date instanceof Date ? date : new Date(date);
+  if (Number.isNaN(d.getTime())) {
+    return '';
+  }
+  return DateTime.fromMillis(d.getTime())
+    .setZone(DING_CHANGE_DISPLAY_TIMEZONE)
+    .toFormat('M/d/yyyy, h:mm:ss a ZZZZ');
+}
+
 /**
  * Google Sheets date/time serial (Excel-compatible): whole + fractional days since 1899-12-30 UTC.
  * Store this in column B so the cell is a datetime value (apply Date time format in the sheet).
@@ -113,6 +103,7 @@ function dateToGoogleSheetsSerial(date) {
 
 module.exports = {
   formatDingChangeTimestamp,
+  formatEasternSheetTimestamp,
   dateToGoogleSheetsSerial,
   sheetDatetimeCellTextToUtcMillis,
   sheetSlashDatetimeAsUtcMillis,

@@ -156,7 +156,7 @@ function readPeopleStatus(rowData, statusColumnIndex) {
 }
 
 /**
- * Read applicant/participant status from People column X (header "Status").
+ * Read applicant/participant status from People Status column (default T).
  * @param {import("google-spreadsheet").GoogleSpreadsheetRow | null | undefined} row
  * @param {string[]} rowData
  * @param {number | null} statusColumnIndex
@@ -265,7 +265,7 @@ function peopleRoleHeaderCandidates() {
 }
 
 /**
- * Read portal admin flag from a People row. Prefer header-based lookup (column X may
+ * Read portal admin flag from a People row. Prefer header-based lookup (Admins column may
  * extend past the trailing edge of row._rawData when earlier columns end at E).
  * @param {import("google-spreadsheet").GoogleSpreadsheetRow | null | undefined} row
  * @param {string[]} rowData
@@ -802,21 +802,29 @@ async function appendDingChangeRow(row) {
 
   // Apply display format via batchUpdate. Using saveCells() on a loaded cell often yields
   // "At least one cell must have something to update" when Sheets already treats the format as unchanged.
-  await worksheet._makeSingleUpdateRequest("repeatCell", {
-    range: {
-      sheetId: worksheet.sheetId,
-      startRowIndex: rowNum - 1,
-      endRowIndex: rowNum,
-      startColumnIndex: tsColIndex,
-      endColumnIndex: tsColIndex + 1,
-    },
-    cell: {
-      userEnteredFormat: {
-        numberFormat: DING_TIMESTAMP_NUMBER_FORMAT,
+  // Non-fatal: row data is already saved; Google occasionally returns 500 on repeatCell for new sheets.
+  try {
+    await worksheet._makeSingleUpdateRequest("repeatCell", {
+      range: {
+        sheetId: worksheet.sheetId,
+        startRowIndex: rowNum - 1,
+        endRowIndex: rowNum,
+        startColumnIndex: tsColIndex,
+        endColumnIndex: tsColIndex + 1,
       },
-    },
-    fields: "userEnteredFormat.numberFormat",
-  });
+      cell: {
+        userEnteredFormat: {
+          numberFormat: DING_TIMESTAMP_NUMBER_FORMAT,
+        },
+      },
+      fields: "userEnteredFormat.numberFormat",
+    });
+  } catch (formatError) {
+    console.warn(
+      "Ding change row saved but timestamp cell format failed:",
+      formatGoogleSheetsOperationError(formatError),
+    );
+  }
 }
 
 function isPeoplePastDingSyncEnabled() {
@@ -975,7 +983,7 @@ async function syncPastDingNumbersToPeople(userId) {
 }
 
 /**
- * Record a successful portal sign-in on the People sheet (column Y by default).
+ * Record a successful portal sign-in on the People sheet (column U by default).
  * Stores Eastern (America/New_York) date/time text, e.g. `6/23/2026, 2:15:30 PM EDT`.
  * @param {string} userId - AESOP ID (People id column)
  * @param {Date} [loginAt]
@@ -1870,7 +1878,7 @@ async function searchPeopleProfiles(query, limit = 25) {
 }
 
 /**
- * Populate People Status (column X): Teaching, Admitted, or Applied (262 applicants).
+ * Populate People Status (column T by default): Teaching, Admitted, or Applied (262 applicants).
  * @param {{ teacherEmails?: Set<string>|string[], studentEmails?: Set<string>|string[] }} roleContext
  * @returns {Promise<{ updated: number, skipped: number }>}
  */
