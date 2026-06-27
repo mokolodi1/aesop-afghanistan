@@ -154,6 +154,10 @@ function buildEmailFromEnv() {
     sendgrid: {
       apiKey: process.env.SENDGRID_API_KEY || "",
     },
+    postmark: {
+      serverToken: process.env.POSTMARK_SERVER_TOKEN || "",
+      messageStream: process.env.POSTMARK_MESSAGE_STREAM || "outbound",
+    },
     gmail: {
       user: process.env.GMAIL_USER || "",
       appPassword: process.env.GMAIL_APP_PASSWORD || "",

@@ -80,7 +80,7 @@ Implemented via Helmet.js:
 
 ### 10. Email Security
 
-- **SMTP Configuration**: Supports multiple providers (SMTP, SendGrid, Gmail)
+- **SMTP Configuration**: Supports multiple providers (Postmark, SMTP, SendGrid, Gmail)
 - **Header Sanitization**: Email headers sanitized to prevent injection
 - **From Address**: Configurable from address
 - **Error Handling**: Email errors don't expose recipient information
