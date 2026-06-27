@@ -1,11 +1,13 @@
 const nodemailer = require('nodemailer');
+const postmark = require('postmark');
 const { JWT } = require('google-auth-library');
 const config = require('../config/secrets');
-const { AESOP_EMAIL, FONT_HEADING, AESOP_CONTACT, wrapAesopEmail } = require('./emailBranding');
+const { AESOP_EMAIL, FONT_HEADING, wrapAesopEmail } = require('./emailBranding');
 const { formatGmailAuthError, formatErrorForLog } = require('../utils/errorLogging');
 
 let transporter = null;
 let gmailJwtClient = null;
+let postmarkClient = null;
 
 const GMAIL_SEND_SCOPE = 'https://www.googleapis.com/auth/gmail.send';
 
@@ -51,7 +53,7 @@ function initEmailTransporter() {
         pass: config.email.gmail.appPassword, // Use App Password, not regular password
       },
     });
-  } else if (config.email.provider === 'gmailServiceAccount') {
+  } else if (config.email.provider === 'gmailServiceAccount' || config.email.provider === 'postmark') {
     return null;
   } else {
     throw new Error(`Unsupported email provider: ${config.email.provider}`);
@@ -208,6 +210,48 @@ async function sendWithGmailServiceAccount({ to, subject, text, html, fromEmail 
 }
 
 /**
+ * Initialize Postmark ServerClient
+ * @returns {postmark.ServerClient}
+ */
+function initPostmarkClient() {
+  if (postmarkClient) {
+    return postmarkClient;
+  }
+
+  const serverToken = config.email?.postmark?.serverToken;
+  if (!serverToken || !String(serverToken).trim()) {
+    throw new Error('Missing email.postmark.serverToken in secrets config (or POSTMARK_SERVER_TOKEN env var).');
+  }
+
+  postmarkClient = new postmark.ServerClient(String(serverToken).trim());
+  return postmarkClient;
+}
+
+/**
+ * Send email through Postmark API
+ * @param {Object} options
+ * @param {string} options.to
+ * @param {string} options.subject
+ * @param {string} options.text
+ * @param {string} options.html
+ * @param {string} options.fromEmail
+ * @returns {Promise<Object>}
+ */
+async function sendWithPostmark({ to, subject, text, html, fromEmail }) {
+  const client = initPostmarkClient();
+  const messageStream = config.email.postmark?.messageStream || 'outbound';
+
+  return client.sendEmail({
+    From: `"AESOP Afghanistan" <${fromEmail}>`,
+    To: to,
+    Subject: subject,
+    TextBody: text || '',
+    HtmlBody: html || '',
+    MessageStream: messageStream,
+  });
+}
+
+/**
  * Send an email
  * @param {Object} options - Email options
  * @param {string} options.to - Recipient email (must be pre-validated and sanitized)
@@ -240,12 +284,25 @@ async function sendEmail({ to, subject, text, html }) {
         html: mailOptions.html,
         fromEmail,
       });
+    } else if (config.email.provider === 'postmark') {
+      info = await sendWithPostmark({
+        to,
+        subject: sanitizedSubject,
+        text: mailOptions.text,
+        html: mailOptions.html,
+        fromEmail,
+      });
     } else {
       const transporter = initEmailTransporter();
       info = await transporter.sendMail(mailOptions);
     }
 
-    console.log('Email sent successfully');
+    const messageId = info?.MessageID || info?.messageId;
+    if (messageId) {
+      console.log('Email sent successfully, messageId:', messageId);
+    } else {
+      console.log('Email sent successfully');
+    }
     return info;
   } catch (error) {
     // Don't expose email details in error logs
@@ -272,14 +329,11 @@ async function sendDingNumberUpdatedEmail({ to, displayName, newDingNumber }) {
     '',
     'If you did not make this change, contact AESOP immediately.',
     '',
-    `${AESOP_CONTACT.phoneDisplay}`,
-    AESOP_CONTACT.email,
-    '',
     'AESOP Afghanistan',
     'https://aesopafghanistan.org/',
   ].join('\n');
 
-  const { ink, muted, accent, skyTint, line } = AESOP_EMAIL;
+  const { ink, muted, skyTint, line } = AESOP_EMAIL;
   const innerHtml = `
       <p style="margin:0 0 12px;">Dear ${safeName},</p>
       <p style="margin:0 0 14px;">
@@ -293,13 +347,10 @@ async function sendDingNumberUpdatedEmail({ to, displayName, newDingNumber }) {
         </tr>
       </table>
       <p style="margin:0;font-size:13px;line-height:1.5;color:${muted};">
-        If you did not make this change, contact us immediately:
-        <a href="tel:${AESOP_CONTACT.phoneTel}" style="color:${accent};font-weight:600;text-decoration:none;">${AESOP_CONTACT.phoneDisplay}</a>
-        ·
-        <a href="mailto:${AESOP_CONTACT.email}" style="color:${accent};font-weight:600;text-decoration:none;">${AESOP_CONTACT.email}</a>
+        If you did not make this change, contact AESOP immediately.
       </p>
   `;
-  const html = wrapAesopEmail(innerHtml, { title: subject });
+  const html = wrapAesopEmail(innerHtml, { title: subject, showContactFooter: false });
 
   await sendEmail({ to, subject, text, html });
 }

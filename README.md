@@ -115,8 +115,10 @@ If `SECRETS_JSON` is unset and `config/secrets.json` is absent (typical minimal 
   - `CLASSROOM_IMPERSONATE_EMAIL` - Workspace user the service account impersonates to read all courses (defaults to `GMAIL_SA_DELEGATED_USER`).
   - `CLASSROOM_ROLES_SHEET_NAME` (default `Classroom Roles`), `CLASSROOM_ROLES_EMAIL_COLUMN` (`A`), `CLASSROOM_ROLES_ROLE_COLUMN` (`B`), `CLASSROOM_ROLES_CLASSES_COLUMN` (`C`).
   - `CLASSROOM_GRADES_SHEET_NAME` (default `Classroom Grades`), `CLASSROOM_GRADES_EMAIL_COLUMN` (`A`), `CLASSROOM_GRADES_NAME_COLUMN` (`B`), `CLASSROOM_GRADES_SECTION_COLUMN` (`C`), `CLASSROOM_GRADES_GRADE_COLUMN` (`D`).
-- `EMAIL_PROVIDER` - Email provider: `smtp`, `sendgrid`, `gmail`, or `gmailServiceAccount`
+- `EMAIL_PROVIDER` - Email provider: `postmark`, `smtp`, `sendgrid`, `gmail`, or `gmailServiceAccount`
 - `EMAIL_FROM` - From email address
+- `POSTMARK_SERVER_TOKEN` - Postmark Server API token (if using Postmark)
+- `POSTMARK_MESSAGE_STREAM` - Postmark message stream (default: `outbound`)
 - `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD` - SMTP settings
 - `SENDGRID_API_KEY` - If using SendGrid
 - `GMAIL_USER`, `GMAIL_APP_PASSWORD` - If using Gmail
@@ -225,6 +227,33 @@ The script resolves the current deployed image, then runs `fly machine run <imag
 
 Choose one of the following email providers:
 
+#### Postmark (Recommended)
+
+Verify your sending domain in Postmark (DKIM + Return-Path), create a Server, and copy its **Server API token**. Keep `gmailServiceAccount` in secrets if you use Google Sheets or Classroom sync — those features still need the service account credentials.
+
+```json
+{
+  "email": {
+    "provider": "postmark",
+    "from": "noreply@aesopafghanistan.org",
+    "postmark": {
+      "serverToken": "YOUR-POSTMARK-SERVER-API-TOKEN",
+      "messageStream": "outbound"
+    },
+    "gmailServiceAccount": {
+      "delegatedUser": "auth@yourdomain.com",
+      "credentials": { "...": "service account JSON for Sheets/Classroom" }
+    }
+  }
+}
+```
+
+Test delivery locally:
+
+```bash
+node scripts/send-test-email.js you@example.com
+```
+
 #### SMTP (Generic)
 
 ```json
@@ -301,5 +330,5 @@ Choose one of the following email providers:
 
 - **Magic Link Authentication**: Users enter their email and receive a secure magic link
 - **Google Sheets Integration**: Email verification against a Google Sheet
-- **Email Sending**: Automated magic link emails via SMTP, SendGrid, or Gmail
+- **Email Sending**: Automated magic link emails via Postmark, SMTP, SendGrid, or Gmail
 - **Secure Token Generation**: Cryptographically secure magic links with 15-minute expiration
