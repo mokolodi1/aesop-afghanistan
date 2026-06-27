@@ -35,6 +35,19 @@ const {
   getAdminViewAsTeacher,
 } = require('./services/adminPortal');
 const {
+  getEmailGroups,
+  getAdmissionsMetadata,
+  previewEmailRecipients,
+  sendAdminEmailTest,
+  startAdminEmailCampaign,
+  getAdminEmailCampaignStatus,
+  startEmailCampaignWorker,
+} = require('./services/adminEmail');
+const {
+  verifyPostmarkWebhookAuth,
+  handlePostmarkWebhook,
+} = require('./services/postmarkWebhooks');
+const {
   sanitizeEmail,
   isValidEmail,
   isValidToken,
@@ -242,7 +255,7 @@ app.use((req, res, next) => {
   if (req.method !== 'GET') {
     return next();
   }
-  if (req.path === '/profile' || req.path === '/faq' || req.path === '/admin') {
+  if (req.path === '/profile' || req.path === '/faq' || req.path === '/admin' || req.path === '/admin/emails') {
     return res.sendFile(path.join(__dirname, 'public', 'portal.html'));
   }
   if (isPortalRequestHost(req) && req.path === '/') {
@@ -1077,6 +1090,122 @@ app.post('/api/portal-admin/dingconnect-export', portalAdminRateLimiter, async (
   }
 });
 
+app.post('/api/portal-admin/email/groups', portalAdminRateLimiter, async (req, res) => {
+  try {
+    const profile = await requirePortalAdmin(res, req.body);
+    if (!profile) {
+      return;
+    }
+    res.json({ success: true, groups: getEmailGroups() });
+  } catch (error) {
+    console.error('Error loading email groups:', formatErrorForLog(error));
+    res.status(500).json({ error: 'Could not load email groups.' });
+  }
+});
+
+app.post('/api/portal-admin/email/admissions-metadata', portalAdminRateLimiter, async (req, res) => {
+  try {
+    const profile = await requirePortalAdmin(res, req.body);
+    if (!profile) {
+      return;
+    }
+    const metadata = await getAdmissionsMetadata();
+    res.json({ success: true, metadata });
+  } catch (error) {
+    console.error('Error loading admissions metadata:', formatErrorForLog(error));
+    res.status(500).json({ error: 'Could not load Admissions sheet metadata.' });
+  }
+});
+
+app.post('/api/portal-admin/email/preview', portalAdminRateLimiter, async (req, res) => {
+  try {
+    const profile = await requirePortalAdmin(res, req.body);
+    if (!profile) {
+      return;
+    }
+    const group = typeof req.body.group === 'string' ? req.body.group.trim() : 'admissions';
+    const preview = await previewEmailRecipients({ group, filter: req.body.filter });
+    res.json({ success: true, ...preview });
+  } catch (error) {
+    console.error('Error previewing email recipients:', formatErrorForLog(error));
+    res.status(500).json({ error: 'Could not preview recipients.' });
+  }
+});
+
+app.post('/api/portal-admin/email/test', portalAdminRateLimiter, async (req, res) => {
+  try {
+    const profile = await requirePortalAdmin(res, req.body);
+    if (!profile) {
+      return;
+    }
+    const result = await sendAdminEmailTest(profile.email, {
+      group: req.body.group,
+      subject: req.body.subject,
+      body: req.body.body,
+      globalVars: req.body.globalVars,
+      filter: req.body.filter,
+    });
+    res.json({ success: true, ...result });
+  } catch (error) {
+    console.error('Error sending admin test email:', formatErrorForLog(error));
+    const status = error.statusCode || 500;
+    res.status(status).json({ error: error.message || 'Could not send test email.' });
+  }
+});
+
+app.post('/api/portal-admin/email/send', portalAdminRateLimiter, async (req, res) => {
+  try {
+    const profile = await requirePortalAdmin(res, req.body);
+    if (!profile) {
+      return;
+    }
+    const result = await startAdminEmailCampaign(profile.email, {
+      group: req.body.group,
+      subject: req.body.subject,
+      body: req.body.body,
+      globalVars: req.body.globalVars,
+      filter: req.body.filter,
+    });
+    res.json({ success: true, ...result });
+  } catch (error) {
+    console.error('Error starting admin email campaign:', formatErrorForLog(error));
+    const status = error.statusCode || 500;
+    res.status(status).json({ error: error.message || 'Could not start email campaign.' });
+  }
+});
+
+app.post('/api/portal-admin/email/campaign-status', portalAdminRateLimiter, async (req, res) => {
+  try {
+    const profile = await requirePortalAdmin(res, req.body);
+    if (!profile) {
+      return;
+    }
+    const campaignId = Number.parseInt(String(req.body.campaignId ?? ''), 10);
+    if (!Number.isFinite(campaignId) || campaignId <= 0) {
+      return res.status(400).json({ error: 'A valid campaignId is required.' });
+    }
+    const status = await getAdminEmailCampaignStatus(campaignId);
+    res.json({ success: true, status });
+  } catch (error) {
+    console.error('Error loading email campaign status:', formatErrorForLog(error));
+    const status = error.statusCode || 500;
+    res.status(status).json({ error: error.message || 'Could not load campaign status.' });
+  }
+});
+
+app.post('/api/postmark/webhook', async (req, res) => {
+  if (!verifyPostmarkWebhookAuth(req)) {
+    return res.status(401).json({ error: 'Unauthorized webhook request.' });
+  }
+  try {
+    const result = await handlePostmarkWebhook(req.body || {});
+    res.status(200).json({ ok: true, ...result });
+  } catch (error) {
+    console.error('Postmark webhook error:', formatErrorForLog(error));
+    res.status(500).json({ error: 'Webhook processing failed.' });
+  }
+});
+
 app.listen(PORT, '0.0.0.0', async () => {
   console.log(`Server running on port ${PORT}`);
   if (process.env.DATABASE_AUTO_MIGRATE === 'true' && isDatabaseEnabled()) {
@@ -1088,4 +1217,5 @@ app.listen(PORT, '0.0.0.0', async () => {
       console.error('[db] auto-migrate failed:', formatErrorForLog(error));
     }
   }
+  startEmailCampaignWorker();
 });

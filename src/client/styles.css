@@ -2319,3 +2319,112 @@ button:disabled {
 .portal-admin-class-table {
   min-width: 520px;
 }
+
+.portal-admin-emails-card {
+  max-width: 960px;
+}
+
+.portal-admin-emails-section {
+  margin-bottom: 24px;
+}
+
+.portal-admin-emails-heading {
+  margin: 0 0 12px;
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--aesop-teal-dark);
+}
+
+.portal-admin-emails-group-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.portal-admin-emails-radio {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+}
+
+.portal-admin-emails-radio--disabled {
+  opacity: 0.55;
+}
+
+.portal-admin-emails-soon {
+  font-weight: 500;
+  color: var(--aesop-text-muted);
+}
+
+.portal-admin-emails-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.portal-admin-emails-filter-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.portal-admin-emails-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.portal-admin-emails-label {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--aesop-text-muted);
+}
+
+.portal-admin-emails-select,
+.portal-admin-emails-textarea {
+  width: 100%;
+  font: inherit;
+  border: 1px solid hsla(11.73, 82.49%, 57.45%, 0.25);
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: #fff;
+  color: var(--aesop-text);
+}
+
+.portal-admin-emails-textarea {
+  resize: vertical;
+  min-height: 180px;
+  line-height: 1.5;
+}
+
+.portal-admin-emails-vars {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.portal-admin-emails-count {
+  margin: 0 0 8px;
+  font-size: 1.15rem;
+  color: var(--aesop-teal-dark);
+}
+
+.portal-admin-emails-recipient-wrap {
+  max-height: 320px;
+  overflow: auto;
+  margin-top: 12px;
+}
+
+.portal-admin-emails-recipient-table {
+  min-width: 520px;
+}
+
+.portal-admin-emails-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 8px;
+}

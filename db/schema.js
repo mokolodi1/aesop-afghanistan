@@ -204,6 +204,76 @@ const dingTopups = pgTable(
   }),
 );
 
+const emailAdminTests = pgTable(
+  "email_admin_tests",
+  {
+    adminEmail: varchar("admin_email", { length: 320 }).notNull(),
+    contentHash: varchar("content_hash", { length: 64 }).notNull(),
+    testSentAt: timestamp("test_sent_at", { withTimezone: true }).notNull(),
+    testSentTo: varchar("test_sent_to", { length: 320 }).notNull(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.adminEmail, table.contentHash] }),
+  }),
+);
+
+const emailCampaigns = pgTable(
+  "email_campaigns",
+  {
+    id: serial("id").primaryKey(),
+    createdByEmail: varchar("created_by_email", { length: 320 }).notNull(),
+    recipientGroup: varchar("recipient_group", { length: 64 }).notNull(),
+    subject: text("subject").notNull(),
+    body: text("body").notNull(),
+    globalVars: text("global_vars").notNull().default("{}"),
+    recipientFilter: text("recipient_filter"),
+    contentHash: varchar("content_hash", { length: 64 }).notNull(),
+    testSentAt: timestamp("test_sent_at", { withTimezone: true }),
+    testSentTo: varchar("test_sent_to", { length: 320 }),
+    status: varchar("status", { length: 20 }).notNull().default("sending"),
+    totalRecipients: integer("total_recipients").notNull().default(0),
+    sentCount: integer("sent_count").notNull().default(0),
+    failedCount: integer("failed_count").notNull().default(0),
+    nextBatchAt: timestamp("next_batch_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+  },
+  (table) => ({
+    statusNextBatchIdx: index("email_campaigns_status_next_batch_idx").on(table.status, table.nextBatchAt),
+  }),
+);
+
+const emailCampaignRecipients = pgTable(
+  "email_campaign_recipients",
+  {
+    id: serial("id").primaryKey(),
+    campaignId: integer("campaign_id")
+      .notNull()
+      .references(() => emailCampaigns.id, { onDelete: "cascade" }),
+    aesopId: varchar("aesop_id", { length: 64 }),
+    name: varchar("name", { length: 255 }),
+    email: varchar("email", { length: 320 }).notNull(),
+    rowFields: text("row_fields").notNull().default("{}"),
+    status: varchar("status", { length: 20 }).notNull().default("pending"),
+    sentAt: timestamp("sent_at", { withTimezone: true }),
+    postmarkMessageId: varchar("postmark_message_id", { length: 64 }),
+    deliveredAt: timestamp("delivered_at", { withTimezone: true }),
+    openedAt: timestamp("opened_at", { withTimezone: true }),
+    bouncedAt: timestamp("bounced_at", { withTimezone: true }),
+    error: text("error"),
+    batchNumber: integer("batch_number"),
+  },
+  (table) => ({
+    campaignStatusIdx: index("email_campaign_recipients_campaign_status_idx").on(
+      table.campaignId,
+      table.status,
+    ),
+    postmarkMessageIdIdx: index("email_campaign_recipients_postmark_message_id_idx").on(
+      table.postmarkMessageId,
+    ),
+  }),
+);
+
 module.exports = {
   syncRuns,
   people,
@@ -216,4 +286,7 @@ module.exports = {
   dingChangeHistory,
   magicLinks,
   dingTopups,
+  emailAdminTests,
+  emailCampaigns,
+  emailCampaignRecipients,
 };

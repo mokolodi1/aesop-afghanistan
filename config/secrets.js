@@ -75,6 +75,30 @@ function buildGoogleSheetsConfig(fileSection) {
     teachersSheetName: envOr("GOOGLE_TEACHERS_SHEET_NAME", "teachersSheetName", "Teachers"),
     teachersIdColumn: envOr("GOOGLE_TEACHERS_ID_COLUMN", "teachersIdColumn", "A"),
     teachersClassesColumn: envOr("GOOGLE_TEACHERS_CLASSES_COLUMN", "teachersClassesColumn", "B"),
+    admissionsSheetName: envOr("GOOGLE_ADMISSIONS_SHEET_NAME", "admissionsSheetName", "Admissions"),
+    admissionsIdColumn: envOr("GOOGLE_ADMISSIONS_ID_COLUMN", "admissionsIdColumn", "B"),
+    admissionsNameColumn: envOr("GOOGLE_ADMISSIONS_NAME_COLUMN", "admissionsNameColumn", "C"),
+    admissionsEmailColumn: envOr("GOOGLE_ADMISSIONS_EMAIL_COLUMN", "admissionsEmailColumn", "D"),
+    admissionsHeaderRow: envOr("GOOGLE_ADMISSIONS_HEADER_ROW", "admissionsHeaderRow", "1"),
+  };
+}
+
+function buildPostmarkConfig(fileSection) {
+  const f = fileSection && typeof fileSection === "object" ? fileSection : {};
+  const envOr = (envKey, fileKey, fallback = "") => {
+    const fromEnv = process.env[envKey];
+    if (fromEnv != null && String(fromEnv).trim() !== "") {
+      return String(fromEnv).trim();
+    }
+    const fromFile = f[fileKey];
+    if (fromFile != null && String(fromFile).trim() !== "") {
+      return String(fromFile).trim();
+    }
+    return fallback;
+  };
+  return {
+    serverToken: envOr("POSTMARK_SERVER_TOKEN", "serverToken", ""),
+    webhookSecret: envOr("POSTMARK_WEBHOOK_SECRET", "webhookSecret", ""),
   };
 }
 
@@ -309,6 +333,7 @@ function loadSecretsFromSecretsJsonEnv() {
     parsed.admin = buildAdminConfig(parsed.admin);
     parsed.database = buildDatabaseConfig(parsed.database);
     parsed.backup = buildBackupConfig(parsed.backup);
+    parsed.postmark = buildPostmarkConfig(parsed.postmark);
     mergePortalContactEmail(parsed);
     return parsed;
   } catch (error) {
@@ -342,6 +367,7 @@ function loadSecrets() {
       secrets.admin = buildAdminConfig(secrets.admin);
       secrets.database = buildDatabaseConfig(secrets.database);
       secrets.backup = buildBackupConfig(secrets.backup);
+      secrets.postmark = buildPostmarkConfig(secrets.postmark);
       mergePortalContactEmail(secrets);
       return secrets;
     } catch (error) {
@@ -356,6 +382,7 @@ function loadSecrets() {
     admin: buildAdminConfig(undefined),
     database: buildDatabaseConfig(undefined),
     backup: buildBackupConfig(undefined),
+    postmark: buildPostmarkConfig(undefined),
     email: emailFromEnv,
     portalContactEmail: "",
   };

@@ -3,7 +3,9 @@
 token.json
 secrets/*
 config/secrets.json
+.env
 __pycache__
+scripts/.venv
 .vscode
 node_modules
 data/backups/

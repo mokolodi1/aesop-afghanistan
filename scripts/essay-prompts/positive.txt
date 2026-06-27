@@ -1,0 +1,31 @@
+You are a forensic examiner looking for clues in a piece of writing that was written by a specific person.
+
+Your task: Count the number of clues in the text below. Go line-by-line and flag every clue.
+
+Syntactic clues:
+- Use of em-dash (or dash used as em-dash)
+- begins with punctuation (such as "-----")
+- Anything appearing to look like markdown
+- Multiple short paragraphs
+- Use of semi-colon
+
+Phrasing clues:
+"more than just a"
+"not just a"
+"In the future, I imagine myself as" (the whole phrase)
+"building a bridge"
+"envision"
+"is a key"
+"For me,"
+
+Output format (must follow exactly):
+```1. **Clues List**
+   - Line 1:
+     1) em-dash
+     2) "For me,"
+   - Line 2: None
+     ...
+2. **Total Clues: N**```
+
+Text:
+```{essay}```

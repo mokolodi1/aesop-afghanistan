@@ -2026,6 +2026,137 @@ async function getClassroomTabStats() {
   }
 }
 
+/**
+ * Convert zero-based column index to A1 letter(s).
+ * @param {number} index
+ * @returns {string}
+ */
+function columnIndexToLetter(index) {
+  let n = index + 1;
+  let letters = "";
+  while (n > 0) {
+    const rem = (n - 1) % 26;
+    letters = String.fromCharCode(65 + rem) + letters;
+    n = Math.floor((n - 1) / 26);
+  }
+  return letters;
+}
+
+/**
+ * Load all rows from the Admissions sheet tab with header-based field map.
+ * @returns {Promise<{ headers: Array<{ letter: string, label: string, index: number }>, rows: Array<{ id: string, name: string, email: string, fields: Record<string, string> }>, identityColumnIndices: Set<number> }>}
+ */
+async function loadAdmissionsSheet() {
+  const empty = { headers: [], rows: [], identityColumnIndices: new Set() };
+  try {
+    const gs = config.googleSheets || {};
+    const sheetName = gs.admissionsSheetName || "Admissions";
+    const headerRowNum = Math.max(1, parseInt(String(gs.admissionsHeaderRow || "1"), 10) || 1);
+    const idColumnIndex = resolveColumnIndex(gs.admissionsIdColumn || "B");
+    const nameColumnIndex = resolveColumnIndex(gs.admissionsNameColumn || "C");
+    const emailColumnIndex = resolveColumnIndex(gs.admissionsEmailColumn || "D");
+    const identityColumnIndices = new Set([idColumnIndex, nameColumnIndex, emailColumnIndex]);
+
+    const sheet = await initGoogleSheets();
+    const worksheet = sheet.sheetsByTitle[sheetName];
+    if (!worksheet) {
+      console.warn(`loadAdmissionsSheet: sheet "${sheetName}" not found.`);
+      return empty;
+    }
+
+    await worksheet.loadHeaderRow(headerRowNum);
+    const headerValues = Array.isArray(worksheet.headerValues) ? worksheet.headerValues : [];
+    const headers = headerValues.map((label, index) => ({
+      letter: columnIndexToLetter(index),
+      label: String(label || "").trim() || columnIndexToLetter(index),
+      index,
+    }));
+
+    const rows = [];
+    const dataRows = await worksheet.getRows();
+    for (const row of dataRows) {
+      const rowData = Array.isArray(row._rawData) ? row._rawData : [];
+      const email = String(rowData[emailColumnIndex] ?? "").trim();
+      if (!email) {
+        continue;
+      }
+      const fields = {};
+      for (const header of headers) {
+        if (identityColumnIndices.has(header.index)) {
+          continue;
+        }
+        fields[header.label] = String(rowData[header.index] ?? "").trim();
+      }
+      rows.push({
+        id: String(rowData[idColumnIndex] ?? "").trim(),
+        name: String(rowData[nameColumnIndex] ?? "").trim(),
+        email,
+        fields,
+      });
+    }
+
+    return { headers, rows, identityColumnIndices };
+  } catch (error) {
+    console.warn("loadAdmissionsSheet:", formatGoogleSheetsOperationError(error));
+    return empty;
+  }
+}
+
+/**
+ * @param {Array<{ id: string, name: string, email: string, fields: Record<string, string> }>} rows
+ * @param {{ column?: string, values?: string[] }|null|undefined} filter
+ */
+function filterAdmissionsRows(rows, filter) {
+  if (!Array.isArray(rows)) {
+    return [];
+  }
+  if (!filter || !filter.column || !Array.isArray(filter.values) || filter.values.length === 0) {
+    return rows;
+  }
+  const column = String(filter.column).trim();
+  const want = new Set(filter.values.map((v) => String(v ?? "").trim().toLowerCase()).filter(Boolean));
+  if (!column || want.size === 0) {
+    return rows;
+  }
+  return rows.filter((row) => {
+    const cell = row.fields[column];
+    if (cell == null) {
+      return false;
+    }
+    return want.has(String(cell).trim().toLowerCase());
+  });
+}
+
+/**
+ * Distinct filter values per non-identity Admissions column.
+ * @param {{ headers: Array<{ letter: string, label: string, index: number }>, rows: Array<{ fields: Record<string, string> }>, identityColumnIndices: Set<number> }} sheetData
+ */
+function getAdmissionsFilterOptions(sheetData) {
+  const headers = Array.isArray(sheetData?.headers) ? sheetData.headers : [];
+  const rows = Array.isArray(sheetData?.rows) ? sheetData.rows : [];
+  const identityColumnIndices =
+    sheetData?.identityColumnIndices instanceof Set ? sheetData.identityColumnIndices : new Set();
+
+  const filterHeaders = headers.filter((h) => !identityColumnIndices.has(h.index));
+  const valuesByColumn = {};
+  for (const header of filterHeaders) {
+    const values = new Set();
+    for (const row of rows) {
+      const cell = row.fields?.[header.label];
+      if (cell != null && String(cell).trim() !== "") {
+        values.add(String(cell).trim());
+      }
+    }
+    valuesByColumn[header.label] = Array.from(values).sort((a, b) => a.localeCompare(b));
+  }
+
+  return {
+    columns: filterHeaders.map((h) => h.label),
+    valuesByColumn,
+    headers: filterHeaders.map((h) => ({ letter: h.letter, label: h.label })),
+  };
+}
+
 module.exports = {
   appendDingChangeRow,
   buildPastDingSummaryFromChanges,
@@ -2064,4 +2195,7 @@ module.exports = {
   syncPeopleStatusOnPeopleSheet,
   loadClassroomRoleEmailSetsFromSheets,
   backfillAppliedStatusOnPeopleSheet,
+  loadAdmissionsSheet,
+  filterAdmissionsRows,
+  getAdmissionsFilterOptions,
 };

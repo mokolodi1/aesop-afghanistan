@@ -24,6 +24,7 @@ function getPortalRouteSegment() {
   if (pathname === '/' && isPortalHostname()) return 'hub';
   if (pathname === '/profile' || pathname.startsWith('/profile/')) return 'profile';
   if (pathname === '/faq' || pathname.startsWith('/faq/')) return 'faq';
+  if (pathname === '/admin/emails') return 'admin-emails';
   if (pathname === '/admin' || pathname.startsWith('/admin/')) return 'admin';
   return 'hub';
 }
@@ -45,6 +46,7 @@ function shouldMountPortalSpa() {
     p === '/profile' ||
     p === '/faq' ||
     p === '/admin' ||
+    p === '/admin/emails' ||
     p.startsWith('/profile/') ||
     p.startsWith('/faq/') ||
     p.startsWith('/admin/');
@@ -1979,6 +1981,12 @@ function PortalSectionLinks({ current, isAdmin }) {
           <a href="/admin" className={current === 'admin' ? 'is-current' : undefined}>
             Admin
           </a>
+          <span className="portal-section-links-sep" aria-hidden="true">
+            ·
+          </span>
+          <a href="/admin/emails" className={current === 'admin-emails' ? 'is-current' : undefined}>
+            Emails
+          </a>
         </>
       ) : null}
       <span className="portal-section-links-sep" aria-hidden="true">
@@ -2620,7 +2628,8 @@ function PortalAdminPage() {
           <PortalRoleBadge isAdmin className="portal-welcome-role" />
         </h2>
         <p className="portal-admin-lead">
-          Live Classroom rosters, student lookup, high-grade rewards, and DingConnect+ bulk top-up export.
+          Live Classroom rosters, student lookup, high-grade rewards, and DingConnect+ bulk top-up export.{' '}
+          <a href="/admin/emails">Bulk email →</a>
         </p>
 
         <PortalAdminViewAs />
@@ -2965,6 +2974,589 @@ function PortalAdminPage() {
   );
 }
 
+const EMAIL_IDENTITY_PLACEHOLDERS = new Set(['aesop id', 'name', 'email']);
+
+function extractEmailPlaceholders(subject, body) {
+  const found = new Set();
+  const re = /\[\[([^\]]+)\]\]/g;
+  for (const text of [subject, body]) {
+    if (typeof text !== 'string') {
+      continue;
+    }
+    let match;
+    const copy = new RegExp(re.source, 'g');
+    while ((match = copy.exec(text)) !== null) {
+      found.add(match[1].trim());
+    }
+  }
+  return Array.from(found);
+}
+
+function detectGlobalEmailPlaceholders(subject, body, rowColumnLabels) {
+  const rowSet = new Set((rowColumnLabels || []).map((label) => String(label).trim().toLowerCase()));
+  return extractEmailPlaceholders(subject, body).filter((name) => {
+    const lower = name.toLowerCase();
+    return !EMAIL_IDENTITY_PLACEHOLDERS.has(lower) && !rowSet.has(lower);
+  });
+}
+
+function buildEmailFilterPayload(filterAll, filterColumn, filterValue) {
+  if (filterAll || !filterColumn || !filterValue) {
+    return null;
+  }
+  return { column: filterColumn, values: [filterValue] };
+}
+
+function PortalAdminEmailsPage() {
+  const { isAdmin } = usePortalClassGrade();
+  const signedIn = isPortalSessionCompleteSync();
+  const adminEmail = readSessionField('studentPortalEmail').trim();
+
+  const [group] = useState('admissions');
+  const [metadata, setMetadata] = useState(null);
+  const [metadataError, setMetadataError] = useState('');
+  const [metadataLoading, setMetadataLoading] = useState(false);
+
+  const [filterAll, setFilterAll] = useState(true);
+  const [filterColumn, setFilterColumn] = useState('');
+  const [filterValue, setFilterValue] = useState('');
+
+  const [subject, setSubject] = useState('');
+  const [body, setBody] = useState('');
+  const [globalVars, setGlobalVars] = useState({});
+
+  const [recipients, setRecipients] = useState([]);
+  const [recipientCount, setRecipientCount] = useState(0);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState('');
+
+  const [testLoading, setTestLoading] = useState(false);
+  const [testError, setTestError] = useState('');
+  const [testSuccess, setTestSuccess] = useState('');
+  const [lastTestHash, setLastTestHash] = useState('');
+  const [testPreviewRecipient, setTestPreviewRecipient] = useState(null);
+
+  const [sendLoading, setSendLoading] = useState(false);
+  const [sendError, setSendError] = useState('');
+  const [campaignId, setCampaignId] = useState(null);
+  const [campaignStatus, setCampaignStatus] = useState(null);
+
+  const filterPayload = buildEmailFilterPayload(filterAll, filterColumn, filterValue);
+  const rowColumnLabels = metadata?.columns || [];
+  const globalPlaceholders = detectGlobalEmailPlaceholders(subject, body, rowColumnLabels);
+  const composePayload = {
+    group,
+    subject,
+    body,
+    globalVars,
+    filter: filterPayload,
+  };
+
+  useEffect(() => {
+    setLastTestHash('');
+    setTestSuccess('');
+    setTestPreviewRecipient(null);
+    setTestError('');
+  }, [subject, body, JSON.stringify(globalVars), filterAll, filterColumn, filterValue]);
+
+  useEffect(() => {
+    if (!signedIn || !isAdmin) {
+      return undefined;
+    }
+    let cancelled = false;
+    setMetadataLoading(true);
+    setMetadataError('');
+    adminApiPost('/api/portal-admin/email/admissions-metadata')
+      .then((data) => {
+        if (!cancelled) {
+          setMetadata(data.metadata || null);
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setMetadataError(err.message || 'Could not load Admissions sheet.');
+          setMetadata(null);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setMetadataLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [signedIn, isAdmin]);
+
+  useEffect(() => {
+    if (!signedIn || !isAdmin || group !== 'admissions') {
+      return undefined;
+    }
+    if (!filterAll && (!filterColumn || !filterValue)) {
+      setRecipients([]);
+      setRecipientCount(0);
+      return undefined;
+    }
+    let cancelled = false;
+    setPreviewLoading(true);
+    setPreviewError('');
+    adminApiPost('/api/portal-admin/email/preview', {
+      group,
+      filter: filterPayload,
+    })
+      .then((data) => {
+        if (!cancelled) {
+          setRecipients(Array.isArray(data.recipients) ? data.recipients : []);
+          setRecipientCount(typeof data.count === 'number' ? data.count : 0);
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setPreviewError(err.message || 'Could not load recipients.');
+          setRecipients([]);
+          setRecipientCount(0);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setPreviewLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [signedIn, isAdmin, group, filterAll, filterColumn, filterValue]);
+
+  useEffect(() => {
+    if (!campaignId || !signedIn || !isAdmin) {
+      return undefined;
+    }
+    let cancelled = false;
+    let intervalId = 0;
+
+    const poll = () => {
+      adminApiPost('/api/portal-admin/email/campaign-status', { campaignId })
+        .then((data) => {
+          if (!cancelled) {
+            setCampaignStatus(data.status || null);
+          }
+        })
+        .catch(() => {});
+    };
+
+    poll();
+    intervalId = window.setInterval(poll, 10_000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [campaignId, signedIn, isAdmin]);
+
+  useEffect(() => {
+    setGlobalVars((prev) => {
+      let next = null;
+      for (const name of globalPlaceholders) {
+        if (Object.prototype.hasOwnProperty.call(prev, name)) {
+          continue;
+        }
+        if (!next) {
+          next = { ...prev };
+        }
+        next[name] =
+          name.toLowerCase() === 'date'
+            ? new Date().toLocaleDateString(undefined, {
+                year: 'numeric',
+                month: 'long',
+                day: 'numeric',
+              })
+            : '';
+      }
+      return next || prev;
+    });
+  }, [globalPlaceholders.join('|')]);
+
+  const filterValueOptions =
+    filterColumn && metadata?.valuesByColumn ? metadata.valuesByColumn[filterColumn] || [] : [];
+
+  const canSendTest =
+    subject.trim().length > 0 &&
+    body.trim().length > 0 &&
+    recipientCount > 0 &&
+    globalPlaceholders.every((name) => String(globalVars[name] ?? '').trim().length > 0);
+
+  const canSendBulk = canSendTest && lastTestHash.length > 0 && !sendLoading;
+
+  async function handleSendTest() {
+    setTestLoading(true);
+    setTestError('');
+    setTestSuccess('');
+    try {
+      const data = await adminApiPost('/api/portal-admin/email/test', composePayload);
+      setLastTestHash(data.contentHash || '');
+      setTestPreviewRecipient(data.previewRecipient || null);
+      setTestSuccess(`Test sent to ${adminEmail}.`);
+    } catch (err) {
+      setTestError(err.message || 'Could not send test email.');
+    } finally {
+      setTestLoading(false);
+    }
+  }
+
+  async function handleSendBulk() {
+    const confirmed = window.confirm(
+      `Send this message to ${recipientCount} recipient${recipientCount === 1 ? '' : 's'}?`,
+    );
+    if (!confirmed) {
+      return;
+    }
+    setSendLoading(true);
+    setSendError('');
+    try {
+      const data = await adminApiPost('/api/portal-admin/email/send', composePayload);
+      setCampaignId(data.campaignId || null);
+      setCampaignStatus({
+        campaignId: data.campaignId,
+        status: 'sending',
+        totalRecipients: data.totalRecipients,
+        sentCount: 0,
+        failedCount: 0,
+        pendingCount: data.totalRecipients,
+        batchSize: data.batchSize,
+        batchIntervalMinutes: data.batchIntervalMinutes,
+      });
+    } catch (err) {
+      setSendError(err.message || 'Could not start send.');
+    } finally {
+      setSendLoading(false);
+    }
+  }
+
+  if (!signedIn) {
+    return (
+      <PortalLayout>
+        <div className="portal-card portal-content portal-admin-card">
+          <PortalSectionLinks current="admin-emails" isAdmin={false} />
+          <div className="portal-session-banner" role="status">
+            <p className="portal-session-banner-title">Sign in required</p>
+            <p className="portal-session-banner-text">
+              Sign in from the portal home page to use admin email tools.
+            </p>
+          </div>
+        </div>
+      </PortalLayout>
+    );
+  }
+
+  if (!isAdmin) {
+    return (
+      <PortalLayout>
+        <div className="portal-card portal-content portal-admin-card">
+          <PortalSectionLinks current="admin-emails" isAdmin={false} />
+          <div className="portal-session-banner" role="status">
+            <p className="portal-session-banner-title">Access denied</p>
+            <p className="portal-session-banner-text">
+              Your account is not on the admin allowlist. Contact operations if you need access.
+            </p>
+          </div>
+        </div>
+      </PortalLayout>
+    );
+  }
+
+  const batchNote =
+    recipientCount > 250
+      ? '250 send immediately, then 250 every 5 minutes until complete.'
+      : null;
+
+  return (
+    <PortalLayout>
+      <div className="portal-card portal-content portal-admin-card portal-admin-emails-card">
+        <PortalSectionLinks current="admin-emails" isAdmin={isAdmin} />
+        <h2 className="portal-admin-title">
+          Bulk email
+          <PortalRoleBadge isAdmin className="portal-welcome-role" />
+        </h2>
+        <p className="portal-admin-lead">
+          Compose templated messages for Admissions recipients. Send a test to yourself before every
+          bulk send.
+        </p>
+
+        <section className="portal-admin-panel portal-admin-emails-section" aria-label="Recipient group">
+          <h3 className="portal-admin-emails-heading">Group</h3>
+          <div className="portal-admin-emails-group-list">
+            <label className="portal-admin-emails-radio">
+              <input type="radio" name="email-group" value="admissions" checked readOnly />
+              Admissions
+            </label>
+            <label className="portal-admin-emails-radio portal-admin-emails-radio--disabled">
+              <input type="radio" name="email-group" value="students" disabled />
+              Students <span className="portal-admin-emails-soon">(coming soon)</span>
+            </label>
+          </div>
+        </section>
+
+        <section className="portal-admin-panel portal-admin-emails-section" aria-label="Recipient filter">
+          <h3 className="portal-admin-emails-heading">Filter recipients</h3>
+          {metadataLoading ? <p className="portal-admin-status">Loading Admissions columns…</p> : null}
+          {metadataError ? (
+            <p className="portal-admin-status portal-admin-status--error" role="alert">
+              {metadataError}
+            </p>
+          ) : null}
+          <label className="portal-admin-emails-checkbox">
+            <input
+              type="checkbox"
+              checked={filterAll}
+              onChange={(e) => {
+                setFilterAll(e.target.checked);
+                if (e.target.checked) {
+                  setFilterColumn('');
+                  setFilterValue('');
+                }
+              }}
+            />
+            All rows with an email
+          </label>
+          {!filterAll ? (
+            <div className="portal-admin-emails-filter-row">
+              <label className="portal-admin-emails-field">
+                <span className="portal-admin-emails-label">Column</span>
+                <select
+                  className="portal-admin-emails-select"
+                  value={filterColumn}
+                  onChange={(e) => {
+                    setFilterColumn(e.target.value);
+                    setFilterValue('');
+                  }}
+                >
+                  <option value="">Select column…</option>
+                  {rowColumnLabels.map((label) => (
+                    <option key={label} value={label}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="portal-admin-emails-field">
+                <span className="portal-admin-emails-label">Value</span>
+                <select
+                  className="portal-admin-emails-select"
+                  value={filterValue}
+                  onChange={(e) => setFilterValue(e.target.value)}
+                  disabled={!filterColumn}
+                >
+                  <option value="">Select value…</option>
+                  {filterValueOptions.map((value) => (
+                    <option key={value} value={value}>
+                      {value}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          ) : null}
+        </section>
+
+        <section className="portal-admin-panel portal-admin-emails-section" aria-label="Compose message">
+          <h3 className="portal-admin-emails-heading">Message</h3>
+          <label className="portal-admin-emails-field" htmlFor="portal-admin-email-subject">
+            <span className="portal-admin-emails-label">Subject</span>
+            <input
+              id="portal-admin-email-subject"
+              type="text"
+              className="portal-admin-lookup-input"
+              value={subject}
+              onChange={(e) => setSubject(e.target.value)}
+              placeholder="Subject line (supports [[variables]])"
+            />
+          </label>
+          <label className="portal-admin-emails-field" htmlFor="portal-admin-email-body">
+            <span className="portal-admin-emails-label">Body</span>
+            <textarea
+              id="portal-admin-email-body"
+              className="portal-admin-emails-textarea"
+              rows={10}
+              value={body}
+              onChange={(e) => setBody(e.target.value)}
+              placeholder="Write your message. Use [[Name]], [[AESOP ID]], [[Email]], sheet columns like [[Round 1]], or globals like [[Date]]."
+            />
+          </label>
+          <p className="portal-admin-hint">
+            Per-recipient: <code>[[AESOP ID]]</code>, <code>[[Name]]</code>, <code>[[Email]]</code>, and
+            any Admissions column header (e.g. <code>[[Round 1]]</code>).
+          </p>
+        </section>
+
+        {globalPlaceholders.length > 0 ? (
+          <section className="portal-admin-panel portal-admin-emails-section" aria-label="Global variables">
+            <h3 className="portal-admin-emails-heading">Global variables</h3>
+            <div className="portal-admin-emails-vars">
+              {globalPlaceholders.map((name) => (
+                <label key={name} className="portal-admin-emails-field">
+                  <span className="portal-admin-emails-label">{name}</span>
+                  <input
+                    type="text"
+                    className="portal-admin-lookup-input"
+                    value={globalVars[name] ?? ''}
+                    onChange={(e) =>
+                      setGlobalVars((prev) => ({
+                        ...prev,
+                        [name]: e.target.value,
+                      }))
+                    }
+                  />
+                </label>
+              ))}
+            </div>
+          </section>
+        ) : null}
+
+        <section className="portal-admin-panel portal-admin-emails-section" aria-label="Review recipients">
+          <h3 className="portal-admin-emails-heading">Review before sending</h3>
+          {previewLoading ? <p className="portal-admin-status">Loading recipient list…</p> : null}
+          {previewError ? (
+            <p className="portal-admin-status portal-admin-status--error" role="alert">
+              {previewError}
+            </p>
+          ) : null}
+          {!previewLoading && !previewError ? (
+            <>
+              <p className="portal-admin-emails-count">
+                <strong>{recipientCount}</strong> email{recipientCount === 1 ? '' : 's'} will be sent
+              </p>
+              {batchNote ? <p className="portal-admin-hint">{batchNote}</p> : null}
+              {!filterAll && filterColumn && filterValue ? (
+                <p className="portal-admin-hint">
+                  Filter: {filterColumn} = {filterValue}
+                </p>
+              ) : null}
+              {recipientCount === 0 ? (
+                <p className="portal-admin-status">No recipients match the current filter.</p>
+              ) : (
+                <div className="portal-admin-table-wrap portal-admin-emails-recipient-wrap">
+                  <table className="portal-admin-table portal-admin-emails-recipient-table">
+                    <thead>
+                      <tr>
+                        <th scope="col">AESOP ID</th>
+                        <th scope="col">Name</th>
+                        <th scope="col">Email</th>
+                        {!filterAll && filterColumn ? <th scope="col">{filterColumn}</th> : null}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {recipients.map((row) => (
+                        <tr key={`${row.id}-${row.email}`}>
+                          <td className="portal-admin-mono">{row.id || '—'}</td>
+                          <td>{row.name || '—'}</td>
+                          <td>{row.email}</td>
+                          {!filterAll && filterColumn ? (
+                            <td>{row.fields?.[filterColumn] || '—'}</td>
+                          ) : null}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </>
+          ) : null}
+        </section>
+
+        <section className="portal-admin-panel portal-admin-emails-section" aria-label="Send actions">
+          <div className="portal-admin-emails-actions">
+            <button
+              type="button"
+              className="portal-admin-action"
+              onClick={handleSendTest}
+              disabled={!canSendTest || testLoading}
+            >
+              {testLoading ? 'Sending test…' : 'Send test to me'}
+            </button>
+            <button
+              type="button"
+              className="portal-admin-action portal-admin-action--primary"
+              onClick={handleSendBulk}
+              disabled={!canSendBulk}
+            >
+              {sendLoading ? 'Starting send…' : `Send to ${recipientCount} recipient${recipientCount === 1 ? '' : 's'}`}
+            </button>
+          </div>
+          {!lastTestHash ? (
+            <p className="portal-admin-hint">Send a test email after any change before bulk send.</p>
+          ) : null}
+          {testError ? (
+            <p className="portal-admin-status portal-admin-status--error" role="alert">
+              {testError}
+            </p>
+          ) : null}
+          {testSuccess ? (
+            <p className="portal-admin-status" role="status">
+              {testSuccess}
+              {testPreviewRecipient ? (
+                <>
+                  {' '}
+                  Preview data from {testPreviewRecipient.name || testPreviewRecipient.id || 'first row'}.
+                </>
+              ) : null}
+            </p>
+          ) : null}
+          {sendError ? (
+            <p className="portal-admin-status portal-admin-status--error" role="alert">
+              {sendError}
+            </p>
+          ) : null}
+        </section>
+
+        {campaignStatus ? (
+          <section className="portal-admin-panel portal-admin-emails-section" aria-label="Send progress">
+            <h3 className="portal-admin-emails-heading">Send progress</h3>
+            <dl className="portal-admin-stats">
+              <div className="portal-admin-stat-row">
+                <dt>Status</dt>
+                <dd>{campaignStatus.status}</dd>
+              </div>
+              <div className="portal-admin-stat-row">
+                <dt>Sent</dt>
+                <dd>
+                  {campaignStatus.sentCount ?? 0} / {campaignStatus.totalRecipients ?? recipientCount}
+                </dd>
+              </div>
+              <div className="portal-admin-stat-row">
+                <dt>Failed</dt>
+                <dd>{campaignStatus.failedCount ?? 0}</dd>
+              </div>
+              <div className="portal-admin-stat-row">
+                <dt>Delivered</dt>
+                <dd>{campaignStatus.deliveredCount ?? 0}</dd>
+              </div>
+              <div className="portal-admin-stat-row">
+                <dt>Opened</dt>
+                <dd>{campaignStatus.openedCount ?? 0}</dd>
+              </div>
+              {(campaignStatus.bouncedCount ?? 0) > 0 ? (
+                <div className="portal-admin-stat-row">
+                  <dt>Bounced</dt>
+                  <dd>{campaignStatus.bouncedCount}</dd>
+                </div>
+              ) : null}
+              {campaignStatus.pendingCount > 0 && campaignStatus.nextBatchAt ? (
+                <div className="portal-admin-stat-row">
+                  <dt>Next batch</dt>
+                  <dd>{new Date(campaignStatus.nextBatchAt).toLocaleString()}</dd>
+                </div>
+              ) : null}
+            </dl>
+            <p className="portal-admin-hint">
+              Delivered and opened counts update from Postmark webhooks after messages are accepted.
+            </p>
+          </section>
+        ) : null}
+      </div>
+    </PortalLayout>
+  );
+}
+
 function PortalShellApp() {
   useEffect(() => {
     document.body.classList.add('portal-body');
@@ -3006,6 +3598,9 @@ function PortalShellApp() {
 
   if (segment === 'faq') {
     return <PortalFaqPage />;
+  }
+  if (segment === 'admin-emails') {
+    return <PortalAdminEmailsPage />;
   }
   if (segment === 'admin') {
     return <PortalAdminPage />;
