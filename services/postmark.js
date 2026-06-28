@@ -2,8 +2,37 @@ const config = require("../config/secrets");
 
 const POSTMARK_API = "https://api.postmarkapp.com";
 
+/**
+ * Resolve the Postmark Server API token from any supported config location.
+ * Primary: secrets.postmark.serverToken (or POSTMARK_SERVER_TOKEN env).
+ * Legacy: secrets.email.postmark.serverToken (Postmark branch layout).
+ */
 function getPostmarkToken() {
-  return config.postmark?.serverToken || process.env.POSTMARK_SERVER_TOKEN || "";
+  const topLevel = config.postmark?.serverToken;
+  if (topLevel != null && String(topLevel).trim() !== "") {
+    return String(topLevel).trim();
+  }
+  const nested = config.email?.postmark?.serverToken;
+  if (nested != null && String(nested).trim() !== "") {
+    return String(nested).trim();
+  }
+  const fromEnv = process.env.POSTMARK_SERVER_TOKEN;
+  if (fromEnv != null && String(fromEnv).trim() !== "") {
+    return String(fromEnv).trim();
+  }
+  return "";
+}
+
+function getPostmarkMessageStream() {
+  const nested = config.email?.postmark?.messageStream;
+  if (nested != null && String(nested).trim() !== "") {
+    return String(nested).trim();
+  }
+  const fromEnv = process.env.POSTMARK_MESSAGE_STREAM;
+  if (fromEnv != null && String(fromEnv).trim() !== "") {
+    return String(fromEnv).trim();
+  }
+  return "outbound";
 }
 
 function getFromAddress() {
@@ -102,4 +131,5 @@ module.exports = {
   sendPostmarkEmail,
   sendPostmarkBatch,
   getPostmarkToken,
+  getPostmarkMessageStream,
 };

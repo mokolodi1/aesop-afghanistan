@@ -2,6 +2,7 @@ const nodemailer = require('nodemailer');
 const postmark = require('postmark');
 const { JWT } = require('google-auth-library');
 const config = require('../config/secrets');
+const { getPostmarkToken, getPostmarkMessageStream } = require('./postmark');
 const { AESOP_EMAIL, FONT_HEADING, wrapAesopEmail } = require('./emailBranding');
 const { formatGmailAuthError, formatErrorForLog } = require('../utils/errorLogging');
 
@@ -218,12 +219,14 @@ function initPostmarkClient() {
     return postmarkClient;
   }
 
-  const serverToken = config.email?.postmark?.serverToken;
-  if (!serverToken || !String(serverToken).trim()) {
-    throw new Error('Missing email.postmark.serverToken in secrets config (or POSTMARK_SERVER_TOKEN env var).');
+  const serverToken = getPostmarkToken();
+  if (!serverToken) {
+    throw new Error(
+      'Postmark is not configured. Set postmark.serverToken in secrets.json or POSTMARK_SERVER_TOKEN.',
+    );
   }
 
-  postmarkClient = new postmark.ServerClient(String(serverToken).trim());
+  postmarkClient = new postmark.ServerClient(serverToken);
   return postmarkClient;
 }
 
@@ -239,7 +242,7 @@ function initPostmarkClient() {
  */
 async function sendWithPostmark({ to, subject, text, html, fromEmail }) {
   const client = initPostmarkClient();
-  const messageStream = config.email.postmark?.messageStream || 'outbound';
+  const messageStream = getPostmarkMessageStream();
 
   return client.sendEmail({
     From: `"AESOP Afghanistan" <${fromEmail}>`,

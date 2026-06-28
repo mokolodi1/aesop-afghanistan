@@ -103,6 +103,28 @@ function buildPostmarkConfig(fileSection) {
 }
 
 /**
+ * Use one Postmark token everywhere: promote legacy email.postmark.serverToken
+ * to the top-level postmark block when needed.
+ * @param {Record<string, unknown>} secrets
+ */
+function mergePostmarkSecrets(secrets) {
+  secrets.postmark = buildPostmarkConfig(secrets.postmark);
+  const nested =
+    secrets.email &&
+    typeof secrets.email === "object" &&
+    secrets.email.postmark &&
+    typeof secrets.email.postmark === "object" &&
+    secrets.email.postmark.serverToken != null
+      ? String(secrets.email.postmark.serverToken).trim()
+      : "";
+  const top = secrets.postmark.serverToken || "";
+  const resolved = top || nested;
+  if (resolved) {
+    secrets.postmark.serverToken = resolved;
+  }
+}
+
+/**
  * Build Google Classroom sync settings from an optional secrets.json `classroom`
  * section merged with process.env (env wins when set). The sync reuses the Gmail
  * service-account credentials, so only an impersonation email and the destination
@@ -338,6 +360,7 @@ function loadSecretsFromSecretsJsonEnv() {
     parsed.database = buildDatabaseConfig(parsed.database);
     parsed.backup = buildBackupConfig(parsed.backup);
     parsed.postmark = buildPostmarkConfig(parsed.postmark);
+    mergePostmarkSecrets(parsed);
     mergePortalContactEmail(parsed);
     return parsed;
   } catch (error) {
@@ -372,6 +395,7 @@ function loadSecrets() {
       secrets.database = buildDatabaseConfig(secrets.database);
       secrets.backup = buildBackupConfig(secrets.backup);
       secrets.postmark = buildPostmarkConfig(secrets.postmark);
+      mergePostmarkSecrets(secrets);
       mergePortalContactEmail(secrets);
       return secrets;
     } catch (error) {

@@ -64,6 +64,20 @@ function normalizeGlobalVars(raw) {
   return out;
 }
 
+/** JSONB columns may already be objects when read from Postgres. */
+function parseJsonColumn(value, fallback = {}) {
+  if (value == null || value === "") {
+    return fallback;
+  }
+  if (typeof value === "object") {
+    return value;
+  }
+  if (typeof value === "string") {
+    return JSON.parse(value);
+  }
+  return fallback;
+}
+
 function extractPlaceholders(subject, body) {
   const found = new Set();
   for (const text of [subject, body]) {
@@ -472,7 +486,7 @@ async function processEmailCampaignBatches() {
 
 async function processSingleCampaignBatch(campaign) {
   const db = getDb();
-  const globalVars = normalizeGlobalVars(JSON.parse(campaign.globalVars || "{}"));
+  const globalVars = normalizeGlobalVars(parseJsonColumn(campaign.globalVars, {}));
   const pending = await db
     .select()
     .from(emailCampaignRecipients)
@@ -507,7 +521,7 @@ async function processSingleCampaignBatch(campaign) {
       id: row.aesopId || "",
       name: row.name || "",
       email: row.email,
-      fields: JSON.parse(row.rowFields || "{}"),
+      fields: parseJsonColumn(row.rowFields, {}),
     };
     const bodies = buildEmailBodies(campaign.subject, campaign.body, recipient, globalVars);
     messages.push({

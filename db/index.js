@@ -24,17 +24,36 @@ function isDatabaseEnabled() {
   return getDatabaseUrl().length > 0;
 }
 
+function resolvePoolSsl(connectionString) {
+  if (process.env.DATABASE_SSL === "false") {
+    return false;
+  }
+  if (process.env.DATABASE_SSL === "true") {
+    return { rejectUnauthorized: false };
+  }
+  try {
+    const host = new URL(connectionString).hostname.toLowerCase();
+    if (host === "localhost" || host === "127.0.0.1") {
+      return false;
+    }
+  } catch {
+    // Fall through to SSL for Fly/production URLs.
+  }
+  return { rejectUnauthorized: false };
+}
+
 function getPool() {
   if (!isDatabaseEnabled()) {
     return null;
   }
   if (!pool) {
+    const connectionString = getDatabaseUrl();
     pool = new Pool({
-      connectionString: getDatabaseUrl(),
+      connectionString,
       max: Number.parseInt(process.env.DATABASE_POOL_MAX || "5", 10),
       idleTimeoutMillis: 30_000,
       connectionTimeoutMillis: 10_000,
-      ssl: process.env.DATABASE_SSL === "false" ? false : { rejectUnauthorized: false },
+      ssl: resolvePoolSsl(connectionString),
     });
     pool.on("error", (err) => {
       console.error("[db] pool error:", err.message);

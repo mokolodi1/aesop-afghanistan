@@ -84,6 +84,26 @@ async function initGoogleSheets() {
 }
 
 /**
+ * Resolve a worksheet by tab title, reloading spreadsheet metadata once if missing
+ * (handles tabs added after the server started).
+ * @param {import('google-spreadsheet').GoogleSpreadsheet} doc
+ * @param {string} title
+ * @returns {Promise<import('google-spreadsheet').GoogleSpreadsheetWorksheet|null>}
+ */
+async function getWorksheetByTitle(doc, title) {
+  const normalizedTitle = String(title || "").trim();
+  if (!normalizedTitle) {
+    return null;
+  }
+  let worksheet = doc.sheetsByTitle[normalizedTitle];
+  if (worksheet) {
+    return worksheet;
+  }
+  await doc.loadInfo();
+  return doc.sheetsByTitle[normalizedTitle] || null;
+}
+
+/**
  * Convert column reference to zero-based index.
  * Supports numeric indices or A1-style letters (A, B, ..., AA).
  * @param {string|number} columnRef
@@ -2058,9 +2078,11 @@ async function loadAdmissionsSheet() {
     const identityColumnIndices = new Set([idColumnIndex, nameColumnIndex, emailColumnIndex]);
 
     const sheet = await initGoogleSheets();
-    const worksheet = sheet.sheetsByTitle[sheetName];
+    const worksheet = await getWorksheetByTitle(sheet, sheetName);
     if (!worksheet) {
-      console.warn(`loadAdmissionsSheet: sheet "${sheetName}" not found.`);
+      const similar = Object.keys(sheet.sheetsByTitle).filter((t) => /admit|applic/i.test(t));
+      const hint = similar.length ? ` Similar tabs: ${similar.join(", ")}.` : "";
+      console.warn(`loadAdmissionsSheet: sheet "${sheetName}" not found.${hint}`);
       return empty;
     }
 
