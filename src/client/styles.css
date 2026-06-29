@@ -2403,6 +2403,7 @@ button:disabled {
   min-height: 0;
   max-height: 4.5rem;
   line-height: 1.45;
+  text-align: start;
 }
 
 .portal-admin-emails-subject:focus-visible {
@@ -2421,6 +2422,8 @@ button:disabled {
   white-space: pre-wrap;
   word-break: break-word;
   cursor: text;
+  text-align: start;
+  unicode-bidi: plaintext;
 }
 
 .portal-admin-emails-body-editor:focus-visible {
@@ -2439,6 +2442,12 @@ button:disabled {
   font-weight: 600;
   text-decoration: underline;
   cursor: text;
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+
+.portal-admin-emails-body-block {
+  text-align: start;
 }
 
 .portal-admin-emails-body-block + .portal-admin-emails-body-block {

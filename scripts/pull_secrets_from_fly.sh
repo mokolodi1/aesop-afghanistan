@@ -7,7 +7,7 @@
 #   bash scripts/pull_secrets_from_fly.sh
 #   FLY_APP=aesop-afghanistan FLY_ORG=aesop-afghanistan-934 bash scripts/pull_secrets_from_fly.sh
 #
-# Also writes config/secrets.pull.raw.txt (gitignored) — the untouched SSH output.
+# Also writes config/secrets.pull.raw.txt (+ .err.txt) — raw SSH stdout/stderr (gitignored).
 #
 set -euo pipefail
 
@@ -48,6 +48,7 @@ fi
 
 echo "Pulling SECRETS_JSON from app=${APP} machine=${MACHINE_ID} (${REGION}) ..."
 
+RAW_ERR="${RAW_PATH%.txt}.err.txt"
 mkdir -p "$(dirname "$RAW_PATH")"
 if ! fly ssh console \
   -a "$APP" \
@@ -55,29 +56,46 @@ if ! fly ssh console \
   --machine "$MACHINE_ID" \
   -C "printenv SECRETS_JSON" \
   --pty=false \
-  -q >"$RAW_PATH" 2>&1; then
-  echo "Error: fly ssh console failed. See ${RAW_PATH}" >&2
+  -q >"$RAW_PATH" 2>"$RAW_ERR"; then
+  echo "Error: fly ssh console failed." >&2
+  echo "  stdout: ${RAW_PATH}" >&2
+  echo "  stderr: ${RAW_ERR}" >&2
   exit 1
 fi
 
-chmod 600 "$RAW_PATH"
-echo "Saved raw SSH output to ${RAW_PATH}"
+chmod 600 "$RAW_PATH" "$RAW_ERR" 2>/dev/null || chmod 600 "$RAW_PATH"
+echo "Saved raw SECRETS_JSON to ${RAW_PATH}"
+if [[ -s "$RAW_ERR" ]]; then
+  echo "Fly stderr (non-fatal): ${RAW_ERR}"
+fi
 
 mkdir -p "$(dirname "$SECRETS_PATH")"
 TMP="$(mktemp)"
 trap 'rm -f "$TMP"' EXIT
 
-node - "$RAW_PATH" "$TMP" <<'NODE'
+if ! node - "$RAW_PATH" "$TMP" <<'NODE'
 const fs = require('fs');
 
 const rawPath = process.argv[2];
 const outPath = process.argv[3];
-const raw = fs.readFileSync(rawPath, 'utf8').replace(/\r/g, '');
+
+function fail(message) {
+  console.error(`Error: ${message}`);
+  console.error(`Raw SSH output is in ${rawPath}`);
+  process.exit(1);
+}
+
+let raw;
+try {
+  raw = fs.readFileSync(rawPath, 'utf8').replace(/\r/g, '');
+} catch (err) {
+  fail(`Could not read ${rawPath}: ${err.message}`);
+}
 
 function extractJsonObject(text) {
   const start = text.indexOf('{');
   if (start === -1) {
-    throw new Error('No JSON object found in SSH output (missing "{").');
+    throw new Error('No JSON object found (missing "{"). Fly may have printed a status line before the secret.');
   }
   let depth = 0;
   let inString = false;
@@ -109,8 +127,13 @@ function extractJsonObject(text) {
   throw new Error('Unbalanced JSON in SSH output.');
 }
 
-const jsonText = extractJsonObject(raw);
-const parsed = JSON.parse(jsonText);
+let parsed;
+try {
+  const jsonText = extractJsonObject(raw);
+  parsed = JSON.parse(jsonText);
+} catch (err) {
+  fail(`${err.message}`);
+}
 
 const dbMatch = raw.match(/^DATABASE_URL=(.+)$/m);
 if (dbMatch) {
@@ -120,10 +143,14 @@ if (dbMatch) {
 
 fs.writeFileSync(outPath, `${JSON.stringify(parsed, null, 2)}\n`, { mode: 0o600 });
 NODE
+then
+  echo "Could not parse SECRETS_JSON. Raw output kept at ${RAW_PATH}" >&2
+  exit 1
+fi
 
 # DATABASE_URL is often a separate Fly secret, not inside SECRETS_JSON.
 DB_RAW="$(mktemp)"
-fly ssh console -a "$APP" -o "$ORG" --machine "$MACHINE_ID" -C "printenv DATABASE_URL" --pty=false -q >"$DB_RAW" 2>&1 || true
+fly ssh console -a "$APP" -o "$ORG" --machine "$MACHINE_ID" -C "printenv DATABASE_URL" --pty=false -q >"$DB_RAW" 2>/dev/null || true
 DB_URL="$(node -e "
 const fs=require('fs');
 const raw=fs.readFileSync(process.argv[1],'utf8').replace(/\r/g,'').trim();

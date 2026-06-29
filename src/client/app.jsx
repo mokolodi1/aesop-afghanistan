@@ -11,6 +11,7 @@ import {
   PORTAL_DING_HELP_NEED_DETAIL_MESSAGE,
   filterDingPhoneInputChars,
 } from '../../utils/validation';
+import { paragraphDirection } from '../shared/emailTextDirection.js';
 import './styles.css';
 
 function isPortalHostname() {
@@ -3232,7 +3233,8 @@ function emailBodyMarkdownToHtml(markdown) {
     .split(/\n\n+/)
     .map((paragraph) => {
       const lines = paragraph.split('\n').map((line) => renderEmailBodyInlineMarkdown(line));
-      return `<div class="portal-admin-emails-body-block">${lines.join('<br />')}</div>`;
+      const dir = paragraphDirection(paragraph);
+      return `<div class="portal-admin-emails-body-block" dir="${dir}">${lines.join('<br />')}</div>`;
     })
     .join('');
 }
@@ -3402,6 +3404,7 @@ function AdminEmailBodyEditor({ id, value, onChange, placeholder }) {
       id={id}
       ref={editorRef}
       className="portal-admin-emails-textarea portal-admin-emails-body-editor"
+      dir="auto"
       contentEditable
       role="textbox"
       aria-multiline="true"
@@ -4572,6 +4575,7 @@ function PortalAdminEmailsPage() {
             <textarea
               id="portal-admin-email-subject"
               className="portal-admin-emails-subject"
+              dir="auto"
               rows={2}
               value={subject}
               onChange={(e) => setSubject(e.target.value)}
