@@ -23,7 +23,6 @@ function getPortalRouteSegment() {
   if (pathname === '/portal.html') return 'hub';
   if (pathname === '/' && isPortalHostname()) return 'hub';
   if (pathname === '/profile' || pathname.startsWith('/profile/')) return 'profile';
-  if (pathname === '/faq' || pathname.startsWith('/faq/')) return 'faq';
   if (pathname === '/admin/emails') return 'admin-emails';
   if (pathname === '/admin' || pathname.startsWith('/admin/')) return 'admin';
   return 'hub';
@@ -216,7 +215,9 @@ function applyPortalSessionFromApi(data, options = {}) {
     typeof data.peopleStatus === 'string'
       ? data.peopleStatus.trim()
       : resolveClientPeopleStatus(userIdFromApi, '');
-  const isAppliedFromApi = data.isApplied === true || isAppliedPeopleStatus(peopleStatusFromApi);
+  const isApplicantFromApi = data.isApplicant === true;
+  const isAppliedFromApi =
+    isApplicantFromApi || data.isApplied === true || isAppliedPeopleStatus(peopleStatusFromApi);
 
   if (nameFromApi) {
     sessionStorage.setItem('studentPortalName', nameFromApi);
@@ -387,6 +388,7 @@ async function loadPortalClassGradeFromApi() {
       teacherClasses: '',
       isAdmin: false,
       isApplied: false,
+      isApplicant: false,
       peopleStatus: '',
     });
   }
@@ -406,6 +408,7 @@ async function loadPortalClassGradeFromApi() {
           teacherClasses: '',
           isAdmin: false,
           isApplied: false,
+          isApplicant: false,
           peopleStatus: '',
         };
       }
@@ -424,6 +427,7 @@ async function loadPortalClassGradeFromApi() {
           teacherClasses: '',
           isAdmin: false,
           isApplied: false,
+          isApplicant: false,
           peopleStatus: '',
         };
       }
@@ -439,7 +443,8 @@ async function loadPortalClassGradeFromApi() {
         typeof data.peopleStatus === 'string'
           ? data.peopleStatus.trim()
           : resolveClientPeopleStatus(userId, '');
-      const isApplied = data.isApplied === true || isAppliedPeopleStatus(peopleStatus);
+      const isApplicant = data.isApplicant === true;
+      const isApplied = isApplicant || data.isApplied === true || isAppliedPeopleStatus(peopleStatus);
       sessionStorage.setItem('studentPortalClass', isApplied ? '' : classSection);
       sessionStorage.setItem('studentPortalGrade', isApplied ? '' : calculatedGrade);
       writeClassGradesToSession(isApplied ? [] : classGrades);
@@ -474,6 +479,7 @@ async function loadPortalClassGradeFromApi() {
         teacherClasses: isApplied ? '' : teacherClasses,
         isAdmin,
         isApplied,
+        isApplicant,
         peopleStatus,
       };
     } catch {
@@ -485,6 +491,7 @@ async function loadPortalClassGradeFromApi() {
         teacherClasses: '',
         isAdmin: false,
         isApplied: false,
+        isApplicant: false,
         peopleStatus: '',
       };
     } finally {
@@ -501,6 +508,7 @@ function usePortalClassGrade() {
   const [isTeacher, setIsTeacher] = useState(() => readSessionField('studentPortalIsTeacher') === '1');
   const [teacherClasses, setTeacherClasses] = useState(() => readSessionField('studentPortalTeacherClasses'));
   const [isApplied, setIsApplied] = useState(() => readPortalIsApplied());
+  const [isApplicant, setIsApplicant] = useState(false);
   const [peopleStatus, setPeopleStatus] = useState(() =>
     resolveClientPeopleStatus(
       readSessionField('studentPortalUserId'),
@@ -521,6 +529,7 @@ function usePortalClassGrade() {
         teacherClasses: teach,
         isAdmin: adm,
         isApplied: applied,
+        isApplicant: applicant,
         peopleStatus: status,
       }) => {
         if (cancelled) return;
@@ -531,6 +540,7 @@ function usePortalClassGrade() {
         setTeacherClasses(teach);
         setIsAdmin(adm);
         setIsApplied(applied);
+        setIsApplicant(applicant);
         setPeopleStatus(status);
       },
     );
@@ -547,14 +557,24 @@ function usePortalClassGrade() {
     teacherClasses,
     isAdmin,
     isApplied,
+    isApplicant,
     peopleStatus,
   };
 }
 
-function computeHasStudentCategory({ isTeacher, isApplied, aesopId, studentClass, studentGrade, classGrades }) {
+function computeHasStudentCategory({
+  isTeacher,
+  isApplied,
+  isApplicant,
+  aesopId,
+  studentClass,
+  studentGrade,
+  classGrades,
+}) {
   return (
     !isTeacher &&
     !isApplied &&
+    !isApplicant &&
     aesopId !== '' &&
     (classGrades.length > 0 || (studentClass.trim() !== '' && studentGrade.trim() !== ''))
   );
@@ -566,23 +586,27 @@ function usePortalProfileSections() {
   const impersonationRole = readSessionField(PORTAL_IMPERSONATION_ROLE_KEY);
   const aesopId = readSessionField('studentPortalUserId').trim();
   const portalClassGrade = usePortalClassGrade();
-  const { studentClass, studentGrade, classGrades, isTeacher, isApplied, peopleStatus } = portalClassGrade;
+  const { studentClass, studentGrade, classGrades, isTeacher, isApplied, isApplicant, peopleStatus } =
+    portalClassGrade;
+  const isApplicantProfile = isApplicant || isApplied;
   const hasStudentCategory = computeHasStudentCategory({
     isTeacher,
     isApplied,
+    isApplicant,
     aesopId,
     studentClass,
     studentGrade,
     classGrades,
   });
 
-  if (isApplied) {
+  if (isApplicantProfile) {
     return {
       ...portalClassGrade,
       showStudentFields: false,
       showTeacherFields: false,
       hasStudentCategory: false,
       isApplied: true,
+      isApplicant: true,
       peopleStatus: peopleStatus || 'applied',
     };
   }
@@ -1691,7 +1715,7 @@ function PortalRoleBadge({ isTeacher, hasStudentCategory, isAdmin, isApplied, cl
   }
   if (isApplied) {
     const classes = ['portal-role-badge', 'portal-role-badge--applied', className].filter(Boolean).join(' ');
-    return <span className={classes}>Applied</span>;
+    return <span className={classes}>Applicant</span>;
   }
   if (!isTeacher && !hasStudentCategory) {
     return null;
@@ -1989,12 +2013,6 @@ function PortalSectionLinks({ current, isAdmin }) {
           </a>
         </>
       ) : null}
-      <span className="portal-section-links-sep" aria-hidden="true">
-        ·
-      </span>
-      <a href="/faq" className={current === 'faq' ? 'is-current' : undefined}>
-        FAQ
-      </a>
     </nav>
   );
 }
@@ -2038,6 +2056,184 @@ function PortalIntentNotice({ intent }) {
         does not require signing in.
       </p>
     </div>
+  );
+}
+
+function PortalVoiceMemoSection({ studentUserId, studentEmail, enabled }) {
+  const [voiceMemoOpen, setVoiceMemoOpen] = useState(false);
+  const [voiceMemoLoading, setVoiceMemoLoading] = useState(false);
+  const [voiceMemoError, setVoiceMemoError] = useState('');
+  const [voiceMemoStatus, setVoiceMemoStatus] = useState(null);
+  const [voiceMemoAudioError, setVoiceMemoAudioError] = useState('');
+
+  const voiceMemoStreamSrc = useMemo(() => {
+    if (!voiceMemoOpen || !voiceMemoStatus?.hasRecording || !enabled) {
+      return '';
+    }
+    if (!studentUserId.trim() || !studentEmail.trim()) {
+      return '';
+    }
+    const params = new URLSearchParams({
+      userId: studentUserId.trim(),
+      email: studentEmail.trim(),
+    });
+    return `/api/portal-voice-memo/stream?${params.toString()}`;
+  }, [voiceMemoOpen, voiceMemoStatus?.hasRecording, enabled, studentUserId, studentEmail]);
+
+  useEffect(() => {
+    if (!enabled) {
+      setVoiceMemoStatus(null);
+      setVoiceMemoError('');
+      setVoiceMemoLoading(false);
+      setVoiceMemoAudioError('');
+      return undefined;
+    }
+    let cancelled = false;
+    setVoiceMemoLoading(true);
+    setVoiceMemoError('');
+    setVoiceMemoAudioError('');
+    (async () => {
+      try {
+        const response = await fetch('/api/portal-voice-memo/status', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId: studentUserId, email: studentEmail }),
+        });
+        const data = await response.json();
+        if (cancelled) {
+          return;
+        }
+        if (!response.ok) {
+          setVoiceMemoError(data.error || 'Could not load voice memo status.');
+          setVoiceMemoStatus(null);
+          return;
+        }
+        setVoiceMemoStatus(data);
+      } catch {
+        if (!cancelled) {
+          setVoiceMemoError('Network error. Please try again.');
+          setVoiceMemoStatus(null);
+        }
+      } finally {
+        if (!cancelled) {
+          setVoiceMemoLoading(false);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [enabled, studentUserId, studentEmail]);
+
+  useEffect(() => {
+    setVoiceMemoAudioError('');
+  }, [voiceMemoStreamSrc]);
+
+  if (!enabled || !voiceMemoStatus?.eligible) {
+    return null;
+  }
+
+  return (
+    <section className="portal-voice-memo-section" aria-label="Round 2 voice memo">
+      <div
+        className={`portal-voice-memo-status${
+          voiceMemoStatus.submitted
+            ? ' portal-voice-memo-status--submitted'
+            : ' portal-voice-memo-status--pending'
+        }`}
+        role="status"
+      >
+        {voiceMemoLoading
+          ? 'Checking voice memo status…'
+          : voiceMemoStatus.submitted
+            ? 'Submitted'
+            : 'Not submitted yet'}
+      </div>
+
+      <div className="portal-ding-accordion portal-voice-memo-accordion" aria-label="Voice memo">
+        <div className="portal-ding-accordion-item">
+          <button
+            type="button"
+            role="tab"
+            id="voice-memo-tab"
+            aria-selected={voiceMemoOpen}
+            aria-controls="voice-memo-panel"
+            aria-expanded={voiceMemoOpen}
+            className={`portal-ding-tab${voiceMemoOpen ? ' is-active' : ''}`}
+            onClick={() => setVoiceMemoOpen((open) => !open)}
+          >
+            <span className="portal-ding-tab-label">Voice memo</span>
+            <span className="portal-ding-tab-chevron" aria-hidden="true">
+              {voiceMemoOpen ? '▼' : '▶'}
+            </span>
+          </button>
+          {voiceMemoOpen ? (
+            <div
+              id="voice-memo-panel"
+              role="tabpanel"
+              aria-labelledby="voice-memo-tab"
+              className="portal-ding-tab-panel portal-voice-memo-panel"
+            >
+              {voiceMemoError ? (
+                <p className="portal-field-error" role="alert">
+                  {voiceMemoError}
+                </p>
+              ) : null}
+              {voiceMemoStatus.submitted ? (
+                <>
+                  {voiceMemoStatus.submittedAt ? (
+                    <p className="portal-field-hint">
+                      Submitted on <strong>{voiceMemoStatus.submittedAt}</strong>
+                      {voiceMemoStatus.fileName ? (
+                        <>
+                          {' '}
+                          (<span className="portal-admin-mono">{voiceMemoStatus.fileName}</span>)
+                        </>
+                      ) : null}
+                    </p>
+                  ) : null}
+                  {voiceMemoStatus.hasRecording ? (
+                    <>
+                      {voiceMemoAudioError ? (
+                        <p className="portal-field-error" role="alert">
+                          {voiceMemoAudioError}
+                        </p>
+                      ) : null}
+                      {voiceMemoStreamSrc ? (
+                        <audio
+                          key={voiceMemoStreamSrc}
+                          className="portal-voice-memo-player"
+                          controls
+                          preload="metadata"
+                          src={voiceMemoStreamSrc}
+                          onError={() =>
+                            setVoiceMemoAudioError(
+                              'Could not play your voice memo. Please try again or contact support.',
+                            )
+                          }
+                        >
+                          Your browser does not support audio playback.
+                        </audio>
+                      ) : null}
+                    </>
+                  ) : (
+                    <p className="portal-field-hint">
+                      Your submission is recorded, but the audio file is not available to play yet. Please
+                      check again later.
+                    </p>
+                  )}
+                </>
+              ) : (
+                <p className="portal-field-hint">
+                  {voiceMemoStatus.submissionInstructions ||
+                    'Submit your Round 2 voice memo using the instructions you received by email. Once it is received, this page will show Submitted and you can listen to your recording here.'}
+                </p>
+              )}
+            </div>
+          ) : null}
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -2123,9 +2319,7 @@ function PortalHubPage() {
           <>
             <PortalSectionLinks current="hub" isAdmin={showAdminFeatures} />
             <h2 className="portal-welcome">
-              {impersonating
-                ? `Viewing as ${studentName || 'this person'}`
-                : `Welcome, ${studentName || (isApplied ? 'Applicant' : 'Student')}!`}
+              {`Welcome, ${studentName || (isApplied ? 'Applicant' : 'Student')}!`}
               <PortalRoleBadge
                 isTeacher={showTeacherFields && isTeacher}
                 hasStudentCategory={showStudentFields && hasStudentCategory}
@@ -2192,7 +2386,7 @@ function PortalHubPage() {
                   </dd>
                 </div>
               ) : null}
-              {showStudentFields || showTeacherFields || showAdminFeatures || isApplied ? (
+              {showStudentFields || showTeacherFields || showAdminFeatures ? (
                 <div className="portal-hub-meta-row">
                   <dt className="portal-hub-meta-label">Category</dt>
                   <dd className="portal-hub-meta-value">
@@ -2200,7 +2394,7 @@ function PortalHubPage() {
                       isTeacher={showTeacherFields && isTeacher}
                       hasStudentCategory={showStudentFields && hasStudentCategory}
                       isAdmin={showAdminFeatures}
-                      isApplied={isApplied}
+                      isApplied={false}
                     />
                   </dd>
                 </div>
@@ -2212,6 +2406,11 @@ function PortalHubPage() {
                 </div>
               ) : null}
             </dl>
+            <PortalVoiceMemoSection
+              studentUserId={studentUserId}
+              studentEmail={studentEmail}
+              enabled={signedIn && studentUserId.length > 0 && studentEmail.length > 0}
+            />
             {isTeacher || showAdminFeatures ? (
               <PortalTeacherRoster
                 rosterEnabled={isTeacher || showAdminFeatures}
@@ -2460,6 +2659,10 @@ function PortalAdminPage() {
   const [exportError, setExportError] = useState('');
   const [exportDownloading, setExportDownloading] = useState(false);
 
+  const [voiceMemoSyncLoading, setVoiceMemoSyncLoading] = useState(false);
+  const [voiceMemoSyncError, setVoiceMemoSyncError] = useState('');
+  const [voiceMemoSyncResult, setVoiceMemoSyncResult] = useState(null);
+
   useEffect(() => {
     if (!signedIn || !isAdmin || activeTab !== 'overview') {
       return undefined;
@@ -2576,6 +2779,20 @@ function PortalAdminPage() {
       setExportError(err.message || 'Download failed.');
     } finally {
       setExportDownloading(false);
+    }
+  };
+
+  const runVoiceMemoSync = async () => {
+    setVoiceMemoSyncLoading(true);
+    setVoiceMemoSyncError('');
+    setVoiceMemoSyncResult(null);
+    try {
+      const data = await adminApiPost('/api/portal-admin/voice-memo/sync');
+      setVoiceMemoSyncResult(data);
+    } catch (err) {
+      setVoiceMemoSyncError(err.message || 'Voice memo sync failed.');
+    } finally {
+      setVoiceMemoSyncLoading(false);
     }
   };
 
@@ -2703,6 +2920,74 @@ function PortalAdminPage() {
               </dl>
             ) : null}
             {dashboard?.syncHint ? <p className="portal-admin-hint">{dashboard.syncHint}</p> : null}
+            <div className="portal-admin-voice-memo-sync">
+              <h3 className="portal-admin-subheading">Voice memos</h3>
+              <p className="portal-admin-hint">
+                Check Google Drive for <code>{'{AESOP ID}'}.m4a</code> files and update the Applicants
+                sheet: Round 2, Voice note link, and Voice note last updated.
+              </p>
+              <button
+                type="button"
+                className="portal-btn portal-btn--secondary"
+                disabled={voiceMemoSyncLoading}
+                onClick={runVoiceMemoSync}
+              >
+                {voiceMemoSyncLoading ? 'Syncing voice memos…' : 'Sync voice memos'}
+              </button>
+              {voiceMemoSyncError ? (
+                <p className="portal-admin-status portal-admin-status--error" role="alert">
+                  {voiceMemoSyncError}
+                </p>
+              ) : null}
+              {voiceMemoSyncResult ? (
+                <>
+                  <p className="portal-admin-status" role="status">
+                    Updated {voiceMemoSyncResult.updated ?? 0} row
+                    {voiceMemoSyncResult.updated === 1 ? '' : 's'}.{' '}
+                    {voiceMemoSyncResult.skippedUpToDate ?? 0} already up to date.{' '}
+                    {voiceMemoSyncResult.driveFileCount ?? 0} matched voice note
+                    {voiceMemoSyncResult.driveFileCount === 1 ? '' : 's'} in Drive.
+                  </p>
+                  {Array.isArray(voiceMemoSyncResult.warnings) && voiceMemoSyncResult.warnings.length > 0 ? (
+                    <div className="portal-admin-voice-memo-warnings" role="alert">
+                      <p className="portal-admin-voice-memo-warnings-title">Drive warnings</p>
+                      <ul className="portal-admin-voice-memo-warnings-list">
+                        {voiceMemoSyncResult.warnings.map((warning) => (
+                          <li key={warning}>{warning}</li>
+                        ))}
+                      </ul>
+                      {Array.isArray(voiceMemoSyncResult.duplicateAesopIds) &&
+                      voiceMemoSyncResult.duplicateAesopIds.length > 0 ? (
+                        <details className="portal-admin-voice-memo-warnings-details">
+                          <summary>Duplicate AESOP IDs in Drive</summary>
+                          <ul className="portal-admin-voice-memo-warnings-list">
+                            {voiceMemoSyncResult.duplicateAesopIds.slice(0, 20).map((entry) => (
+                              <li key={entry.aesopId}>
+                                <strong>{entry.aesopId}</strong>:{' '}
+                                {(entry.files || []).map((file) => file.fileName).join(', ')}
+                              </li>
+                            ))}
+                          </ul>
+                        </details>
+                      ) : null}
+                      {Array.isArray(voiceMemoSyncResult.unmatchedFiles) &&
+                      voiceMemoSyncResult.unmatchedFiles.length > 0 ? (
+                        <details className="portal-admin-voice-memo-warnings-details">
+                          <summary>Voice notes with no matching applicant</summary>
+                          <ul className="portal-admin-voice-memo-warnings-list">
+                            {voiceMemoSyncResult.unmatchedFiles.slice(0, 20).map((entry) => (
+                              <li key={`${entry.aesopId}-${entry.fileName}`}>
+                                {entry.fileName} (AESOP ID {entry.aesopId})
+                              </li>
+                            ))}
+                          </ul>
+                        </details>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </>
+              ) : null}
+            </div>
           </section>
         ) : null}
 
@@ -3563,6 +3848,13 @@ function PortalShellApp() {
     return () => document.body.classList.remove('portal-body');
   }, []);
 
+  useEffect(() => {
+    const { pathname } = window.location;
+    if (pathname === '/faq' || pathname.startsWith('/faq/')) {
+      window.location.replace(portalHubHref());
+    }
+  }, []);
+
   const segment = getPortalRouteSegment();
   const signedIn = isPortalSessionCompleteSync();
 
@@ -3596,9 +3888,6 @@ function PortalShellApp() {
     };
   }, [signedIn]);
 
-  if (segment === 'faq') {
-    return <PortalFaqPage />;
-  }
   if (segment === 'admin-emails') {
     return <PortalAdminEmailsPage />;
   }

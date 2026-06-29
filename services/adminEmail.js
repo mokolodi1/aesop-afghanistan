@@ -209,7 +209,7 @@ async function getAdmissionsMetadata() {
   const sheetData = await loadAdmissionsSheet();
   const filterOptions = getAdmissionsFilterOptions(sheetData);
   return {
-    sheetName: config.googleSheets?.admissionsSheetName || "Admissions",
+    sheetName: config.googleSheets?.admissionsSheetName || "Applicants",
     totalRows: sheetData.rows.length,
     ...filterOptions,
   };

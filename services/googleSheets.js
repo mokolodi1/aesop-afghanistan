@@ -1,6 +1,6 @@
 const { GoogleSpreadsheet } = require("google-spreadsheet");
-const { GoogleAuth, JWT } = require("google-auth-library");
 const config = require("../config/secrets");
+const { buildServiceAccountJwt } = require("./googleAuth");
 const { formatGoogleSheetsOperationError } = require("../utils/errorLogging");
 const { dateToGoogleSheetsSerial, formatEasternSheetTimestamp, sheetDatetimeCellTextToUtcMillis } = require("../utils/dingSheetTime");
 const { isDatabaseEnabled } = require("../db/index");
@@ -35,21 +35,7 @@ function agentDebugLog(location, message, data, hypothesisId) {
  * @returns {Promise<import('google-auth-library').OAuth2Client>}
  */
 async function buildSheetsAuthClient() {
-  const serviceAccountCredentials = config.email?.gmailServiceAccount?.credentials;
-
-  if (serviceAccountCredentials?.client_email && serviceAccountCredentials?.private_key) {
-    return new JWT({
-      email: serviceAccountCredentials.client_email,
-      key: serviceAccountCredentials.private_key,
-      scopes: [SHEETS_SCOPE],
-    });
-  }
-
-  const auth = new GoogleAuth({
-    scopes: [SHEETS_SCOPE],
-  });
-
-  return auth.getClient();
+  return buildServiceAccountJwt([SHEETS_SCOPE]);
 }
 
 /**
@@ -2070,9 +2056,9 @@ async function loadAdmissionsSheet() {
   const empty = { headers: [], rows: [], identityColumnIndices: new Set() };
   try {
     const gs = config.googleSheets || {};
-    const sheetName = gs.admissionsSheetName || "Admissions";
+    const sheetName = gs.admissionsSheetName || "Applicants";
     const headerRowNum = Math.max(1, parseInt(String(gs.admissionsHeaderRow || "1"), 10) || 1);
-    const idColumnIndex = resolveColumnIndex(gs.admissionsIdColumn || "B");
+    const idColumnIndex = resolveColumnIndex(gs.admissionsIdColumn || "A");
     const nameColumnIndex = resolveColumnIndex(gs.admissionsNameColumn || "C");
     const emailColumnIndex = resolveColumnIndex(gs.admissionsEmailColumn || "D");
     const identityColumnIndices = new Set([idColumnIndex, nameColumnIndex, emailColumnIndex]);
@@ -2210,6 +2196,7 @@ module.exports = {
   expandClassGradeRow,
   getUserData,
   initGoogleSheets,
+  getWorksheetByTitle,
   replaceTabData,
   resolveColumnIndex,
   syncAllPeoplePastDingColumns,

@@ -47,6 +47,11 @@ const {
   verifyPostmarkWebhookAuth,
   handlePostmarkWebhook,
 } = require('./services/postmarkWebhooks');
+const { syncVoiceMemoRound2Status, getApplicantRowByAesopId } = require('./services/voiceMemoSync');
+const {
+  getPortalVoiceMemoStatus,
+  getPortalVoiceMemoStream,
+} = require('./services/portalVoiceMemo');
 const {
   sanitizeEmail,
   isValidEmail,
@@ -92,10 +97,29 @@ function resolvePortalContactEmail() {
  * and legacy tabs remain on Google Sheets.
  *
  * @param {{ userId: string, email: string, name: string, peopleStatus?: string }} params
- * @returns {Promise<{ isTeacher: boolean, teacherClasses: string, classSection: string, calculatedGrade: string, classGrades: Array<{ classSection: string, calculatedGrade: string }>, isApplied: boolean, peopleStatus: string }>}
+ * @returns {Promise<{ isTeacher: boolean, teacherClasses: string, classSection: string, calculatedGrade: string, classGrades: Array<{ classSection: string, calculatedGrade: string }>, isApplied: boolean, isApplicant: boolean, peopleStatus: string }>}
  */
 async function resolvePortalRoleAndGrade({ userId, email, name, peopleStatus = '' }) {
   const resolvedStatus = resolvePeopleStatus(userId, peopleStatus);
+
+  try {
+    const applicant = await getApplicantRowByAesopId(userId);
+    if (applicant) {
+      return {
+        isTeacher: false,
+        teacherClasses: '',
+        classSection: '',
+        calculatedGrade: '',
+        classGrades: [],
+        isApplied: true,
+        isApplicant: true,
+        peopleStatus: resolvedStatus || 'Applied',
+      };
+    }
+  } catch (error) {
+    console.warn('Applicants sheet lookup failed:', formatErrorForLog(error));
+  }
+
   if (isAppliedPeopleStatus(resolvedStatus)) {
     return {
       isTeacher: false,
@@ -104,6 +128,7 @@ async function resolvePortalRoleAndGrade({ userId, email, name, peopleStatus = '
       calculatedGrade: '',
       classGrades: [],
       isApplied: true,
+      isApplicant: false,
       peopleStatus: resolvedStatus,
     };
   }
@@ -173,6 +198,7 @@ async function resolvePortalRoleAndGrade({ userId, email, name, peopleStatus = '
     calculatedGrade,
     classGrades,
     isApplied: false,
+    isApplicant: false,
     peopleStatus: resolvedStatus,
   };
 }
@@ -430,13 +456,21 @@ app.post('/api/verify-magic-link', verifyRateLimiter, async (req, res) => {
         }
       }
 
-      const { isTeacher, teacherClasses, classSection, calculatedGrade, classGrades, isApplied, peopleStatus } =
-        await resolvePortalRoleAndGrade({
-          userId: studentUserId,
-          email: emailFromSheet,
-          name: studentName,
-          peopleStatus: profile?.peopleStatus,
-        });
+      const {
+        isTeacher,
+        teacherClasses,
+        classSection,
+        calculatedGrade,
+        classGrades,
+        isApplied,
+        isApplicant,
+        peopleStatus,
+      } = await resolvePortalRoleAndGrade({
+        userId: studentUserId,
+        email: emailFromSheet,
+        name: studentName,
+        peopleStatus: profile?.peopleStatus,
+      });
       const isAdmin = isPortalAdmin({ email: emailFromSheet, portalRole: profile?.portalRole });
 
       if (studentUserId) {
@@ -459,6 +493,7 @@ app.post('/api/verify-magic-link', verifyRateLimiter, async (req, res) => {
         teacherClasses,
         isAdmin,
         isApplied,
+        isApplicant,
         peopleStatus,
         message: 'Magic link verified successfully',
       });
@@ -489,6 +524,12 @@ const portalTeacherRosterRateLimiter = createRateLimiter({ name: 'portal-teacher
 const portalStudentGradesRateLimiter = createRateLimiter({ name: 'portal-student-grades', windowMs: 15 * 60 * 1000, max: 20 });
 
 const portalAdminRateLimiter = createRateLimiter({ name: 'portal-admin', windowMs: 15 * 60 * 1000, max: 200 });
+const portalVoiceMemoRateLimiter = createRateLimiter({ name: 'portal-voice-memo', windowMs: 15 * 60 * 1000, max: 40 });
+const portalVoiceMemoStreamRateLimiter = createRateLimiter({
+  name: 'portal-voice-memo-stream',
+  windowMs: 15 * 60 * 1000,
+  max: 120,
+});
 
 app.post('/api/update-ding-number', dingUpdateRateLimiter, async (req, res) => {
   try {
@@ -719,13 +760,21 @@ app.post('/api/portal-class-grade', portalClassGradeRateLimiter, async (req, res
 
     const studentName = typeof profile.name === 'string' ? profile.name : '';
     const profileEmail = profile?.email ? sanitizeEmail(profile.email) : emailSan;
-    const { isTeacher, teacherClasses, classSection, calculatedGrade, classGrades, isApplied, peopleStatus } =
-      await resolvePortalRoleAndGrade({
-        userId,
-        email: profileEmail,
-        name: studentName,
-        peopleStatus: profile?.peopleStatus,
-      });
+    const {
+      isTeacher,
+      teacherClasses,
+      classSection,
+      calculatedGrade,
+      classGrades,
+      isApplied,
+      isApplicant,
+      peopleStatus,
+    } = await resolvePortalRoleAndGrade({
+      userId,
+      email: profileEmail,
+      name: studentName,
+      peopleStatus: profile?.peopleStatus,
+    });
     const isAdmin = isPortalAdmin({ email: profileEmail, portalRole: profile?.portalRole });
 
     res.json({
@@ -737,6 +786,7 @@ app.post('/api/portal-class-grade', portalClassGradeRateLimiter, async (req, res
       teacherClasses,
       isAdmin,
       isApplied,
+      isApplicant,
       peopleStatus,
     });
   } catch (error) {
@@ -1023,6 +1073,7 @@ app.post('/api/portal-admin/impersonate', portalAdminRateLimiter, async (req, re
       calculatedGrade,
       classGrades,
       isApplied,
+      isApplicant,
       peopleStatus,
     } = await resolvePortalRoleAndGrade({
       userId: targetUserId,
@@ -1045,6 +1096,7 @@ app.post('/api/portal-admin/impersonate', portalAdminRateLimiter, async (req, re
       teacherClasses: effectiveIsTeacher ? teacherClasses : '',
       isAdmin: false,
       isApplied,
+      isApplicant,
       peopleStatus,
       viewRole,
       actualIsTeacher: isTeacher,
@@ -1190,6 +1242,119 @@ app.post('/api/portal-admin/email/campaign-status', portalAdminRateLimiter, asyn
     console.error('Error loading email campaign status:', formatErrorForLog(error));
     const status = error.statusCode || 500;
     res.status(status).json({ error: error.message || 'Could not load campaign status.' });
+  }
+});
+
+app.post('/api/portal-voice-memo/status', portalVoiceMemoRateLimiter, async (req, res) => {
+  try {
+    let { userId, email } = req.body;
+
+    if (!userId || typeof userId !== 'string' || !email || typeof email !== 'string') {
+      return res.status(400).json({ error: 'ID and email are required.' });
+    }
+
+    userId = sanitizeIdentifier(userId);
+    const emailSan = sanitizeEmail(email);
+    if (!userId || !emailSan) {
+      return res.status(400).json({ error: 'Invalid ID or email.' });
+    }
+
+    const status = await getPortalVoiceMemoStatus({ userId, email: emailSan });
+    res.json({ success: true, ...status });
+  } catch (error) {
+    console.error('Error loading portal voice memo status:', formatErrorForLog(error));
+    const status = error.statusCode || 500;
+    res.status(status).json({ error: error.message || 'Could not load voice memo status.' });
+  }
+});
+
+async function pipePortalVoiceMemoStream(req, res, userId, emailSan) {
+  const rangeHeader = typeof req.headers.range === 'string' ? req.headers.range : '';
+  const { stream, mimeType, fileName, size, status, contentRange, contentLength } =
+    await getPortalVoiceMemoStream({
+      userId,
+      email: emailSan,
+      rangeHeader,
+    });
+
+  res.status(status === 206 ? 206 : 200);
+  res.setHeader('Content-Type', mimeType || 'audio/mp4');
+  res.setHeader('Accept-Ranges', 'bytes');
+  res.setHeader('Cache-Control', 'private, no-store');
+  res.setHeader('Content-Disposition', `inline; filename="${String(fileName || 'voice-memo.m4a').replace(/"/g, '')}"`);
+  if (contentRange) {
+    res.setHeader('Content-Range', contentRange);
+  }
+  if (contentLength) {
+    res.setHeader('Content-Length', contentLength);
+  } else if (size != null) {
+    res.setHeader('Content-Length', String(size));
+  }
+
+  stream.on('error', (streamError) => {
+    console.error('Error streaming portal voice memo:', formatErrorForLog(streamError));
+    if (!res.headersSent) {
+      res.status(500).json({ error: 'Could not stream voice memo.' });
+    } else {
+      res.end();
+    }
+  });
+  stream.pipe(res);
+}
+
+app.get('/api/portal-voice-memo/stream', portalVoiceMemoStreamRateLimiter, async (req, res) => {
+  try {
+    let userId = typeof req.query.userId === 'string' ? req.query.userId : '';
+    let email = typeof req.query.email === 'string' ? req.query.email : '';
+
+    userId = sanitizeIdentifier(userId);
+    const emailSan = sanitizeEmail(email);
+    if (!userId || !emailSan) {
+      return res.status(400).json({ error: 'Invalid ID or email.' });
+    }
+
+    await pipePortalVoiceMemoStream(req, res, userId, emailSan);
+  } catch (error) {
+    console.error('Error streaming portal voice memo:', formatErrorForLog(error));
+    const status = error.statusCode || 500;
+    res.status(status).json({ error: error.message || 'Could not stream voice memo.' });
+  }
+});
+
+app.post('/api/portal-voice-memo/stream', portalVoiceMemoStreamRateLimiter, async (req, res) => {
+  try {
+    let { userId, email } = req.body;
+
+    if (!userId || typeof userId !== 'string' || !email || typeof email !== 'string') {
+      return res.status(400).json({ error: 'ID and email are required.' });
+    }
+
+    userId = sanitizeIdentifier(userId);
+    const emailSan = sanitizeEmail(email);
+    if (!userId || !emailSan) {
+      return res.status(400).json({ error: 'Invalid ID or email.' });
+    }
+
+    await pipePortalVoiceMemoStream(req, res, userId, emailSan);
+  } catch (error) {
+    console.error('Error streaming portal voice memo:', formatErrorForLog(error));
+    const status = error.statusCode || 500;
+    res.status(status).json({ error: error.message || 'Could not stream voice memo.' });
+  }
+});
+
+app.post('/api/portal-admin/voice-memo/sync', portalAdminRateLimiter, async (req, res) => {
+  try {
+    const profile = await requirePortalAdmin(res, req.body);
+    if (!profile) {
+      return;
+    }
+    const result = await syncVoiceMemoRound2Status();
+    res.json({ success: true, ...result });
+  } catch (error) {
+    console.error('Error syncing voice memos:', formatErrorForLog(error));
+    const status = error.statusCode || 500;
+    res.status(status).json({ error: error.message || 'Could not sync voice memos.' });
   }
 });
 

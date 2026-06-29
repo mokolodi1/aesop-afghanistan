@@ -75,11 +75,81 @@ function buildGoogleSheetsConfig(fileSection) {
     teachersSheetName: envOr("GOOGLE_TEACHERS_SHEET_NAME", "teachersSheetName", "Teachers"),
     teachersIdColumn: envOr("GOOGLE_TEACHERS_ID_COLUMN", "teachersIdColumn", "A"),
     teachersClassesColumn: envOr("GOOGLE_TEACHERS_CLASSES_COLUMN", "teachersClassesColumn", "B"),
-    admissionsSheetName: envOr("GOOGLE_ADMISSIONS_SHEET_NAME", "admissionsSheetName", "Admissions"),
-    admissionsIdColumn: envOr("GOOGLE_ADMISSIONS_ID_COLUMN", "admissionsIdColumn", "B"),
+    admissionsSheetName: envOr("GOOGLE_ADMISSIONS_SHEET_NAME", "admissionsSheetName", "Applicants"),
+    admissionsIdColumn: envOr("GOOGLE_ADMISSIONS_ID_COLUMN", "admissionsIdColumn", "A"),
     admissionsNameColumn: envOr("GOOGLE_ADMISSIONS_NAME_COLUMN", "admissionsNameColumn", "C"),
     admissionsEmailColumn: envOr("GOOGLE_ADMISSIONS_EMAIL_COLUMN", "admissionsEmailColumn", "D"),
     admissionsHeaderRow: envOr("GOOGLE_ADMISSIONS_HEADER_ROW", "admissionsHeaderRow", "1"),
+  };
+}
+
+/** Map legacy Applicants sheet / secrets header labels to current names. */
+function normalizeVoiceMemoColumnHeader(value, legacyLabels, canonical, fallback) {
+  const trimmed = String(value || "").trim();
+  if (!trimmed) {
+    return fallback;
+  }
+  const lower = trimmed.toLowerCase();
+  if (legacyLabels.some((label) => String(label || "").trim().toLowerCase() === lower)) {
+    return canonical;
+  }
+  return trimmed;
+}
+
+function buildVoiceMemoConfig(fileSection) {
+  const f = fileSection && typeof fileSection === "object" ? fileSection : {};
+  const envOr = (envKey, fileKey, fallback = "") => {
+    const fromEnv = process.env[envKey];
+    if (fromEnv != null && String(fromEnv).trim() !== "") {
+      return String(fromEnv).trim();
+    }
+    const fromFile = f[fileKey];
+    if (fromFile != null && String(fromFile).trim() !== "") {
+      return String(fromFile).trim();
+    }
+    return fallback;
+  };
+  const envBool = (envKey, fileKey, fallback) => {
+    const fromEnv = process.env[envKey];
+    if (fromEnv != null && String(fromEnv).trim() !== "") {
+      return !/^(0|false|no|off)$/i.test(String(fromEnv).trim());
+    }
+    if (typeof f[fileKey] === "boolean") {
+      return f[fileKey];
+    }
+    return fallback;
+  };
+
+  return {
+    driveFolderId: envOr("VOICE_MEMO_DRIVE_FOLDER_ID", "driveFolderId", ""),
+    fileExtension: envOr("VOICE_MEMO_FILE_EXTENSION", "fileExtension", "m4a"),
+    round2ColumnHeader: envOr("VOICE_MEMO_ROUND2_COLUMN_HEADER", "round2ColumnHeader", "Round 2"),
+    linksColumnHeader: normalizeVoiceMemoColumnHeader(
+      envOr("VOICE_MEMO_LINKS_COLUMN_HEADER", "linksColumnHeader", ""),
+      ["Links"],
+      "Voice note link",
+      "Voice note link",
+    ),
+    dateOfSubmissionColumnHeader: normalizeVoiceMemoColumnHeader(
+      envOr("VOICE_MEMO_DATE_COLUMN_HEADER", "dateOfSubmissionColumnHeader", ""),
+      ["Date of Submission", "Date of submission"],
+      "Voice note last updated",
+      "Voice note last updated",
+    ),
+    round1ColumnHeader: envOr("VOICE_MEMO_ROUND1_COLUMN_HEADER", "round1ColumnHeader", "Round 1"),
+    round1AcceptedValue: envOr("VOICE_MEMO_ROUND1_ACCEPTED_VALUE", "round1AcceptedValue", "Accepted"),
+    submittedValue: envOr("VOICE_MEMO_SUBMITTED_VALUE", "submittedValue", "Submitted"),
+    submissionTimeSource: envOr(
+      "VOICE_MEMO_SUBMISSION_TIME_SOURCE",
+      "submissionTimeSource",
+      "createdTime",
+    ),
+    onlyIfRound1Accepted: envBool("VOICE_MEMO_ONLY_IF_ROUND1_ACCEPTED", "onlyIfRound1Accepted", true),
+    submissionInstructions: envOr(
+      "VOICE_MEMO_SUBMISSION_INSTRUCTIONS",
+      "submissionInstructions",
+      "Submit your Round 2 voice memo using the instructions you received by email. Once it is received, this page will show Submitted and you can listen to your recording here.",
+    ),
   };
 }
 
@@ -355,6 +425,7 @@ function loadSecretsFromSecretsJsonEnv() {
       return null;
     }
     parsed.googleSheets = buildGoogleSheetsConfig(parsed.googleSheets);
+    parsed.voiceMemo = buildVoiceMemoConfig(parsed.voiceMemo);
     parsed.classroom = buildClassroomConfig(parsed.classroom, parsed.email);
     parsed.admin = buildAdminConfig(parsed.admin);
     parsed.database = buildDatabaseConfig(parsed.database);
@@ -390,6 +461,7 @@ function loadSecrets() {
       const fileContent = fs.readFileSync(secretsPath, "utf8");
       secrets = JSON.parse(fileContent);
       secrets.googleSheets = buildGoogleSheetsConfig(secrets.googleSheets);
+      secrets.voiceMemo = buildVoiceMemoConfig(secrets.voiceMemo);
       secrets.classroom = buildClassroomConfig(secrets.classroom, secrets.email);
       secrets.admin = buildAdminConfig(secrets.admin);
       secrets.database = buildDatabaseConfig(secrets.database);
@@ -406,6 +478,7 @@ function loadSecrets() {
   const emailFromEnv = buildEmailFromEnv();
   secrets = {
     googleSheets: buildGoogleSheetsConfig(undefined),
+    voiceMemo: buildVoiceMemoConfig(undefined),
     classroom: buildClassroomConfig(undefined, emailFromEnv),
     admin: buildAdminConfig(undefined),
     database: buildDatabaseConfig(undefined),
