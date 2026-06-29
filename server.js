@@ -41,6 +41,8 @@ const {
   sendAdminEmailTest,
   startAdminEmailCampaign,
   getAdminEmailCampaignStatus,
+  listAdminEmailCampaigns,
+  getAdminEmailCampaignDetail,
   startEmailCampaignWorker,
 } = require('./services/adminEmail');
 const {
@@ -67,7 +69,7 @@ const { createRateLimiter } = require('./middleware/rateLimiter');
 const { securityHeaders } = require('./middleware/security');
 const { formatDingChangeTimestamp } = require('./utils/dingSheetTime');
 const { sendDingNumberUpdatedEmail, sendPortalDingHelpRequestEmail } = require('./services/email');
-const { formatErrorForLog, formatGoogleSheetsWriteErrorForLog, isGoogleSheetsForbidden } = require('./utils/errorLogging');
+const { formatErrorForLog, formatGoogleSheetsWriteErrorForLog, isGoogleSheetsForbidden, formatDbErrorMessage } = require('./utils/errorLogging');
 
 /** Value for Ding changes sheet column D when the student updates Ding via the portal (not their personal name). */
 const PORTAL_DING_CHANGE_SOURCE_LABEL = 'Student portal';
@@ -255,7 +257,7 @@ app.use((req, res, next) => {
   if (req.method !== 'GET') {
     return next();
   }
-  if (req.path === '/profile' || req.path === '/faq' || req.path === '/admin' || req.path === '/admin/emails') {
+  if (req.path === '/profile' || req.path === '/faq' || req.path === '/admin' || req.path === '/admin/emails' || req.path === '/admin/campaigns') {
     return res.sendFile(path.join(__dirname, 'public', 'portal.html'));
   }
   if (isPortalRequestHost(req) && req.path === '/') {
@@ -1149,7 +1151,9 @@ app.post('/api/portal-admin/email/test', portalAdminRateLimiter, async (req, res
   } catch (error) {
     console.error('Error sending admin test email:', formatErrorForLog(error));
     const status = error.statusCode || 500;
-    res.status(status).json({ error: error.message || 'Could not send test email.' });
+    res.status(status).json({
+      error: error.message || formatDbErrorMessage(error) || 'Could not send test email.',
+    });
   }
 });
 
@@ -1190,6 +1194,41 @@ app.post('/api/portal-admin/email/campaign-status', portalAdminRateLimiter, asyn
     console.error('Error loading email campaign status:', formatErrorForLog(error));
     const status = error.statusCode || 500;
     res.status(status).json({ error: error.message || 'Could not load campaign status.' });
+  }
+});
+
+app.post('/api/portal-admin/email/campaigns', portalAdminRateLimiter, async (req, res) => {
+  try {
+    const profile = await requirePortalAdmin(res, req.body);
+    if (!profile) {
+      return;
+    }
+    const limit = Number.parseInt(String(req.body.limit ?? ''), 10);
+    const campaigns = await listAdminEmailCampaigns(limit);
+    res.json({ success: true, campaigns });
+  } catch (error) {
+    console.error('Error listing email campaigns:', formatErrorForLog(error));
+    const status = error.statusCode || 500;
+    res.status(status).json({ error: error.message || 'Could not list campaigns.' });
+  }
+});
+
+app.post('/api/portal-admin/email/campaign-detail', portalAdminRateLimiter, async (req, res) => {
+  try {
+    const profile = await requirePortalAdmin(res, req.body);
+    if (!profile) {
+      return;
+    }
+    const campaignId = Number.parseInt(String(req.body.campaignId ?? ''), 10);
+    if (!Number.isFinite(campaignId) || campaignId <= 0) {
+      return res.status(400).json({ error: 'A valid campaignId is required.' });
+    }
+    const detail = await getAdminEmailCampaignDetail(campaignId);
+    res.json({ success: true, ...detail });
+  } catch (error) {
+    console.error('Error loading email campaign detail:', formatErrorForLog(error));
+    const status = error.statusCode || 500;
+    res.status(status).json({ error: error.message || 'Could not load campaign detail.' });
   }
 });
 

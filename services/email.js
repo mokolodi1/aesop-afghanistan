@@ -353,7 +353,7 @@ async function sendDingNumberUpdatedEmail({ to, displayName, newDingNumber }) {
         If you did not make this change, contact AESOP immediately.
       </p>
   `;
-  const html = wrapAesopEmail(innerHtml, { title: subject, showContactFooter: false });
+  const html = wrapAesopEmail(innerHtml, { title: subject });
 
   await sendEmail({ to, subject, text, html });
 }

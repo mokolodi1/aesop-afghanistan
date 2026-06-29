@@ -13,7 +13,8 @@ primary_region = "iad"
   force_https = true
   auto_stop_machines = true
   auto_start_machines = true
-  min_machines_running = 1
+  # Keep two Machines running in primary_region (iad) for redundancy.
+  min_machines_running = 2
   processes = ["app"]
 
 [[vm]]

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
   isValidAfghanistanPhoneNumber,
@@ -25,6 +25,7 @@ function getPortalRouteSegment() {
   if (pathname === '/profile' || pathname.startsWith('/profile/')) return 'profile';
   if (pathname === '/faq' || pathname.startsWith('/faq/')) return 'faq';
   if (pathname === '/admin/emails') return 'admin-emails';
+  if (pathname === '/admin/campaigns') return 'admin-campaigns';
   if (pathname === '/admin' || pathname.startsWith('/admin/')) return 'admin';
   return 'hub';
 }
@@ -47,6 +48,7 @@ function shouldMountPortalSpa() {
     p === '/faq' ||
     p === '/admin' ||
     p === '/admin/emails' ||
+    p === '/admin/campaigns' ||
     p.startsWith('/profile/') ||
     p.startsWith('/faq/') ||
     p.startsWith('/admin/');
@@ -136,7 +138,120 @@ function persistRememberUserId(userId, enabled) {
   localStorage.removeItem(REMEMBERED_USER_ID_KEY);
 }
 
-const PORTAL_IDLE_LOGOUT_MS = 10 * 60 * 1000;
+const PORTAL_SESSION_MS = 60 * 60 * 1000;
+const PORTAL_ADMIN_SESSION_MS = 7 * 24 * 60 * 60 * 1000;
+const PORTAL_SESSION_EXPIRES_AT_KEY = 'studentPortalSessionExpiresAt';
+const PORTAL_ADMIN_SESSION_LOCAL_KEY = 'studentPortalAdminPersistedSession';
+
+function isPortalAdminSession() {
+  if (readSessionField('studentPortalIsAdmin') === '1') {
+    return true;
+  }
+  const backup = readAdminSessionBackup();
+  return backup?.studentPortalIsAdmin === '1';
+}
+
+function getPortalSessionMaxAgeMs() {
+  return isPortalAdminSession() ? PORTAL_ADMIN_SESSION_MS : PORTAL_SESSION_MS;
+}
+
+function touchPortalSessionExpiry() {
+  if (typeof sessionStorage === 'undefined' || !isPortalSessionCompleteSync()) {
+    return;
+  }
+  const expiresAt = Date.now() + getPortalSessionMaxAgeMs();
+  sessionStorage.setItem(PORTAL_SESSION_EXPIRES_AT_KEY, String(expiresAt));
+  if (isPortalAdminSession()) {
+    persistAdminSessionToLocalStorage.lastAt = 0;
+    persistAdminSessionToLocalStorage(expiresAt);
+  }
+}
+
+function isPortalSessionExpired() {
+  const raw = readSessionField(PORTAL_SESSION_EXPIRES_AT_KEY);
+  if (!raw) {
+    return false;
+  }
+  const expiresAt = Number(raw);
+  return !Number.isFinite(expiresAt) || Date.now() >= expiresAt;
+}
+
+function persistAdminSessionToLocalStorage(expiresAt) {
+  if (typeof localStorage === 'undefined' || !isPortalAdminSession()) {
+    return;
+  }
+  const now = Date.now();
+  if (now - persistAdminSessionToLocalStorage.lastAt < 60_000) {
+    return;
+  }
+  persistAdminSessionToLocalStorage.lastAt = now;
+  let sessionData;
+  if (isPortalImpersonating()) {
+    const backup = readAdminSessionBackup();
+    if (!backup || backup.studentPortalIsAdmin !== '1') {
+      return;
+    }
+    sessionData = backup;
+  } else {
+    sessionData = {};
+    PORTAL_SESSION_STORAGE_KEYS.forEach((key) => {
+      const value = sessionStorage.getItem(key);
+      if (value != null) {
+        sessionData[key] = value;
+      }
+    });
+  }
+  localStorage.setItem(
+    PORTAL_ADMIN_SESSION_LOCAL_KEY,
+    JSON.stringify({ expiresAt, session: sessionData }),
+  );
+}
+persistAdminSessionToLocalStorage.lastAt = 0;
+
+function clearAdminSessionFromLocalStorage() {
+  if (typeof localStorage === 'undefined') {
+    return;
+  }
+  localStorage.removeItem(PORTAL_ADMIN_SESSION_LOCAL_KEY);
+}
+
+function restoreAdminSessionFromLocalStorage() {
+  if (typeof localStorage === 'undefined' || typeof sessionStorage === 'undefined') {
+    return false;
+  }
+  if (isPortalSessionCompleteSync()) {
+    return true;
+  }
+  let stored;
+  try {
+    const raw = localStorage.getItem(PORTAL_ADMIN_SESSION_LOCAL_KEY);
+    stored = raw ? JSON.parse(raw) : null;
+  } catch {
+    return false;
+  }
+  if (!stored?.session || !stored.expiresAt || Date.now() >= stored.expiresAt) {
+    clearAdminSessionFromLocalStorage();
+    return false;
+  }
+  Object.entries(stored.session).forEach(([key, value]) => {
+    if (value != null) {
+      sessionStorage.setItem(key, value);
+    }
+  });
+  sessionStorage.setItem(PORTAL_SESSION_EXPIRES_AT_KEY, String(stored.expiresAt));
+  return isPortalSessionCompleteSync();
+}
+
+function ensurePortalSessionReady() {
+  restoreAdminSessionFromLocalStorage();
+  if (isPortalSessionCompleteSync() && isPortalSessionExpired()) {
+    clearPortalSession();
+    return;
+  }
+  if (isPortalSessionCompleteSync() && !readSessionField(PORTAL_SESSION_EXPIRES_AT_KEY)) {
+    touchPortalSessionExpiry();
+  }
+}
 
 /** Dedupe concurrent class/grade fetches (header + hub both mount). */
 let portalClassGradeInFlight = null;
@@ -280,6 +395,7 @@ function applyPortalSessionFromApi(data, options = {}) {
   } else {
     sessionStorage.removeItem('studentPortalTeacherClasses');
   }
+  touchPortalSessionExpiry();
 }
 
 function startPortalImpersonation(data, viewRole = 'student') {
@@ -308,6 +424,7 @@ function stopPortalImpersonation() {
       }
     });
   }
+  touchPortalSessionExpiry();
   window.location.assign('/admin');
 }
 
@@ -1289,6 +1406,8 @@ function clearPortalSession() {
   sessionStorage.removeItem(PORTAL_IMPERSONATING_KEY);
   sessionStorage.removeItem(PORTAL_IMPERSONATION_ROLE_KEY);
   sessionStorage.removeItem(PORTAL_ADMIN_SESSION_BACKUP_KEY);
+  sessionStorage.removeItem(PORTAL_SESSION_EXPIRES_AT_KEY);
+  clearAdminSessionFromLocalStorage();
 }
 
 function logOutPortalClient() {
@@ -1985,7 +2104,13 @@ function PortalSectionLinks({ current, isAdmin }) {
             ·
           </span>
           <a href="/admin/emails" className={current === 'admin-emails' ? 'is-current' : undefined}>
-            Emails
+            Compose
+          </a>
+          <span className="portal-section-links-sep" aria-hidden="true">
+            ·
+          </span>
+          <a href="/admin/campaigns" className={current === 'admin-campaigns' ? 'is-current' : undefined}>
+            Campaigns
           </a>
         </>
       ) : null}
@@ -2978,7 +3103,7 @@ const EMAIL_IDENTITY_PLACEHOLDERS = new Set(['aesop id', 'name', 'email']);
 
 function extractEmailPlaceholders(subject, body) {
   const found = new Set();
-  const re = /\[\[([^\]]+)\]\]/g;
+  const re = /\[\[([^\]]+)\]\]|\{\{([^}]+)\}\}/g;
   for (const text of [subject, body]) {
     if (typeof text !== 'string') {
       continue;
@@ -2986,7 +3111,10 @@ function extractEmailPlaceholders(subject, body) {
     let match;
     const copy = new RegExp(re.source, 'g');
     while ((match = copy.exec(text)) !== null) {
-      found.add(match[1].trim());
+      const name = String(match[1] || match[2] || '').trim();
+      if (name) {
+        found.add(name);
+      }
     }
   }
   return Array.from(found);
@@ -3005,6 +3133,1052 @@ function buildEmailFilterPayload(filterAll, filterColumn, filterValue) {
     return null;
   }
   return { column: filterColumn, values: [filterValue] };
+}
+
+const EMAIL_BODY_MARKDOWN_LINK_RE =
+  /\[([^\]\n]+)\]\((https?:\/\/[^\s<>)}"']+|www\.[^\s<>)}"']+)\)/g;
+const EMAIL_BODY_BARE_URL_RE = /\b(https?:\/\/[^\s<>\]\)}"']+|www\.[^\s<>\]\)}"']+)/gi;
+
+function escapeEmailBodyHtml(text) {
+  return String(text || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+function normalizeClipboardLinkHref(href) {
+  const raw = String(href || '').trim();
+  if (!raw) {
+    return '';
+  }
+  try {
+    const url = new URL(raw);
+    if (
+      (url.hostname === 'www.google.com' || url.hostname === 'google.com') &&
+      url.pathname === '/url'
+    ) {
+      const target = url.searchParams.get('q') || url.searchParams.get('url');
+      if (target && /^https?:\/\//i.test(target)) {
+        return target;
+      }
+    }
+  } catch {
+    // keep raw href
+  }
+  return raw;
+}
+
+function isExternalHttpHref(href) {
+  const normalized = normalizeClipboardLinkHref(href);
+  return /^https?:\/\//i.test(normalized);
+}
+
+function createEmailBodyLinkElement(doc, href, label) {
+  const normalizedHref = normalizeClipboardLinkHref(href);
+  const anchor = doc.createElement('a');
+  anchor.href = normalizedHref;
+  anchor.textContent = label;
+  anchor.className = 'portal-admin-emails-inline-link';
+  anchor.setAttribute('data-email-link', '1');
+  anchor.contentEditable = 'false';
+  return anchor;
+}
+
+function renderEmailBodyInlineMarkdown(text) {
+  let html = '';
+  let lastIndex = 0;
+  EMAIL_BODY_MARKDOWN_LINK_RE.lastIndex = 0;
+  let match;
+  while ((match = EMAIL_BODY_MARKDOWN_LINK_RE.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      html += renderEmailBodyBareUrls(text.slice(lastIndex, match.index));
+    }
+    const href = match[2].startsWith('www.') ? `https://${match[2]}` : match[2];
+    html += `<a href="${escapeEmailBodyHtml(href)}" class="portal-admin-emails-inline-link" data-email-link="1" contenteditable="false">${escapeEmailBodyHtml(match[1])}</a>`;
+    lastIndex = EMAIL_BODY_MARKDOWN_LINK_RE.lastIndex;
+  }
+  if (lastIndex < text.length) {
+    html += renderEmailBodyBareUrls(text.slice(lastIndex));
+  }
+  return html;
+}
+
+function renderEmailBodyBareUrls(text) {
+  let html = '';
+  let lastIndex = 0;
+  EMAIL_BODY_BARE_URL_RE.lastIndex = 0;
+  let match;
+  while ((match = EMAIL_BODY_BARE_URL_RE.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      html += escapeEmailBodyHtml(text.slice(lastIndex, match.index));
+    }
+    const url = match[0];
+    const href = url.startsWith('www.') ? `https://${url}` : url;
+    html += `<a href="${escapeEmailBodyHtml(href)}" class="portal-admin-emails-inline-link" data-email-link="1" contenteditable="false">${escapeEmailBodyHtml(url)}</a>`;
+    lastIndex = EMAIL_BODY_BARE_URL_RE.lastIndex;
+  }
+  if (lastIndex < text.length) {
+    html += escapeEmailBodyHtml(text.slice(lastIndex));
+  }
+  return html;
+}
+
+function emailBodyMarkdownToHtml(markdown) {
+  const normalized = String(markdown || '');
+  if (!normalized.trim()) {
+    return '';
+  }
+  return normalized
+    .split(/\n\n+/)
+    .map((paragraph) => {
+      const lines = paragraph.split('\n').map((line) => renderEmailBodyInlineMarkdown(line));
+      return `<div class="portal-admin-emails-body-block">${lines.join('<br />')}</div>`;
+    })
+    .join('');
+}
+
+function serializeEmailBodyFromHtmlNode(node) {
+  let out = '';
+  for (const child of node.childNodes) {
+    if (child.nodeType === Node.TEXT_NODE) {
+      out += child.textContent || '';
+    } else if (child.nodeType !== Node.ELEMENT_NODE) {
+      continue;
+    } else if (child.nodeName === 'A') {
+      const href = normalizeClipboardLinkHref(child.getAttribute('href') || '');
+      const label = (child.textContent || '').replace(/\s+/g, ' ').trim();
+      if (isExternalHttpHref(href) && label) {
+        out += `[${label}](${href})`;
+      } else {
+        out += child.textContent || '';
+      }
+    } else if (child.nodeName === 'BR') {
+      out += '\n';
+    } else if (
+      child.nodeName === 'P' ||
+      child.nodeName === 'DIV' ||
+      child.nodeName === 'LI' ||
+      child.classList?.contains('portal-admin-emails-body-block')
+    ) {
+      if (out && !out.endsWith('\n\n')) {
+        out += out.endsWith('\n') ? '\n' : '\n\n';
+      }
+      out += serializeEmailBodyFromHtmlNode(child);
+    } else {
+      out += serializeEmailBodyFromHtmlNode(child);
+    }
+  }
+  return out;
+}
+
+function emailBodyElementToMarkdown(root) {
+  return serializeEmailBodyFromHtmlNode(root).replace(/\u00a0/g, ' ').trimEnd();
+}
+
+function clipboardHtmlHasExternalLinks(html) {
+  if (!html || typeof html !== 'string') {
+    return false;
+  }
+  try {
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    const anchors = doc.body?.querySelectorAll('a[href]') || [];
+    for (const anchor of anchors) {
+      if (isExternalHttpHref(anchor.getAttribute('href') || '')) {
+        return true;
+      }
+    }
+  } catch {
+    return false;
+  }
+  return false;
+}
+
+function appendEmailBodyNodesFromHtml(parent, sourceNode, doc) {
+  for (const child of sourceNode.childNodes) {
+    if (child.nodeType === Node.TEXT_NODE) {
+      const text = child.textContent || '';
+      if (text) {
+        parent.appendChild(doc.createTextNode(text));
+      }
+    } else if (child.nodeType !== Node.ELEMENT_NODE) {
+      continue;
+    } else if (child.nodeName === 'A') {
+      const href = child.getAttribute('href') || '';
+      const label = (child.textContent || '').replace(/\s+/g, ' ').trim();
+      if (isExternalHttpHref(href) && label) {
+        parent.appendChild(createEmailBodyLinkElement(doc, href, label));
+      } else if (child.textContent) {
+        parent.appendChild(doc.createTextNode(child.textContent));
+      }
+    } else if (child.nodeName === 'BR') {
+      parent.appendChild(doc.createElement('br'));
+    } else if (child.nodeName === 'P' || child.nodeName === 'DIV' || child.nodeName === 'LI') {
+      if (parent.childNodes.length > 0) {
+        parent.appendChild(doc.createElement('br'));
+        parent.appendChild(doc.createElement('br'));
+      }
+      appendEmailBodyNodesFromHtml(parent, child, doc);
+    } else {
+      appendEmailBodyNodesFromHtml(parent, child, doc);
+    }
+  }
+}
+
+function buildClipboardDocumentFragment(html) {
+  try {
+    const parsed = new DOMParser().parseFromString(html, 'text/html');
+    const wrapper = document.createElement('div');
+    appendEmailBodyNodesFromHtml(wrapper, parsed.body, document);
+    const fragment = document.createDocumentFragment();
+    while (wrapper.firstChild) {
+      fragment.appendChild(wrapper.firstChild);
+    }
+    return fragment.childNodes.length ? fragment : null;
+  } catch {
+    return null;
+  }
+}
+
+function insertDocumentFragmentAtSelection(fragment) {
+  const selection = window.getSelection();
+  if (!selection || selection.rangeCount === 0) {
+    return false;
+  }
+  const range = selection.getRangeAt(0);
+  range.deleteContents();
+  range.insertNode(fragment);
+  range.collapse(false);
+  selection.removeAllRanges();
+  selection.addRange(range);
+  return true;
+}
+
+function AdminEmailBodyEditor({ id, value, onChange, placeholder }) {
+  const editorRef = useRef(null);
+  const lastValueRef = useRef(value);
+
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor) {
+      return;
+    }
+    if (value === lastValueRef.current && editor.innerHTML) {
+      return;
+    }
+    if (document.activeElement === editor) {
+      lastValueRef.current = value;
+      return;
+    }
+    lastValueRef.current = value;
+    editor.innerHTML = value.trim() ? emailBodyMarkdownToHtml(value) : '';
+  }, [value]);
+
+  const syncToMarkdown = useCallback(() => {
+    const editor = editorRef.current;
+    if (!editor) {
+      return;
+    }
+    const markdown = emailBodyElementToMarkdown(editor);
+    lastValueRef.current = markdown;
+    onChange(markdown);
+  }, [onChange]);
+
+  const handlePaste = (event) => {
+    const html = event.clipboardData?.getData('text/html');
+    if (html && clipboardHtmlHasExternalLinks(html)) {
+      const fragment = buildClipboardDocumentFragment(html);
+      if (fragment) {
+        event.preventDefault();
+        insertDocumentFragmentAtSelection(fragment);
+        syncToMarkdown();
+        return;
+      }
+    }
+    requestAnimationFrame(syncToMarkdown);
+  };
+
+  return (
+    <div
+      id={id}
+      ref={editorRef}
+      className="portal-admin-emails-textarea portal-admin-emails-body-editor"
+      contentEditable
+      role="textbox"
+      aria-multiline="true"
+      data-placeholder={placeholder}
+      onInput={syncToMarkdown}
+      onPaste={handlePaste}
+      onBlur={syncToMarkdown}
+      onClick={(event) => {
+        if (event.target.closest('a[data-email-link]')) {
+          event.preventDefault();
+        }
+      }}
+    />
+  );
+}
+
+function rowMatchesAdmissionsFilter(fields, filter) {
+  if (!filter?.column || !Array.isArray(filter.values) || filter.values.length === 0) {
+    return true;
+  }
+  const cell = fields?.[filter.column];
+  if (cell == null) {
+    return false;
+  }
+  const want = new Set(
+    filter.values.map((value) => String(value ?? '').trim().toLowerCase()).filter(Boolean),
+  );
+  return want.has(String(cell).trim().toLowerCase());
+}
+
+function filterDuplicateSkipsForScope(skips, filter) {
+  if (!Array.isArray(skips) || skips.length === 0) {
+    return [];
+  }
+  if (!filter) {
+    return skips;
+  }
+  return skips.filter((skip) => rowMatchesAdmissionsFilter(skip.fields, filter));
+}
+
+function resolvePanelDuplicateSkips(recipientStats, stats, activeFilter) {
+  const fromPreview = filterDuplicateSkipsForScope(recipientStats?.duplicateEmailSkips, activeFilter);
+  if (fromPreview.length > 0) {
+    return fromPreview;
+  }
+  return filterDuplicateSkipsForScope(stats?.duplicateEmailSkips, activeFilter);
+}
+
+function resolvePanelDuplicateGroups(recipientStats, stats, activeFilter) {
+  const fromPreview = Array.isArray(recipientStats?.duplicateEmailGroups)
+    ? recipientStats.duplicateEmailGroups
+    : [];
+  if (fromPreview.length > 0) {
+    return fromPreview;
+  }
+  const fromStats = Array.isArray(stats?.duplicateEmailGroups) ? stats.duplicateEmailGroups : [];
+  if (!activeFilter) {
+    return fromStats;
+  }
+  return fromStats
+    .map((group) => ({
+      email: group.email,
+      rows: (group.rows || []).filter((row) => rowMatchesAdmissionsFilter(row.fields, activeFilter)),
+    }))
+    .filter((group) => group.rows.length > 1);
+}
+
+function resolvePanelExcludedRows(recipientStats) {
+  if (!recipientStats) {
+    return [];
+  }
+  const fromPreview = Array.isArray(recipientStats.excludedFromSend)
+    ? recipientStats.excludedFromSend
+    : [];
+  if (fromPreview.length > 0) {
+    return fromPreview;
+  }
+  const skippedNoEmail = Array.isArray(recipientStats.skippedFromSend)
+    ? recipientStats.skippedFromSend.filter((row) => row.reason === 'no-email')
+    : [];
+  return skippedNoEmail;
+}
+
+function formatRecipientSkipRow(row) {
+  const id = row.id ? `AESOP ID ${row.id}` : 'No AESOP ID';
+  const name = row.name || '(no name)';
+  if (row.reason === 'no-email') {
+    return `${id} — ${name} (Email column is empty)`;
+  }
+  if (row.reason === 'duplicate-email' && row.sharedWith) {
+    const keptId = row.sharedWith.id ? `AESOP ID ${row.sharedWith.id}` : 'another row';
+    const keptName = row.sharedWith.name || row.sharedWith.email || keptId;
+    return `${id} — ${name} (same email as ${keptName}, ${row.email})`;
+  }
+  return `${id} — ${name}`;
+}
+
+function ApplicantsSheetDebugPanel({
+  stats,
+  recipientStats,
+  recipientCount,
+  previewLoading,
+  previewError,
+}) {
+  if (!stats) {
+    return null;
+  }
+
+  if (!stats.sheetFound) {
+    return (
+      <div className="portal-admin-emails-debug" role="status">
+        <p className="portal-admin-emails-debug-title">Sheet debug</p>
+        <p>
+          Tab <strong>{stats.configuredSheetName || 'Applicants'}</strong> was not found in the
+          spreadsheet.
+        </p>
+        {stats.similarTabs?.length ? (
+          <p>
+            Similar tab names: {stats.similarTabs.join(', ')}
+          </p>
+        ) : null}
+        {stats.availableTabs?.length ? (
+          <p className="portal-admin-emails-debug-tabs">
+            Available tabs ({stats.availableTabs.length}): {stats.availableTabs.join(', ')}
+          </p>
+        ) : null}
+      </div>
+    );
+  }
+
+  const mapping = stats.columnMapping || {};
+  const activeFilter = recipientStats?.filter ?? null;
+  const previewReady = !previewLoading && !previewError;
+  const matchedCount =
+    recipientStats?.rowsAfterFilter ??
+    (previewReady && !activeFilter ? stats.rowsWithEmail : null);
+  const sendCount =
+    recipientStats?.recipientCount ?? (previewReady ? recipientCount : null);
+  const sendGap =
+    matchedCount != null && sendCount != null ? Math.max(0, matchedCount - sendCount) : 0;
+  const hasReliableGap = previewReady && recipientStats != null && sendGap > 0;
+  const duplicateSkips = resolvePanelDuplicateSkips(recipientStats, stats, activeFilter);
+  const duplicateGroups = resolvePanelDuplicateGroups(recipientStats, stats, activeFilter);
+  const excludedRows = resolvePanelExcludedRows(recipientStats);
+  const excludedNoEmail = excludedRows.filter((row) => row.reason === 'no-email');
+  const excludedDuplicates = excludedRows.filter((row) => row.reason === 'duplicate-email');
+
+  return (
+    <div className="portal-admin-emails-debug" role="status">
+      <p className="portal-admin-emails-debug-title">Sheet debug</p>
+      <ul className="portal-admin-emails-debug-list">
+        <li>
+          Tab <strong>{stats.configuredSheetName}</strong>, header row {stats.headerRowNum ?? 1}
+        </li>
+        <li>
+          Column mapping: AESOP ID = {mapping.id || 'A'}, Name = {mapping.name || 'C'}, Email ={' '}
+          {mapping.email || 'D'}
+        </li>
+        {stats.headerLabels?.length ? (
+          <li>Headers read: {stats.headerLabels.join(' · ')}</li>
+        ) : null}
+        <li>
+          <strong>{stats.dataRowsRead ?? 0}</strong> data row(s) read from the sheet
+        </li>
+        <li>
+          <strong>{stats.rowsWithEmail ?? 0}</strong> row(s) with a non-empty email (column{' '}
+          {mapping.email || 'D'})
+        </li>
+        {(stats.rowsSkippedNoEmail ?? 0) > 0 ? (
+          <li>
+            <strong>{stats.rowsSkippedNoEmail}</strong> row(s) skipped — no email in column{' '}
+            {mapping.email || 'D'}
+          </li>
+        ) : null}
+        {previewLoading ? (
+          <li>Loading recipient count…</li>
+        ) : previewError ? (
+          <li>Recipient count unavailable — see Review section for the error.</li>
+        ) : sendCount != null ? (
+          <>
+            {recipientStats?.filter ? (
+              <li>
+                Filter <strong>{recipientStats.filter.column}</strong> ={' '}
+                {recipientStats.filter.values?.join(', ')}:{' '}
+                <strong>{recipientStats.rowsAfterFilter ?? 0}</strong> row(s) matched
+              </li>
+            ) : null}
+            <li>
+              <strong>{sendCount}</strong> email{sendCount === 1 ? '' : 's'} will be sent (one per
+              application row)
+            </li>
+            {(recipientStats?.transactionalRecipientCount ?? 0) > 0 ? (
+              <li>
+                Send order: <strong>{recipientStats.transactionalRecipientCount}</strong> shared-email
+                row{recipientStats.transactionalRecipientCount === 1 ? '' : 's'} first (transactional
+                stream), then{' '}
+                <strong>{recipientStats.broadcastRecipientCount ?? 0}</strong> on the broadcast
+                stream
+              </li>
+            ) : null}
+          </>
+        ) : null}
+      </ul>
+      {hasReliableGap ? (
+        <div className="portal-admin-emails-debug-gap" role="alert">
+          <p className="portal-admin-emails-debug-gap-title">
+            Why {matchedCount} matched but only {sendCount} will be sent
+          </p>
+          <p className="portal-admin-emails-debug-gap-lead">
+            <strong>{sendGap}</strong> matched row{sendGap === 1 ? '' : 's'} will not receive an
+            email:
+          </p>
+          {excludedNoEmail.length > 0 ? (
+            <>
+              <p className="portal-admin-emails-debug-gap-reason">
+                Empty email in column {mapping.email || 'D'}:
+              </p>
+              <ul className="portal-admin-emails-debug-skip-list">
+                {excludedNoEmail.map((row) => (
+                  <li key={`no-email-${row.id || row.name}`}>{formatRecipientSkipRow(row)}</li>
+                ))}
+              </ul>
+            </>
+          ) : null}
+          {excludedDuplicates.length > 0 ? (
+            <>
+              <p className="portal-admin-emails-debug-gap-reason">
+                Same email address as another matched row that will receive instead:
+              </p>
+              <ul className="portal-admin-emails-debug-skip-list">
+                {excludedDuplicates.map((row) => (
+                  <li key={`dup-${row.id || row.email}-${row.name}`}>
+                    {formatRecipientSkipRow(row)}
+                  </li>
+                ))}
+              </ul>
+            </>
+          ) : null}
+          {excludedRows.length === 0 ? (
+            <p className="portal-admin-emails-debug-gap-reason">
+              The server reported {sendGap} fewer send{sendGap === 1 ? '' : 's'} than matched rows
+              but did not return row details. Hard refresh this page (Shift+Reload).
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+      {sendGap === 0 && duplicateGroups.length > 0 ? (
+        <div className="portal-admin-emails-debug-info">
+          <p className="portal-admin-emails-debug-info-title">Shared email addresses</p>
+          <p>
+            {duplicateSkips.length} matched row{duplicateSkips.length === 1 ? '' : 's'} share an
+            email with another row in this filter ({duplicateGroups.length} address
+            {duplicateGroups.length === 1 ? '' : 'es'}). Each application row still gets its own
+            email.
+          </p>
+          <details className="portal-admin-emails-debug-details">
+            <summary>Show shared addresses</summary>
+            <ul className="portal-admin-emails-debug-skip-list">
+              {duplicateGroups.map((group) => (
+                <li key={group.email}>
+                  <strong>{group.email}</strong>
+                  <ul>
+                    {group.rows.map((row) => (
+                      <li key={`${group.email}-${row.id || row.name}`}>
+                        {row.id ? `AESOP ID ${row.id}` : 'No AESOP ID'} — {row.name || '(no name)'}
+                      </li>
+                    ))}
+                  </ul>
+                </li>
+              ))}
+            </ul>
+          </details>
+        </div>
+      ) : null}
+      {(stats.rowsWithEmail ?? 0) <= 1 && (stats.dataRowsRead ?? 0) > 1 ? (
+        <p className="portal-admin-emails-debug-note">
+          Most rows have no email in column {mapping.email || 'D'}. Check that the Email column is
+          actually column {mapping.email || 'D'} and that applicant emails are filled in.
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+const EMAIL_BATCH_SIZE = 100;
+const EMAIL_BATCH_INTERVAL_MINUTES = 5;
+
+function estimateBulkEmailDuration(
+  recipientCount,
+  batchSize = EMAIL_BATCH_SIZE,
+  intervalMinutes = EMAIL_BATCH_INTERVAL_MINUTES,
+) {
+  if (recipientCount <= 0) {
+    return null;
+  }
+  const batches = Math.ceil(recipientCount / batchSize);
+  const totalMinutes = (batches - 1) * intervalMinutes;
+  return { batches, batchSize, intervalMinutes, totalMinutes };
+}
+
+function formatDurationMinutes(totalMinutes) {
+  if (totalMinutes <= 0) {
+    return 'less than a minute';
+  }
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (hours === 0) {
+    return `${minutes} minute${minutes === 1 ? '' : 's'}`;
+  }
+  if (minutes === 0) {
+    return `${hours} hour${hours === 1 ? '' : 's'}`;
+  }
+  return `${hours} hour${hours === 1 ? '' : 's'} ${minutes} minute${minutes === 1 ? '' : 's'}`;
+}
+
+function formatBulkEmailBatchSchedule(
+  recipientCount,
+  batchSize = EMAIL_BATCH_SIZE,
+  intervalMinutes = EMAIL_BATCH_INTERVAL_MINUTES,
+) {
+  if (recipientCount <= 0) {
+    return null;
+  }
+  if (recipientCount <= batchSize) {
+    return `All ${recipientCount} send in one batch.`;
+  }
+  return `Up to ${batchSize} send immediately, then up to ${batchSize} every ${intervalMinutes} minutes until complete.`;
+}
+
+function formatCampaignStatusLabel(status) {
+  if (status === 'sending') {
+    return 'Sending';
+  }
+  if (status === 'completed') {
+    return 'Complete';
+  }
+  if (status === 'failed') {
+    return 'Failed';
+  }
+  return status || '—';
+}
+
+function formatCampaignRecipientStatusLabel(status) {
+  if (status === 'pending') return 'Pending';
+  if (status === 'processing') return 'Sending';
+  if (status === 'sent') return 'Sent';
+  if (status === 'failed') return 'Failed';
+  if (status === 'bounced') return 'Bounced';
+  return status || '—';
+}
+
+function formatPortalDateTime(value) {
+  if (!value) return '—';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '—';
+  return date.toLocaleString();
+}
+
+function formatCampaignListDate(value) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toLocaleDateString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  });
+}
+
+function recipientEngagementSummary(recipient) {
+  const parts = [];
+  if (recipient.deliveredAt) parts.push('Delivered');
+  if (recipient.openedAt) parts.push('Opened');
+  if (recipient.clickedAt) parts.push('Clicked');
+  if (recipient.status === 'bounced' || recipient.bouncedAt) parts.push('Bounced');
+  if (recipient.status === 'failed') parts.push('Failed');
+  if (parts.length === 0) {
+    if (recipient.status === 'pending' || recipient.status === 'processing') {
+      return 'Not sent yet';
+    }
+    if (recipient.sentAt) {
+      return 'Sent';
+    }
+    return '—';
+  }
+  return parts.join(' · ');
+}
+
+function PortalAdminCampaignsPage() {
+  const { isAdmin } = usePortalClassGrade();
+  const signedIn = isPortalSessionCompleteSync();
+
+  const initialCampaignId = useMemo(() => {
+    if (typeof window === 'undefined') return null;
+    const raw = new URLSearchParams(window.location.search).get('campaign');
+    const parsed = Number.parseInt(String(raw ?? ''), 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  }, []);
+
+  const [campaigns, setCampaigns] = useState([]);
+  const [campaignsLoading, setCampaignsLoading] = useState(false);
+  const [campaignsError, setCampaignsError] = useState('');
+  const [selectedCampaignId, setSelectedCampaignId] = useState(initialCampaignId);
+  const [detail, setDetail] = useState(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState('');
+  const [recipientFilter, setRecipientFilter] = useState('all');
+
+  const selectCampaign = useCallback((campaignId) => {
+    setSelectedCampaignId(campaignId);
+    if (typeof window !== 'undefined') {
+      const url = new URL(window.location.href);
+      if (campaignId) {
+        url.searchParams.set('campaign', String(campaignId));
+      } else {
+        url.searchParams.delete('campaign');
+      }
+      window.history.replaceState(null, '', `${url.pathname}${url.search}`);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!signedIn || !isAdmin) {
+      return undefined;
+    }
+    let cancelled = false;
+    setCampaignsLoading(true);
+    setCampaignsError('');
+    adminApiPost('/api/portal-admin/email/campaigns')
+      .then((data) => {
+        if (!cancelled) {
+          const rows = Array.isArray(data.campaigns) ? data.campaigns : [];
+          setCampaigns(rows);
+          if (!selectedCampaignId && !initialCampaignId && rows.length > 0) {
+            selectCampaign(rows[0].id);
+          }
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setCampaignsError(err.message || 'Could not load campaigns.');
+          setCampaigns([]);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setCampaignsLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [signedIn, isAdmin]);
+
+  useEffect(() => {
+    setDetail(null);
+    setDetailError('');
+    setDetailLoading(!!selectedCampaignId);
+    setRecipientFilter('all');
+  }, [selectedCampaignId]);
+
+  useEffect(() => {
+    if (!selectedCampaignId || !signedIn || !isAdmin) {
+      return undefined;
+    }
+    let cancelled = false;
+    let intervalId = 0;
+
+    const loadDetail = () => {
+      adminApiPost('/api/portal-admin/email/campaign-detail', { campaignId: selectedCampaignId })
+        .then((data) => {
+          if (!cancelled) {
+            setDetail({
+              campaign: data.campaign || null,
+              status: data.status || null,
+              recipients: Array.isArray(data.recipients) ? data.recipients : [],
+            });
+          }
+        })
+        .catch((err) => {
+          if (!cancelled) {
+            setDetailError(err.message || 'Could not load campaign detail.');
+            setDetail(null);
+          }
+        })
+        .finally(() => {
+          if (!cancelled) {
+            setDetailLoading(false);
+          }
+        });
+    };
+
+    loadDetail();
+    intervalId = window.setInterval(loadDetail, 8000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [selectedCampaignId, signedIn, isAdmin]);
+
+  const filteredRecipients = useMemo(() => {
+    if (!detail?.recipients) return [];
+    const rows = detail.recipients;
+    if (recipientFilter === 'all') return rows;
+    if (recipientFilter === 'opened') return rows.filter((row) => row.openedAt);
+    if (recipientFilter === 'clicked') return rows.filter((row) => row.clickedAt);
+    if (recipientFilter === 'bounced') {
+      return rows.filter((row) => row.status === 'bounced' || row.bouncedAt);
+    }
+    if (recipientFilter === 'failed') return rows.filter((row) => row.status === 'failed');
+    if (recipientFilter === 'pending') {
+      return rows.filter((row) => row.status === 'pending' || row.status === 'processing');
+    }
+    return rows;
+  }, [detail, recipientFilter]);
+
+  if (!signedIn) {
+    return (
+      <PortalLayout>
+        <div className="portal-card portal-content portal-admin-card">
+          <PortalSectionLinks current="admin-campaigns" isAdmin={false} />
+          <div className="portal-session-banner" role="status">
+            <p className="portal-session-banner-title">Sign in required</p>
+            <p className="portal-session-banner-text">
+              Sign in from the portal home page to view email campaigns.
+            </p>
+          </div>
+        </div>
+      </PortalLayout>
+    );
+  }
+
+  if (!isAdmin) {
+    return (
+      <PortalLayout>
+        <div className="portal-card portal-content portal-admin-card">
+          <PortalSectionLinks current="admin-campaigns" isAdmin={false} />
+          <div className="portal-session-banner" role="status">
+            <p className="portal-session-banner-title">Access denied</p>
+            <p className="portal-session-banner-text">
+              Your account is not on the admin allowlist. Contact operations if you need access.
+            </p>
+          </div>
+        </div>
+      </PortalLayout>
+    );
+  }
+
+  const status = detail?.status;
+  const campaign = detail?.campaign;
+  const totalRecipients = status?.totalRecipients ?? campaign?.totalRecipients ?? 0;
+  const processedCount = status?.processedCount ?? 0;
+  const progressPct =
+    totalRecipients > 0 ? Math.min(100, Math.round((processedCount / totalRecipients) * 100)) : 0;
+
+  return (
+    <PortalLayout>
+      <div className="portal-card portal-content portal-admin-card portal-admin-campaigns-card">
+        <PortalSectionLinks current="admin-campaigns" isAdmin={isAdmin} />
+        <h2 className="portal-admin-title">
+          Email campaigns
+          <PortalRoleBadge isAdmin className="portal-welcome-role" />
+        </h2>
+        <p className="portal-admin-lead">
+          Review past sends, delivery stats, and per-recipient engagement (opens and link clicks).
+        </p>
+
+        <div className="portal-admin-campaigns-layout">
+          <aside className="portal-admin-campaigns-sidebar" aria-label="Campaign list">
+            <div className="portal-admin-campaigns-sidebar-head">
+              <h3 className="portal-admin-subheading-sm">Campaigns</h3>
+              <a href="/admin/emails" className="portal-admin-campaigns-compose-link">
+                Compose new
+              </a>
+            </div>
+            {campaignsLoading ? <p className="portal-admin-status">Loading campaigns…</p> : null}
+            {campaignsError ? (
+              <p className="portal-admin-status portal-admin-status--error" role="alert">
+                {campaignsError}
+              </p>
+            ) : null}
+            {!campaignsLoading && campaigns.length === 0 ? (
+              <p className="portal-admin-hint">No campaigns yet. Send one from Compose.</p>
+            ) : null}
+            <ul className="portal-admin-campaigns-list">
+              {campaigns.map((row) => {
+                const isSelected = row.id === selectedCampaignId;
+                const processed = (row.sentCount ?? 0) + (row.failedCount ?? 0);
+                const total = row.totalRecipients ?? 0;
+                return (
+                  <li key={row.id}>
+                    <button
+                      type="button"
+                      className={`portal-admin-campaigns-list-item${isSelected ? ' is-selected' : ''}`}
+                      onClick={() => selectCampaign(row.id)}
+                    >
+                      <span className="portal-admin-campaigns-list-subject">{row.subject || '(No subject)'}</span>
+                      <span className="portal-admin-campaigns-list-meta">
+                        <span
+                          className={`portal-admin-campaigns-badge portal-admin-campaigns-badge--${row.status || 'unknown'}`}
+                        >
+                          {formatCampaignStatusLabel(row.status)}
+                        </span>
+                        <span>{formatCampaignListDate(row.createdAt)}</span>
+                      </span>
+                      <span className="portal-admin-campaigns-list-progress">
+                        {processed} / {total} processed
+                      </span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          </aside>
+
+          <section className="portal-admin-campaigns-detail" aria-label="Campaign detail">
+            {!selectedCampaignId ? (
+              <p className="portal-admin-hint">Select a campaign to view stats and recipients.</p>
+            ) : null}
+            {selectedCampaignId && detailLoading && !detail ? (
+              <p className="portal-admin-status">Loading campaign…</p>
+            ) : null}
+            {detailError ? (
+              <p className="portal-admin-status portal-admin-status--error" role="alert">
+                {detailError}
+              </p>
+            ) : null}
+            {campaign ? (
+              <>
+                <header className="portal-admin-campaigns-detail-head">
+                  <h3 className="portal-admin-subheading">{campaign.subject || '(No subject)'}</h3>
+                  <p className="portal-admin-campaigns-detail-meta">
+                    Sent {formatPortalDateTime(campaign.createdAt)}
+                    {campaign.completedAt ? ` · Completed ${formatPortalDateTime(campaign.completedAt)}` : ''}
+                    {' · '}
+                    {formatCampaignStatusLabel(campaign.status)}
+                  </p>
+                </header>
+
+                {status ? (
+                  <div className="portal-admin-campaigns-stats">
+                    <div
+                      className="portal-admin-emails-progress"
+                      role="progressbar"
+                      aria-valuemin={0}
+                      aria-valuemax={100}
+                      aria-valuenow={progressPct}
+                      aria-label={`${processedCount} of ${totalRecipients} processed`}
+                    >
+                      <div
+                        className="portal-admin-emails-progress-bar"
+                        style={{ width: `${progressPct}%` }}
+                      />
+                    </div>
+                    <p className="portal-admin-emails-progress-summary">
+                      <strong>{status.sentCount ?? 0}</strong> sent
+                      {(status.failedCount ?? 0) > 0 ? (
+                        <>
+                          , <strong>{status.failedCount}</strong> failed
+                        </>
+                      ) : null}
+                      {(status.pendingCount ?? 0) > 0 ? (
+                        <>
+                          , <strong>{status.pendingCount}</strong> pending
+                        </>
+                      ) : null}
+                      {' · '}
+                      {processedCount} / {totalRecipients} processed ({progressPct}%)
+                    </p>
+                    <dl className="portal-admin-stats portal-admin-stats--compact">
+                      <div className="portal-admin-stat-row">
+                        <dt>Delivered</dt>
+                        <dd>{status.deliveredCount ?? 0}</dd>
+                      </div>
+                      <div className="portal-admin-stat-row">
+                        <dt>Opened</dt>
+                        <dd>{status.openedCount ?? 0}</dd>
+                      </div>
+                      <div className="portal-admin-stat-row">
+                        <dt>Clicked</dt>
+                        <dd>{status.clickedCount ?? 0}</dd>
+                      </div>
+                      {(status.bouncedCount ?? 0) > 0 ? (
+                        <div className="portal-admin-stat-row">
+                          <dt>Bounced</dt>
+                          <dd>{status.bouncedCount}</dd>
+                        </div>
+                      ) : null}
+                    </dl>
+                  </div>
+                ) : null}
+
+                <div className="portal-admin-campaigns-recipients-head">
+                  <h4 className="portal-admin-subheading-sm">
+                    Recipients ({filteredRecipients.length}
+                    {recipientFilter !== 'all' ? ` of ${detail.recipients.length}` : ''})
+                  </h4>
+                  <label className="portal-admin-campaigns-filter">
+                    <span className="portal-admin-emails-label">Show</span>
+                    <select
+                      className="portal-admin-emails-select"
+                      value={recipientFilter}
+                      onChange={(e) => setRecipientFilter(e.target.value)}
+                    >
+                      <option value="all">All</option>
+                      <option value="opened">Opened</option>
+                      <option value="clicked">Clicked</option>
+                      <option value="bounced">Bounced</option>
+                      <option value="failed">Failed</option>
+                      <option value="pending">Pending</option>
+                    </select>
+                  </label>
+                </div>
+
+                <div className="portal-admin-campaigns-recipient-wrap">
+                  <table className="portal-admin-campaigns-recipient-table">
+                    <thead>
+                      <tr>
+                        <th scope="col">Recipient</th>
+                        <th scope="col">Send status</th>
+                        <th scope="col">Engagement</th>
+                        <th scope="col">Sent</th>
+                        <th scope="col">Opened</th>
+                        <th scope="col">Clicked</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredRecipients.length === 0 ? (
+                        <tr>
+                          <td colSpan={6} className="portal-admin-campaigns-empty">
+                            No recipients match this filter.
+                          </td>
+                        </tr>
+                      ) : (
+                        filteredRecipients.map((recipient) => (
+                          <tr key={recipient.id}>
+                            <td>
+                              <div className="portal-admin-campaigns-recipient-name">
+                                {recipient.name || recipient.email}
+                              </div>
+                              {recipient.name ? (
+                                <div className="portal-admin-campaigns-recipient-email">{recipient.email}</div>
+                              ) : null}
+                              {recipient.aesopId ? (
+                                <div className="portal-admin-campaigns-recipient-id">{recipient.aesopId}</div>
+                              ) : null}
+                              {recipient.error ? (
+                                <div className="portal-admin-campaigns-recipient-error" title={recipient.error}>
+                                  {recipient.error}
+                                </div>
+                              ) : null}
+                            </td>
+                            <td>
+                              <span
+                                className={`portal-admin-campaigns-badge portal-admin-campaigns-badge--${recipient.status || 'unknown'}`}
+                              >
+                                {formatCampaignRecipientStatusLabel(recipient.status)}
+                              </span>
+                            </td>
+                            <td>{recipientEngagementSummary(recipient)}</td>
+                            <td>{formatPortalDateTime(recipient.sentAt)}</td>
+                            <td>{formatPortalDateTime(recipient.openedAt)}</td>
+                            <td>{formatPortalDateTime(recipient.clickedAt)}</td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            ) : null}
+          </section>
+        </div>
+      </div>
+    </PortalLayout>
+  );
 }
 
 function PortalAdminEmailsPage() {
@@ -3027,6 +4201,7 @@ function PortalAdminEmailsPage() {
 
   const [recipients, setRecipients] = useState([]);
   const [recipientCount, setRecipientCount] = useState(0);
+  const [recipientStats, setRecipientStats] = useState(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState('');
 
@@ -3042,8 +4217,9 @@ function PortalAdminEmailsPage() {
   const [campaignStatus, setCampaignStatus] = useState(null);
 
   const filterPayload = buildEmailFilterPayload(filterAll, filterColumn, filterValue);
-  const rowColumnLabels = metadata?.columns || [];
-  const globalPlaceholders = detectGlobalEmailPlaceholders(subject, body, rowColumnLabels);
+  const filterColumnLabels = metadata?.filterColumns || metadata?.columns || [];
+  const variableColumnLabels = metadata?.variableColumns || [];
+  const globalPlaceholders = detectGlobalEmailPlaceholders(subject, body, variableColumnLabels);
   const composePayload = {
     group,
     subject,
@@ -3074,7 +4250,7 @@ function PortalAdminEmailsPage() {
       })
       .catch((err) => {
         if (!cancelled) {
-          setMetadataError(err.message || 'Could not load Admissions sheet.');
+          setMetadataError(err.message || 'Could not load Applicants sheet.');
           setMetadata(null);
         }
       })
@@ -3095,6 +4271,7 @@ function PortalAdminEmailsPage() {
     if (!filterAll && (!filterColumn || !filterValue)) {
       setRecipients([]);
       setRecipientCount(0);
+      setRecipientStats(null);
       return undefined;
     }
     let cancelled = false;
@@ -3108,6 +4285,7 @@ function PortalAdminEmailsPage() {
         if (!cancelled) {
           setRecipients(Array.isArray(data.recipients) ? data.recipients : []);
           setRecipientCount(typeof data.count === 'number' ? data.count : 0);
+          setRecipientStats(data.recipientStats || null);
         }
       })
       .catch((err) => {
@@ -3115,6 +4293,7 @@ function PortalAdminEmailsPage() {
           setPreviewError(err.message || 'Could not load recipients.');
           setRecipients([]);
           setRecipientCount(0);
+          setRecipientStats(null);
         }
       })
       .finally(() => {
@@ -3145,7 +4324,7 @@ function PortalAdminEmailsPage() {
     };
 
     poll();
-    intervalId = window.setInterval(poll, 10_000);
+    intervalId = window.setInterval(poll, 5000);
 
     return () => {
       cancelled = true;
@@ -3204,8 +4383,12 @@ function PortalAdminEmailsPage() {
   }
 
   async function handleSendBulk() {
+    const estimate = estimateBulkEmailDuration(recipientCount);
+    const durationNote = estimate
+      ? `\n\nEstimated send time: about ${formatDurationMinutes(estimate.totalMinutes)} (${estimate.batches} batch${estimate.batches === 1 ? '' : 'es'}).`
+      : '';
     const confirmed = window.confirm(
-      `Send this message to ${recipientCount} recipient${recipientCount === 1 ? '' : 's'}?`,
+      `Send this message to ${recipientCount} recipient${recipientCount === 1 ? '' : 's'}?${durationNote}`,
     );
     if (!confirmed) {
       return;
@@ -3222,8 +4405,10 @@ function PortalAdminEmailsPage() {
         sentCount: 0,
         failedCount: 0,
         pendingCount: data.totalRecipients,
+        processedCount: 0,
         batchSize: data.batchSize,
         batchIntervalMinutes: data.batchIntervalMinutes,
+        estimatedDurationMinutes: data.estimatedDurationMinutes,
       });
     } catch (err) {
       setSendError(err.message || 'Could not start send.');
@@ -3264,10 +4449,23 @@ function PortalAdminEmailsPage() {
     );
   }
 
-  const batchNote =
-    recipientCount > 250
-      ? '250 send immediately, then 250 every 5 minutes until complete.'
-      : null;
+  const batchSize = campaignStatus?.batchSize ?? EMAIL_BATCH_SIZE;
+  const batchIntervalMinutes =
+    campaignStatus?.batchIntervalMinutes ?? EMAIL_BATCH_INTERVAL_MINUTES;
+  const sendEstimate = estimateBulkEmailDuration(recipientCount, batchSize, batchIntervalMinutes);
+  const batchScheduleNote = formatBulkEmailBatchSchedule(
+    recipientCount,
+    batchSize,
+    batchIntervalMinutes,
+  );
+  const campaignTotal = campaignStatus?.totalRecipients ?? recipientCount;
+  const campaignSent = campaignStatus?.sentCount ?? 0;
+  const campaignFailed = campaignStatus?.failedCount ?? 0;
+  const campaignPending = campaignStatus?.pendingCount ?? 0;
+  const campaignProcessed =
+    campaignStatus?.processedCount ?? campaignSent + campaignFailed;
+  const campaignProgressPct =
+    campaignTotal > 0 ? Math.min(100, Math.round((campaignProcessed / campaignTotal) * 100)) : 0;
 
   return (
     <PortalLayout>
@@ -3278,8 +4476,8 @@ function PortalAdminEmailsPage() {
           <PortalRoleBadge isAdmin className="portal-welcome-role" />
         </h2>
         <p className="portal-admin-lead">
-          Compose templated messages for Admissions recipients. Send a test to yourself before every
-          bulk send.
+          Compose templated messages for Applicants sheet recipients. Send a test to yourself before
+          every bulk send.
         </p>
 
         <section className="portal-admin-panel portal-admin-emails-section" aria-label="Recipient group">
@@ -3298,7 +4496,7 @@ function PortalAdminEmailsPage() {
 
         <section className="portal-admin-panel portal-admin-emails-section" aria-label="Recipient filter">
           <h3 className="portal-admin-emails-heading">Filter recipients</h3>
-          {metadataLoading ? <p className="portal-admin-status">Loading Admissions columns…</p> : null}
+          {metadataLoading ? <p className="portal-admin-status">Loading Applicants filters…</p> : null}
           {metadataError ? (
             <p className="portal-admin-status portal-admin-status--error" role="alert">
               {metadataError}
@@ -3331,7 +4529,7 @@ function PortalAdminEmailsPage() {
                   }}
                 >
                   <option value="">Select column…</option>
-                  {rowColumnLabels.map((label) => (
+                  {filterColumnLabels.map((label) => (
                     <option key={label} value={label}>
                       {label}
                     </option>
@@ -3356,35 +4554,57 @@ function PortalAdminEmailsPage() {
               </label>
             </div>
           ) : null}
+          {!metadataLoading && !metadataError ? (
+            <ApplicantsSheetDebugPanel
+              stats={metadata?.stats}
+              recipientStats={recipientStats}
+              recipientCount={recipientCount}
+              previewLoading={previewLoading}
+              previewError={previewError}
+            />
+          ) : null}
         </section>
 
         <section className="portal-admin-panel portal-admin-emails-section" aria-label="Compose message">
           <h3 className="portal-admin-emails-heading">Message</h3>
           <label className="portal-admin-emails-field" htmlFor="portal-admin-email-subject">
             <span className="portal-admin-emails-label">Subject</span>
-            <input
+            <textarea
               id="portal-admin-email-subject"
-              type="text"
-              className="portal-admin-lookup-input"
+              className="portal-admin-emails-subject"
+              rows={2}
               value={subject}
               onChange={(e) => setSubject(e.target.value)}
-              placeholder="Subject line (supports [[variables]])"
+              placeholder="Subject line (supports [[variables]] or {{variables}})"
             />
           </label>
           <label className="portal-admin-emails-field" htmlFor="portal-admin-email-body">
             <span className="portal-admin-emails-label">Body</span>
-            <textarea
+            <AdminEmailBodyEditor
               id="portal-admin-email-body"
-              className="portal-admin-emails-textarea"
-              rows={10}
               value={body}
-              onChange={(e) => setBody(e.target.value)}
-              placeholder="Write your message. Use [[Name]], [[AESOP ID]], [[Email]], sheet columns like [[Round 1]], or globals like [[Date]]."
+              onChange={setBody}
+              placeholder="Write your message. Use [[Name]], [[Applicant ID]], [[Round 2 Prompt]], or globals like [[Date]]."
             />
           </label>
           <p className="portal-admin-hint">
-            Per-recipient: <code>[[AESOP ID]]</code>, <code>[[Name]]</code>, <code>[[Email]]</code>, and
-            any Admissions column header (e.g. <code>[[Round 1]]</code>).
+            Per-recipient: <code>[[AESOP ID]]</code> / <code>{'{{AESOP ID}}'}</code>,{' '}
+            <code>[[Name]]</code> / <code>{'{{Name}}'}</code>, <code>[[Email]]</code> /{' '}
+            <code>{'{{Email}}'}</code>
+            {variableColumnLabels.length > 0 ? (
+              <>
+                , and sheet columns{' '}
+                {variableColumnLabels.map((label, index) => (
+                  <span key={label}>
+                    {index > 0 ? ', ' : ''}
+                    <code>{`[[${label}]]`}</code>
+                  </span>
+                ))}
+              </>
+            ) : null}
+            . Filter by Level, Round 1, or Round 2 above — those values are still available in each
+            row if you need them in the message. Paste from Google Docs to keep links — they appear
+            blue in the editor and stay clickable in the sent email.
           </p>
         </section>
 
@@ -3425,7 +4645,16 @@ function PortalAdminEmailsPage() {
               <p className="portal-admin-emails-count">
                 <strong>{recipientCount}</strong> email{recipientCount === 1 ? '' : 's'} will be sent
               </p>
-              {batchNote ? <p className="portal-admin-hint">{batchNote}</p> : null}
+              {batchScheduleNote ? (
+                <p className="portal-admin-hint">{batchScheduleNote}</p>
+              ) : null}
+              {sendEstimate && sendEstimate.totalMinutes > 0 ? (
+                <p className="portal-admin-hint">
+                  Estimated send time: about{' '}
+                  <strong>{formatDurationMinutes(sendEstimate.totalMinutes)}</strong> (
+                  {sendEstimate.batches} batch{sendEstimate.batches === 1 ? '' : 'es'}).
+                </p>
+              ) : null}
               {!filterAll && filterColumn && filterValue ? (
                 <p className="portal-admin-hint">
                   Filter: {filterColumn} = {filterValue}
@@ -3511,20 +4740,52 @@ function PortalAdminEmailsPage() {
         {campaignStatus ? (
           <section className="portal-admin-panel portal-admin-emails-section" aria-label="Send progress">
             <h3 className="portal-admin-emails-heading">Send progress</h3>
+            <div
+              className="portal-admin-emails-progress"
+              role="progressbar"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={campaignProgressPct}
+              aria-label={`${campaignProcessed} of ${campaignTotal} processed`}
+            >
+              <div
+                className="portal-admin-emails-progress-bar"
+                style={{ width: `${campaignProgressPct}%` }}
+              />
+            </div>
+            <p className="portal-admin-emails-progress-summary">
+              <strong>{campaignSent}</strong> sent
+              {campaignFailed > 0 ? (
+                <>
+                  , <strong>{campaignFailed}</strong> failed
+                </>
+              ) : null}
+              {campaignPending > 0 ? (
+                <>
+                  , <strong>{campaignPending}</strong> pending
+                </>
+              ) : null}
+              {' · '}
+              {campaignProcessed} / {campaignTotal} processed ({campaignProgressPct}%)
+            </p>
             <dl className="portal-admin-stats">
               <div className="portal-admin-stat-row">
                 <dt>Status</dt>
-                <dd>{campaignStatus.status}</dd>
+                <dd>{formatCampaignStatusLabel(campaignStatus.status)}</dd>
               </div>
               <div className="portal-admin-stat-row">
-                <dt>Sent</dt>
+                <dt>Accepted by Postmark</dt>
                 <dd>
-                  {campaignStatus.sentCount ?? 0} / {campaignStatus.totalRecipients ?? recipientCount}
+                  {campaignSent} / {campaignTotal}
                 </dd>
               </div>
               <div className="portal-admin-stat-row">
                 <dt>Failed</dt>
-                <dd>{campaignStatus.failedCount ?? 0}</dd>
+                <dd>{campaignFailed}</dd>
+              </div>
+              <div className="portal-admin-stat-row">
+                <dt>Pending</dt>
+                <dd>{campaignPending}</dd>
               </div>
               <div className="portal-admin-stat-row">
                 <dt>Delivered</dt>
@@ -3534,21 +4795,41 @@ function PortalAdminEmailsPage() {
                 <dt>Opened</dt>
                 <dd>{campaignStatus.openedCount ?? 0}</dd>
               </div>
+              <div className="portal-admin-stat-row">
+                <dt>Clicked</dt>
+                <dd>{campaignStatus.clickedCount ?? 0}</dd>
+              </div>
               {(campaignStatus.bouncedCount ?? 0) > 0 ? (
                 <div className="portal-admin-stat-row">
                   <dt>Bounced</dt>
                   <dd>{campaignStatus.bouncedCount}</dd>
                 </div>
               ) : null}
-              {campaignStatus.pendingCount > 0 && campaignStatus.nextBatchAt ? (
+              {campaignStatus.status === 'sending' && campaignStatus.estimatedCompletionAt ? (
+                <div className="portal-admin-stat-row">
+                  <dt>Estimated finish</dt>
+                  <dd>{new Date(campaignStatus.estimatedCompletionAt).toLocaleString()}</dd>
+                </div>
+              ) : null}
+              {campaignPending > 0 && campaignStatus.nextBatchAt ? (
                 <div className="portal-admin-stat-row">
                   <dt>Next batch</dt>
                   <dd>{new Date(campaignStatus.nextBatchAt).toLocaleString()}</dd>
                 </div>
               ) : null}
+              {campaignStatus.status === 'completed' && campaignStatus.completedAt ? (
+                <div className="portal-admin-stat-row">
+                  <dt>Finished</dt>
+                  <dd>{new Date(campaignStatus.completedAt).toLocaleString()}</dd>
+                </div>
+              ) : null}
             </dl>
             <p className="portal-admin-hint">
               Delivered and opened counts update from Postmark webhooks after messages are accepted.
+            </p>
+            <p className="portal-admin-hint">
+              Duplicate protection: each batch claims recipients in the database with row locks before
+              sending, and only one server can process a campaign batch at a time.
             </p>
           </section>
         ) : null}
@@ -3574,11 +4855,12 @@ function PortalShellApp() {
     let timeoutId = 0;
 
     const resetIdleTimer = () => {
+      touchPortalSessionExpiry();
       window.clearTimeout(timeoutId);
       timeoutId = window.setTimeout(() => {
         clearPortalSession();
         window.location.assign(portalHubHref());
-      }, PORTAL_IDLE_LOGOUT_MS);
+      }, getPortalSessionMaxAgeMs());
     };
 
     const activityEvents = ['mousemove', 'mousedown', 'keydown', 'touchstart', 'wheel'];
@@ -3601,6 +4883,9 @@ function PortalShellApp() {
   }
   if (segment === 'admin-emails') {
     return <PortalAdminEmailsPage />;
+  }
+  if (segment === 'admin-campaigns') {
+    return <PortalAdminCampaignsPage />;
   }
   if (segment === 'admin') {
     return <PortalAdminPage />;
@@ -4226,6 +5511,10 @@ function AppRouter() {
   }
 
   return <RequestMagicLinkApp />;
+}
+
+if (typeof window !== 'undefined') {
+  ensurePortalSessionReady();
 }
 
 const rootElement = document.getElementById('root');

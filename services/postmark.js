@@ -35,6 +35,25 @@ function getPostmarkMessageStream() {
   return "outbound";
 }
 
+function getPostmarkBroadcastMessageStream() {
+  const nested = config.email?.postmark?.broadcastMessageStream;
+  if (nested != null && String(nested).trim() !== "") {
+    return String(nested).trim();
+  }
+  const fromEnv = process.env.POSTMARK_BROADCAST_MESSAGE_STREAM;
+  if (fromEnv != null && String(fromEnv).trim() !== "") {
+    return String(fromEnv).trim();
+  }
+  return "broadcast";
+}
+
+function resolvePostmarkMessageStream(message) {
+  if (message?.messageStream != null && String(message.messageStream).trim() !== "") {
+    return String(message.messageStream).trim();
+  }
+  return getPostmarkMessageStream();
+}
+
 function getFromAddress() {
   return config.email?.from || process.env.EMAIL_FROM || "noreply@aesopafghanistan.org";
 }
@@ -65,7 +84,7 @@ async function sendPostmarkEmail(message) {
       Subject: message.subject,
       TextBody: message.text,
       HtmlBody: message.html,
-      MessageStream: "outbound",
+      MessageStream: resolvePostmarkMessageStream(message),
       TrackOpens: message.trackOpens !== false,
       Tag: message.tag || undefined,
       Metadata: message.metadata || undefined,
@@ -109,7 +128,7 @@ async function sendPostmarkBatch(messages) {
         Subject: message.subject,
         TextBody: message.text,
         HtmlBody: message.html,
-        MessageStream: "outbound",
+        MessageStream: resolvePostmarkMessageStream(message),
         TrackOpens: message.trackOpens !== false,
         Tag: message.tag || undefined,
         Metadata: message.metadata || undefined,
@@ -132,4 +151,6 @@ module.exports = {
   sendPostmarkBatch,
   getPostmarkToken,
   getPostmarkMessageStream,
+  getPostmarkBroadcastMessageStream,
+  resolvePostmarkMessageStream,
 };

@@ -75,11 +75,17 @@ function buildGoogleSheetsConfig(fileSection) {
     teachersSheetName: envOr("GOOGLE_TEACHERS_SHEET_NAME", "teachersSheetName", "Teachers"),
     teachersIdColumn: envOr("GOOGLE_TEACHERS_ID_COLUMN", "teachersIdColumn", "A"),
     teachersClassesColumn: envOr("GOOGLE_TEACHERS_CLASSES_COLUMN", "teachersClassesColumn", "B"),
-    admissionsSheetName: envOr("GOOGLE_ADMISSIONS_SHEET_NAME", "admissionsSheetName", "Admissions"),
-    admissionsIdColumn: envOr("GOOGLE_ADMISSIONS_ID_COLUMN", "admissionsIdColumn", "B"),
+    admissionsSheetName: envOr("GOOGLE_ADMISSIONS_SHEET_NAME", "admissionsSheetName", "Applicants"),
+    admissionsIdColumn: envOr("GOOGLE_ADMISSIONS_ID_COLUMN", "admissionsIdColumn", "A"),
     admissionsNameColumn: envOr("GOOGLE_ADMISSIONS_NAME_COLUMN", "admissionsNameColumn", "C"),
     admissionsEmailColumn: envOr("GOOGLE_ADMISSIONS_EMAIL_COLUMN", "admissionsEmailColumn", "D"),
     admissionsHeaderRow: envOr("GOOGLE_ADMISSIONS_HEADER_ROW", "admissionsHeaderRow", "1"),
+    /** Comma-separated header labels used as recipient filters (Level, Round 1, Round 2). */
+    admissionsFilterColumns: envOr(
+      "GOOGLE_ADMISSIONS_FILTER_COLUMNS",
+      "admissionsFilterColumns",
+      "Level,Round 1,Round 2",
+    ),
   };
 }
 
@@ -203,6 +209,7 @@ function buildEmailFromEnv() {
     postmark: {
       serverToken: process.env.POSTMARK_SERVER_TOKEN || "",
       messageStream: process.env.POSTMARK_MESSAGE_STREAM || "outbound",
+      broadcastMessageStream: process.env.POSTMARK_BROADCAST_MESSAGE_STREAM || "broadcast",
     },
     gmail: {
       user: process.env.GMAIL_USER || "",

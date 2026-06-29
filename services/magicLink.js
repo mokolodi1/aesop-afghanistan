@@ -104,11 +104,14 @@ async function writeMagicLinkRecord(token, { email, userId, expiresAt }) {
 async function markMagicLinkUsed(token) {
   if (isDatabaseEnabled()) {
     const db = getDb();
-    if (!db) {
-      return;
+    if (db) {
+      try {
+        await db.update(magicLinks).set({ used: true }).where(eq(magicLinks.token, token));
+        return;
+      } catch (error) {
+        console.error('[magic-link] DB mark-used failed; using memory fallback:', error.message);
+      }
     }
-    await db.update(magicLinks).set({ used: true }).where(eq(magicLinks.token, token));
-    return;
   }
 
   const linkData = magicLinkStore.get(token);
@@ -120,11 +123,14 @@ async function markMagicLinkUsed(token) {
 async function deleteMagicLinkRecord(token) {
   if (isDatabaseEnabled()) {
     const db = getDb();
-    if (!db) {
-      return;
+    if (db) {
+      try {
+        await db.delete(magicLinks).where(eq(magicLinks.token, token));
+        return;
+      } catch (error) {
+        console.error('[magic-link] DB delete failed; using memory fallback:', error.message);
+      }
     }
-    await db.delete(magicLinks).where(eq(magicLinks.token, token));
-    return;
   }
 
   magicLinkStore.delete(token);
@@ -220,7 +226,7 @@ async function sendMagicLinkEmail(email, token) {
         If you did not request this email, you may disregard it.
       </p>
   `;
-  const emailHtml = wrapAesopEmail(innerHtml, { title: emailSubject, showContactFooter: false });
+  const emailHtml = wrapAesopEmail(innerHtml, { title: emailSubject });
 
   const emailText = [
     'AESOP Afghanistan — Student portal',

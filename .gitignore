@@ -3,6 +3,7 @@
 token.json
 secrets/*
 config/secrets.json
+config/secrets.pull.raw.txt
 .env
 __pycache__
 scripts/.venv
