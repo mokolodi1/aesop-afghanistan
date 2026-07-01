@@ -16,7 +16,7 @@ Phrasing clues:
 "building a bridge"
 "envision"
 "is a key"
-"For me,"
+"For me," (beginning of the sentence, including the comma)
 
 Output format (must follow exactly):
 ```1. **Clues List**

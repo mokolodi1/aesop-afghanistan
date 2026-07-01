@@ -2454,7 +2454,8 @@ button:disabled {
 }
 
 .portal-admin-emails-select,
-.portal-admin-emails-textarea {
+.portal-admin-emails-textarea,
+.portal-admin-emails-subject {
   width: 100%;
   font: inherit;
   border: 1px solid hsla(11.73, 82.49%, 57.45%, 0.25);
@@ -2462,12 +2463,65 @@ button:disabled {
   padding: 10px 12px;
   background: #fff;
   color: var(--aesop-text);
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.portal-admin-emails-subject {
+  flex: none;
+  resize: vertical;
+  min-height: 0;
+  max-height: 4.5rem;
+  line-height: 1.45;
+  text-align: start;
+}
+
+.portal-admin-emails-subject:focus-visible {
+  outline: 2px solid var(--aesop-teal);
+  outline-offset: 2px;
 }
 
 .portal-admin-emails-textarea {
   resize: vertical;
   min-height: 180px;
   line-height: 1.5;
+}
+
+.portal-admin-emails-body-editor {
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  cursor: text;
+  text-align: start;
+  unicode-bidi: plaintext;
+}
+
+.portal-admin-emails-body-editor:focus-visible {
+  outline: 2px solid var(--aesop-teal);
+  outline-offset: 2px;
+}
+
+.portal-admin-emails-body-editor:empty::before {
+  content: attr(data-placeholder);
+  color: var(--aesop-text-muted);
+  pointer-events: none;
+}
+
+.portal-admin-emails-inline-link {
+  color: var(--aesop-teal-dark);
+  font-weight: 600;
+  text-decoration: underline;
+  cursor: text;
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+
+.portal-admin-emails-body-block {
+  text-align: start;
+}
+
+.portal-admin-emails-body-block + .portal-admin-emails-body-block {
+  margin-top: 0.85em;
 }
 
 .portal-admin-emails-vars {
@@ -2497,4 +2551,333 @@ button:disabled {
   flex-wrap: wrap;
   gap: 10px;
   margin-bottom: 8px;
+}
+
+.portal-admin-emails-progress {
+  height: 10px;
+  margin: 0 0 10px;
+  border-radius: 999px;
+  background: var(--portal-surface-muted, #e8ebf0);
+  overflow: hidden;
+}
+
+.portal-admin-emails-progress-bar {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--portal-accent, #1a5f4a);
+  transition: width 0.35s ease;
+}
+
+.portal-admin-emails-progress-summary {
+  margin: 0 0 14px;
+  font-size: 0.95rem;
+  line-height: 1.45;
+}
+
+.portal-admin-emails-debug {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--portal-border, #d8dce3);
+  border-radius: 8px;
+  background: var(--portal-surface-muted, #f6f7f9);
+  font-size: 0.92rem;
+  line-height: 1.45;
+}
+
+.portal-admin-emails-debug-title {
+  margin: 0 0 8px;
+  font-weight: 600;
+}
+
+.portal-admin-emails-debug-list {
+  margin: 0;
+  padding-left: 1.2rem;
+}
+
+.portal-admin-emails-debug-list li + li {
+  margin-top: 4px;
+}
+
+.portal-admin-emails-debug-tabs {
+  word-break: break-word;
+}
+
+.portal-admin-emails-debug-note {
+  margin: 10px 0 0;
+  color: var(--portal-warning-text, #8a4b00);
+}
+
+.portal-admin-emails-debug-gap {
+  margin-top: 12px;
+  padding: 12px 14px;
+  border: 1px solid #d14343;
+  border-radius: 8px;
+  background: #fff4f4;
+}
+
+.portal-admin-emails-debug-gap-title {
+  margin: 0 0 6px;
+  font-weight: 700;
+  color: #9b1c1c;
+}
+
+.portal-admin-emails-debug-gap-lead {
+  margin: 0 0 8px;
+}
+
+.portal-admin-emails-debug-gap-reason {
+  margin: 8px 0 4px;
+  font-weight: 600;
+}
+
+.portal-admin-emails-debug-skip-list {
+  margin: 0 0 8px;
+  padding-left: 1.2rem;
+}
+
+.portal-admin-emails-debug-skip-list li + li {
+  margin-top: 4px;
+}
+
+.portal-admin-emails-debug-info {
+  margin-top: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--portal-border, #d8dce3);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.portal-admin-emails-debug-info-title {
+  margin: 0 0 6px;
+  font-weight: 600;
+}
+
+.portal-admin-emails-debug-details {
+  margin-top: 8px;
+}
+
+.portal-admin-emails-debug-details summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.portal-admin-campaigns-card {
+  max-width: none;
+}
+
+.portal-admin-campaigns-layout {
+  display: grid;
+  grid-template-columns: minmax(240px, 300px) minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+  margin-top: 8px;
+}
+
+.portal-admin-campaigns-sidebar {
+  border: 1px solid hsla(11.73, 82.49%, 57.45%, 0.18);
+  border-radius: 12px;
+  background: hsla(11.73, 82.49%, 57.45%, 0.04);
+  padding: 14px;
+  max-height: calc(100vh - 220px);
+  overflow: auto;
+  position: sticky;
+  top: 16px;
+}
+
+.portal-admin-campaigns-sidebar-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.portal-admin-campaigns-compose-link {
+  font-size: 0.84rem;
+  font-weight: 600;
+  color: var(--aesop-teal);
+  text-decoration: none;
+}
+
+.portal-admin-campaigns-compose-link:hover {
+  text-decoration: underline;
+}
+
+.portal-admin-campaigns-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.portal-admin-campaigns-list-item {
+  width: 100%;
+  text-align: left;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: #fff;
+  padding: 10px 12px;
+  cursor: pointer;
+  display: grid;
+  gap: 4px;
+}
+
+.portal-admin-campaigns-list-item:hover {
+  border-color: hsla(11.73, 82.49%, 57.45%, 0.25);
+}
+
+.portal-admin-campaigns-list-item.is-selected {
+  border-color: var(--aesop-teal);
+  box-shadow: 0 0 0 1px var(--aesop-teal);
+}
+
+.portal-admin-campaigns-list-subject {
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: var(--aesop-teal-dark);
+  line-height: 1.35;
+}
+
+.portal-admin-campaigns-list-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.78rem;
+  color: var(--aesop-text-muted);
+}
+
+.portal-admin-campaigns-list-progress {
+  font-size: 0.78rem;
+  color: var(--aesop-text-muted);
+}
+
+.portal-admin-campaigns-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.portal-admin-campaigns-badge--sending,
+.portal-admin-campaigns-badge--processing {
+  background: hsl(45 95% 90%);
+  color: hsl(32 90% 30%);
+}
+
+.portal-admin-campaigns-badge--completed,
+.portal-admin-campaigns-badge--sent {
+  background: hsl(150 45% 90%);
+  color: hsl(150 45% 28%);
+}
+
+.portal-admin-campaigns-badge--failed,
+.portal-admin-campaigns-badge--bounced {
+  background: hsl(0 80% 94%);
+  color: hsl(0 65% 38%);
+}
+
+.portal-admin-campaigns-badge--pending {
+  background: hsl(210 30% 93%);
+  color: hsl(210 30% 35%);
+}
+
+.portal-admin-campaigns-detail {
+  min-width: 0;
+}
+
+.portal-admin-campaigns-detail-head {
+  margin-bottom: 16px;
+}
+
+.portal-admin-campaigns-detail-meta {
+  margin: 6px 0 0;
+  color: var(--aesop-text-muted);
+  font-size: 0.88rem;
+}
+
+.portal-admin-campaigns-stats {
+  margin-bottom: 20px;
+}
+
+.portal-admin-campaigns-recipients-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.portal-admin-campaigns-filter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.portal-admin-campaigns-recipient-wrap {
+  overflow: auto;
+  border: 1px solid hsla(11.73, 82.49%, 57.45%, 0.18);
+  border-radius: 12px;
+}
+
+.portal-admin-campaigns-recipient-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.86rem;
+}
+
+.portal-admin-campaigns-recipient-table th,
+.portal-admin-campaigns-recipient-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid hsla(11.73, 82.49%, 57.45%, 0.12);
+  text-align: left;
+  vertical-align: top;
+}
+
+.portal-admin-campaigns-recipient-table th {
+  background: hsla(11.73, 82.49%, 57.45%, 0.06);
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--aesop-text-muted);
+}
+
+.portal-admin-campaigns-recipient-name {
+  font-weight: 600;
+  color: var(--aesop-teal-dark);
+}
+
+.portal-admin-campaigns-recipient-email,
+.portal-admin-campaigns-recipient-id {
+  font-size: 0.8rem;
+  color: var(--aesop-text-muted);
+}
+
+.portal-admin-campaigns-recipient-error {
+  margin-top: 4px;
+  font-size: 0.78rem;
+  color: #b91c1c;
+}
+
+.portal-admin-campaigns-empty {
+  text-align: center;
+  color: var(--aesop-text-muted);
+  padding: 24px 12px !important;
+}
+
+@media (max-width: 900px) {
+  .portal-admin-campaigns-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .portal-admin-campaigns-sidebar {
+    max-height: none;
+    position: static;
+  }
 }

@@ -64,6 +64,11 @@ function formatErrorForLog(error) {
     return "Unknown error";
   }
 
+  const cause = error.cause;
+  if (cause && typeof cause === "object" && cause.message) {
+    return `${error.message}\nCaused by: ${cause.message}${cause.stack ? `\n${cause.stack}` : ""}`;
+  }
+
   if (error.stack) {
     return error.stack;
   }
@@ -73,6 +78,27 @@ function formatErrorForLog(error) {
   }
 
   return safeStringify(error);
+}
+
+/**
+ * User-safe database error text (avoids dumping full SQL from DrizzleQueryError).
+ * @param {unknown} error
+ * @returns {string}
+ */
+function formatDbErrorMessage(error) {
+  if (!error || typeof error !== "object") {
+    return "Database error.";
+  }
+  const e = /** @type {{ message?: string; cause?: { message?: string } }} */ (error);
+  const causeMessage = e.cause?.message;
+  if (causeMessage) {
+    return causeMessage;
+  }
+  const message = e.message || "";
+  if (message.startsWith("Failed query:")) {
+    return "Database error. If this persists, run npm run db:migrate on the server.";
+  }
+  return message || "Database error.";
 }
 
 function formatGmailAuthError(error, delegatedUser) {
@@ -113,6 +139,7 @@ module.exports = {
   formatGoogleApiError,
   formatGoogleSheetsOperationError,
   formatErrorForLog,
+  formatDbErrorMessage,
   formatGmailAuthError,
   formatGoogleSheetsWriteErrorForLog,
   isGoogleSheetsForbidden,

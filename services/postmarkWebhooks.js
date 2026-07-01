@@ -84,7 +84,19 @@ async function handlePostmarkWebhook(payload) {
   const recordType = typeof payload.RecordType === "string" ? payload.RecordType.trim() : "";
   const messageStream =
     typeof payload.MessageStream === "string" ? payload.MessageStream.trim() : "";
-  if (messageStream && messageStream !== "outbound") {
+  const allowedStreams = new Set(
+    [
+      config.email?.postmark?.messageStream,
+      config.email?.postmark?.broadcastMessageStream,
+      process.env.POSTMARK_MESSAGE_STREAM,
+      process.env.POSTMARK_BROADCAST_MESSAGE_STREAM,
+      "outbound",
+      "broadcast",
+    ]
+      .map((value) => String(value || "").trim())
+      .filter(Boolean),
+  );
+  if (messageStream && !allowedStreams.has(messageStream)) {
     return { handled: false, reason: "ignored_stream" };
   }
   if (!recordType) {
@@ -125,6 +137,19 @@ async function handlePostmarkWebhook(payload) {
       })
       .where(
         and(eq(emailCampaignRecipients.id, recipient.id), isNull(emailCampaignRecipients.openedAt)),
+      );
+    return { handled: true, recordType, recipientId: recipient.id };
+  }
+
+  if (recordType === "Click") {
+    await db
+      .update(emailCampaignRecipients)
+      .set({
+        postmarkMessageId: messageId || recipient.postmarkMessageId,
+        clickedAt: parsePostmarkTimestamp(payload.ReceivedAt),
+      })
+      .where(
+        and(eq(emailCampaignRecipients.id, recipient.id), isNull(emailCampaignRecipients.clickedAt)),
       );
     return { handled: true, recordType, recipientId: recipient.id };
   }

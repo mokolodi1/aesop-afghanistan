@@ -15,16 +15,16 @@ const AESOP_EMAIL = {
 };
 
 const FONT_STACK =
-  "'Raleway', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif";
+  "'Raleway', Tahoma, 'Geeza Pro', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif";
 const FONT_HEADING =
-  "'Space Grotesk', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+  "'Space Grotesk', Tahoma, 'Geeza Pro', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
 
-/** Official contact lines for transactional emails */
-const AESOP_CONTACT = {
-  phoneDisplay: '+1 (609) 362-2023',
-  phoneTel: '+16093622023',
-  email: 'noreply@aesopafghanistan.org',
-};
+const { paragraphDirection } = require('../src/shared/emailTextDirection');
+
+const URL_RE = /\b(https?:\/\/[^\s<>\]\)}"']+|www\.[^\s<>\]\)}"']+)/gi;
+
+const MARKDOWN_LINK_RE =
+  /\[([^\]\n]+)\]\((https?:\/\/[^\s<>)}"']+|www\.[^\s<>)}"']+)\)/gi;
 
 /**
  * Escape HTML for safe interpolation in email bodies (not for full URL attributes).
@@ -39,23 +39,101 @@ function escapeHtml(value) {
 }
 
 /**
- * Shared layout: paper background, white card, top accent bar, org footer.
+ * @param {string} href
+ * @param {string} label
+ * @param {string} linkStyle
+ * @returns {string}
+ */
+function renderEmailLink(href, label, linkStyle) {
+  const normalizedHref = href.startsWith('www.') ? `https://${href}` : href;
+  if (!/^https?:\/\//i.test(normalizedHref)) {
+    return escapeHtml(label);
+  }
+  const safeHref = normalizedHref.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+  return `<a href="${safeHref}" dir="ltr" style="${linkStyle}">${escapeHtml(label)}</a>`;
+}
+
+/**
+ * Autolink bare URLs in a text segment (no markdown links).
+ * @param {string} text
+ * @param {string} linkStyle
+ * @returns {string}
+ */
+function linkifyBareUrls(text, linkStyle) {
+  let result = '';
+  let lastIndex = 0;
+  URL_RE.lastIndex = 0;
+  let match;
+  while ((match = URL_RE.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      result += escapeHtml(text.slice(lastIndex, match.index));
+    }
+    const url = match[0];
+    result += renderEmailLink(url, url, linkStyle);
+    lastIndex = URL_RE.lastIndex;
+  }
+  if (lastIndex < text.length) {
+    result += escapeHtml(text.slice(lastIndex));
+  }
+  return result;
+}
+
+/**
+ * Turn markdown links and bare URLs into clickable anchors (LTR-isolated in RTL text).
+ * @param {string} text — raw paragraph text
+ * @returns {string} HTML-safe inline content
+ */
+function linkifyPlainText(text) {
+  const { accent } = AESOP_EMAIL;
+  const linkStyle = `color:${accent};font-weight:600;text-decoration:underline;word-break:break-all;unicode-bidi:isolate;direction:ltr;`;
+  let result = '';
+  let lastIndex = 0;
+  MARKDOWN_LINK_RE.lastIndex = 0;
+  let match;
+  while ((match = MARKDOWN_LINK_RE.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      result += linkifyBareUrls(text.slice(lastIndex, match.index), linkStyle);
+    }
+    result += renderEmailLink(match[2], match[1], linkStyle);
+    lastIndex = MARKDOWN_LINK_RE.lastIndex;
+  }
+  if (lastIndex < text.length) {
+    result += linkifyBareUrls(text.slice(lastIndex), linkStyle);
+  }
+  return result.replace(/\n/g, '<br />');
+}
+
+/**
+ * Convert plain-text email body to HTML paragraphs with RTL support and linkified URLs.
+ * @param {string} text
+ * @returns {string}
+ */
+function formatEmailBodyHtml(text) {
+  const normalized = String(text || '');
+  if (!normalized.trim()) {
+    return `<p dir="auto" style="margin:0;">&nbsp;</p>`;
+  }
+  return normalized
+    .split(/\n\n+/)
+    .map((paragraph) => {
+      const dir = paragraphDirection(paragraph);
+      const inline = linkifyPlainText(paragraph);
+      return `<p dir="${dir}" style="margin:0 0 16px;text-align:start;">${inline}</p>`;
+    })
+    .join('');
+}
+
+/**
+ * Shared layout: paper background, white card, top accent bar.
  * @param {string} innerHtml — table cell content only
- * @param {{ title?: string, showContactFooter?: boolean }} [options]
+ * @param {{ title?: string }} [options]
  * @returns {string}
  */
 function wrapAesopEmail(innerHtml, options = {}) {
   const { ink, muted, line, paper, card, accent } = AESOP_EMAIL;
-  const showContactFooter = options.showContactFooter !== false;
   const titleTag = options.title
     ? `<title>${escapeHtml(options.title)}</title>`
     : '<title>AESOP Afghanistan</title>';
-  const contactFooter = showContactFooter
-    ? `<br />
-          <a href="tel:${AESOP_CONTACT.phoneTel}" style="color:${muted};text-decoration:none;">${AESOP_CONTACT.phoneDisplay}</a>
-          <span style="color:${line};">&nbsp;·&nbsp;</span>
-          <a href="mailto:${AESOP_CONTACT.email}" style="color:${accent};font-weight:600;text-decoration:none;">${AESOP_CONTACT.email}</a>`
-    : '';
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -73,14 +151,14 @@ function wrapAesopEmail(innerHtml, options = {}) {
             <td style="height:4px;background-color:${accent};font-size:0;line-height:0;">&nbsp;</td>
           </tr>
           <tr>
-            <td style="padding:28px 28px 32px;font-family:${FONT_STACK};font-size:15px;line-height:1.55;color:${ink};">
+            <td dir="auto" style="padding:28px 28px 32px;font-family:${FONT_STACK};font-size:15px;line-height:1.55;color:${ink};text-align:start;">
               ${innerHtml}
             </td>
           </tr>
         </table>
         <p style="margin:20px 0 0;font-family:${FONT_STACK};font-size:12px;line-height:1.55;color:${muted};max-width:560px;">
           Afghan Education Student Outreach Project (AESOP)<br />
-          <a href="https://aesopafghanistan.org/" style="color:${accent};font-weight:600;text-decoration:none;">aesopafghanistan.org</a>${contactFooter}
+          <a href="https://aesopafghanistan.org/" style="color:${accent};font-weight:600;text-decoration:none;">aesopafghanistan.org</a>
         </p>
       </td>
     </tr>
@@ -91,9 +169,9 @@ function wrapAesopEmail(innerHtml, options = {}) {
 
 module.exports = {
   AESOP_EMAIL,
-  AESOP_CONTACT,
   FONT_STACK,
   FONT_HEADING,
   escapeHtml,
+  formatEmailBodyHtml,
   wrapAesopEmail,
 };

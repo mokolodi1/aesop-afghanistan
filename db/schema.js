@@ -259,14 +259,22 @@ const emailCampaignRecipients = pgTable(
     postmarkMessageId: varchar("postmark_message_id", { length: 64 }),
     deliveredAt: timestamp("delivered_at", { withTimezone: true }),
     openedAt: timestamp("opened_at", { withTimezone: true }),
+    clickedAt: timestamp("clicked_at", { withTimezone: true }),
     bouncedAt: timestamp("bounced_at", { withTimezone: true }),
     error: text("error"),
     batchNumber: integer("batch_number"),
+    sendPriority: integer("send_priority").notNull().default(1),
   },
   (table) => ({
     campaignStatusIdx: index("email_campaign_recipients_campaign_status_idx").on(
       table.campaignId,
       table.status,
+    ),
+    campaignPriorityIdx: index("email_campaign_recipients_campaign_priority_idx").on(
+      table.campaignId,
+      table.status,
+      table.sendPriority,
+      table.id,
     ),
     postmarkMessageIdIdx: index("email_campaign_recipients_postmark_message_id_idx").on(
       table.postmarkMessageId,

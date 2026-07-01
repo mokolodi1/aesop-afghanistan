@@ -2048,12 +2048,78 @@ function columnIndexToLetter(index) {
   return letters;
 }
 
+function parseAdmissionsFilterColumnLabels(gs) {
+  const raw = gs?.admissionsFilterColumns ?? "Level,Round 1,Round 2";
+  if (Array.isArray(raw)) {
+    return raw.map((label) => String(label).trim()).filter(Boolean);
+  }
+  return String(raw)
+    .split(",")
+    .map((label) => label.trim())
+    .filter(Boolean);
+}
+
+function headerLabelMatchesConfigured(label, configuredLabels) {
+  const normalized = String(label || "").trim().toLowerCase();
+  return configuredLabels.some((configured) => configured.toLowerCase() === normalized);
+}
+
 /**
- * Load all rows from the Admissions sheet tab with header-based field map.
+ * @param {Array<{ id: string, name: string, email: string, fields: Record<string, string> }>} rows
+ */
+function analyzeDuplicateApplicantEmails(rows) {
+  const byEmail = new Map();
+  for (const row of rows) {
+    const emailKey = String(row.email || "")
+      .trim()
+      .toLowerCase();
+    if (!emailKey) {
+      continue;
+    }
+    if (!byEmail.has(emailKey)) {
+      byEmail.set(emailKey, []);
+    }
+    byEmail.get(emailKey).push({
+      id: row.id || "",
+      name: row.name || "",
+      email: row.email || "",
+      fields: row.fields || {},
+    });
+  }
+
+  const duplicateEmailGroups = [];
+  const duplicateEmailSkips = [];
+  for (const [email, groupRows] of byEmail) {
+    if (groupRows.length <= 1) {
+      continue;
+    }
+    duplicateEmailGroups.push({ email, rows: groupRows });
+    const [kept, ...skippedRows] = groupRows;
+    for (const skipped of skippedRows) {
+      duplicateEmailSkips.push({
+        reason: "duplicate-email",
+        id: skipped.id,
+        name: skipped.name,
+        email: skipped.email,
+        fields: skipped.fields,
+        sharedWith: {
+          id: kept.id,
+          name: kept.name,
+          email: kept.email,
+        },
+      });
+    }
+  }
+  duplicateEmailGroups.sort((a, b) => a.email.localeCompare(b.email));
+  return { duplicateEmailGroups, duplicateEmailSkips };
+}
+
+/**
+ * Load all rows from the Applicants sheet tab with header-based field map.
  * @returns {Promise<{ headers: Array<{ letter: string, label: string, index: number }>, rows: Array<{ id: string, name: string, email: string, fields: Record<string, string> }>, identityColumnIndices: Set<number> }>}
  */
 async function loadAdmissionsSheet() {
-  const empty = { headers: [], rows: [], identityColumnIndices: new Set() };
+  const empty = { headers: [], rows: [], identityColumnIndices: new Set(), stats: null };
   try {
     const gs = config.googleSheets || {};
     const sheetName = gs.admissionsSheetName || "Applicants";
@@ -2062,14 +2128,30 @@ async function loadAdmissionsSheet() {
     const nameColumnIndex = resolveColumnIndex(gs.admissionsNameColumn || "C");
     const emailColumnIndex = resolveColumnIndex(gs.admissionsEmailColumn || "D");
     const identityColumnIndices = new Set([idColumnIndex, nameColumnIndex, emailColumnIndex]);
+    const columnMapping = {
+      id: columnIndexToLetter(idColumnIndex),
+      name: columnIndexToLetter(nameColumnIndex),
+      email: columnIndexToLetter(emailColumnIndex),
+    };
 
     const sheet = await initGoogleSheets();
+    const availableTabs = Object.keys(sheet.sheetsByTitle || {}).sort((a, b) => a.localeCompare(b));
     const worksheet = await getWorksheetByTitle(sheet, sheetName);
     if (!worksheet) {
-      const similar = Object.keys(sheet.sheetsByTitle).filter((t) => /admit|applic/i.test(t));
-      const hint = similar.length ? ` Similar tabs: ${similar.join(", ")}.` : "";
-      console.warn(`loadAdmissionsSheet: sheet "${sheetName}" not found.${hint}`);
-      return empty;
+      const similarTabs = availableTabs.filter((title) => /admit|applic/i.test(title));
+      const stats = {
+        configuredSheetName: sheetName,
+        sheetFound: false,
+        availableTabs,
+        similarTabs,
+        headerRowNum,
+        columnMapping,
+      };
+      const hint = similarTabs.length ? ` Similar tabs: ${similarTabs.join(", ")}.` : "";
+      console.warn(
+        `[admissions-email] tab "${sheetName}" not found (${availableTabs.length} tabs in spreadsheet).${hint}`,
+      );
+      return { ...empty, stats };
     }
 
     await worksheet.loadHeaderRow(headerRowNum);
@@ -2081,11 +2163,15 @@ async function loadAdmissionsSheet() {
     }));
 
     const rows = [];
+    let dataRowsRead = 0;
+    let rowsSkippedNoEmail = 0;
     const dataRows = await worksheet.getRows();
     for (const row of dataRows) {
+      dataRowsRead += 1;
       const rowData = Array.isArray(row._rawData) ? row._rawData : [];
       const email = String(rowData[emailColumnIndex] ?? "").trim();
       if (!email) {
+        rowsSkippedNoEmail += 1;
         continue;
       }
       const fields = {};
@@ -2103,7 +2189,25 @@ async function loadAdmissionsSheet() {
       });
     }
 
-    return { headers, rows, identityColumnIndices };
+    const duplicateAnalysis = analyzeDuplicateApplicantEmails(rows);
+    const stats = {
+      configuredSheetName: sheetName,
+      sheetFound: true,
+      headerRowNum,
+      dataRowsRead,
+      rowsWithEmail: rows.length,
+      rowsSkippedNoEmail,
+      columnMapping,
+      headerLabels: headers.map((header) => header.label),
+      duplicateEmailGroupCount: duplicateAnalysis.duplicateEmailGroups.length,
+      duplicateEmailSkips: duplicateAnalysis.duplicateEmailSkips,
+      duplicateEmailGroups: duplicateAnalysis.duplicateEmailGroups,
+    };
+    console.info(
+      `[admissions-email] tab "${sheetName}": ${dataRowsRead} data row(s), ${rows.length} with email in column ${columnMapping.email}, ${rowsSkippedNoEmail} skipped (empty email)`,
+    );
+
+    return { headers, rows, identityColumnIndices, stats };
   } catch (error) {
     console.warn("loadAdmissionsSheet:", formatGoogleSheetsOperationError(error));
     return empty;
@@ -2136,7 +2240,8 @@ function filterAdmissionsRows(rows, filter) {
 }
 
 /**
- * Distinct filter values per non-identity Admissions column.
+ * Filter and template-variable options for the Applicants sheet.
+ * Level, Round 1, and Round 2 are filters; other non-identity columns are template variables.
  * @param {{ headers: Array<{ letter: string, label: string, index: number }>, rows: Array<{ fields: Record<string, string> }>, identityColumnIndices: Set<number> }} sheetData
  */
 function getAdmissionsFilterOptions(sheetData) {
@@ -2144,8 +2249,19 @@ function getAdmissionsFilterOptions(sheetData) {
   const rows = Array.isArray(sheetData?.rows) ? sheetData.rows : [];
   const identityColumnIndices =
     sheetData?.identityColumnIndices instanceof Set ? sheetData.identityColumnIndices : new Set();
+  const configuredFilterLabels = parseAdmissionsFilterColumnLabels(config.googleSheets || {});
 
-  const filterHeaders = headers.filter((h) => !identityColumnIndices.has(h.index));
+  const filterHeaders = headers.filter(
+    (header) =>
+      !identityColumnIndices.has(header.index) &&
+      headerLabelMatchesConfigured(header.label, configuredFilterLabels),
+  );
+  const variableHeaders = headers.filter(
+    (header) =>
+      !identityColumnIndices.has(header.index) &&
+      !headerLabelMatchesConfigured(header.label, configuredFilterLabels),
+  );
+
   const valuesByColumn = {};
   for (const header of filterHeaders) {
     const values = new Set();
@@ -2158,10 +2274,15 @@ function getAdmissionsFilterOptions(sheetData) {
     valuesByColumn[header.label] = Array.from(values).sort((a, b) => a.localeCompare(b));
   }
 
+  const filterColumnLabels = filterHeaders.map((header) => header.label);
+  const variableColumnLabels = variableHeaders.map((header) => header.label);
+
   return {
-    columns: filterHeaders.map((h) => h.label),
+    filterColumns: filterColumnLabels,
+    variableColumns: variableColumnLabels,
+    columns: filterColumnLabels,
     valuesByColumn,
-    headers: filterHeaders.map((h) => ({ letter: h.letter, label: h.label })),
+    headers: filterHeaders.map((header) => ({ letter: header.letter, label: header.label })),
   };
 }
 
@@ -2207,4 +2328,5 @@ module.exports = {
   loadAdmissionsSheet,
   filterAdmissionsRows,
   getAdmissionsFilterOptions,
+  analyzeDuplicateApplicantEmails,
 };

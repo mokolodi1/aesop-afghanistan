@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-Score essays on the "Essays" Google Sheet tab using ChatGPT.
+Score essays on the "Teo's Working" Google Sheet tab using ChatGPT.
 
-Reads essays from column B, runs positive/negative indicator prompts, and writes:
-  Q - positive raw output
-  R - negative raw output
-  S - positive total (number)
-  T - negative total (number)
+Reads essays from column AA (from row 4), runs positive/negative indicator prompts, and writes:
+  BB - positive raw output
+  BC - negative raw output
+  BD - positive total (number)
+  BE - negative total (number)
 
 Credentials: config/secrets.json (or SECRETS_JSON), same service account as the Node app.
 OpenAI: .env OPENAI_API_KEY (repo root), or env var, or secrets.openai.apiKey.
@@ -19,37 +19,54 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import random
 import re
 import sys
+import threading
 import time
+import unicodedata
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, TypeVar
 
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
-from openai import OpenAI
+from googleapiclient.errors import HttpError
+from openai import APIConnectionError, APITimeoutError, OpenAI, RateLimitError
+from openai import APIStatusError
+
+T = TypeVar("T")
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SCRIPT_DIR = Path(__file__).resolve().parent
 PROMPTS_DIR = SCRIPT_DIR / "essay-prompts"
 DEFAULT_POSITIVE_PROMPT_FILE = PROMPTS_DIR / "positive.txt"
 DEFAULT_NEGATIVE_PROMPT_FILE = PROMPTS_DIR / "negative.txt"
-DEFAULT_SHEET_ID = "1n2gYqey0rX-hkANJhT_uuco3fvwPKY_sSms919ta5ag"
-DEFAULT_TAB = "Essays"
+DEFAULT_SHEET_ID = "11BotrIShhPCrbfiA9rcjoeR-e5twUyoX8-YlHL5AhyM"
+DEFAULT_TAB = "Teo's Working"
+DEFAULT_ESSAY_COLUMN = "AA"
+DEFAULT_START_ROW = 4
+COL_SKIP_FLAG = "AZ"
 SHEETS_SCOPE = "https://www.googleapis.com/auth/spreadsheets"
 
-COL_POSITIVE_RAW = "Q"
-COL_NEGATIVE_RAW = "R"
-COL_POSITIVE_TOTAL = "S"
-COL_NEGATIVE_TOTAL = "T"
+COL_POSITIVE_RAW = "BB"
+COL_NEGATIVE_RAW = "BC"
+COL_POSITIVE_TOTAL = "BD"
+COL_NEGATIVE_TOTAL = "BE"
 OUTPUT_COLUMNS = (
     COL_POSITIVE_RAW,
     COL_NEGATIVE_RAW,
     COL_POSITIVE_TOTAL,
     COL_NEGATIVE_TOTAL,
 )
-
-ARABIC_RE = re.compile(r"[\u0600-\u06FF]")
+DEFAULT_CONCURRENCY = 10
+MAX_API_RETRIES = 8
+RETRYABLE_HTTP_STATUS = {429, 500, 502, 503, 504}
+RETRY_BASE_SECONDS = 1.0
+RETRY_MAX_SECONDS = 120.0
+RETRY_MULTIPLIER = 2.0
+NON_LATIN_RATIO_THRESHOLD = 0.20
 TOTAL_NUMBER_PATTERNS = [
     re.compile(
         r"\*\*Total\s+(?:Errors|Clues)\s*:\s*(\d+)\s*\*\*",
@@ -161,9 +178,52 @@ def extract_total(text: str) -> int | None:
     return last
 
 
-def has_arabic_skip(essay: str, threshold: int = 10) -> bool:
-    return len(ARABIC_RE.findall(essay)) >= threshold
+def is_latin_letter(char: str) -> bool:
+    if not char.isalpha():
+        return False
+    return "LATIN" in unicodedata.name(char, "")
 
+
+def non_latin_letter_ratio(text: str) -> float:
+    letters = [c for c in text if c.isalpha()]
+    if not letters:
+        return 0.0
+    non_latin = sum(1 for c in letters if not is_latin_letter(c))
+    return non_latin / len(letters)
+
+
+def should_skip_non_latin(
+    text: str, threshold: float = NON_LATIN_RATIO_THRESHOLD
+) -> bool:
+    return non_latin_letter_ratio(text) > threshold
+
+
+def strip_non_english(text: str) -> str:
+    """Remove non-Latin letters; keep Latin text, digits, and punctuation."""
+    kept: list[str] = []
+    for char in text:
+        if char.isalpha() and not is_latin_letter(char):
+            continue
+        kept.append(char)
+    cleaned = "".join(kept)
+    cleaned = re.sub(r"[ \t]+", " ", cleaned)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+    return cleaned.strip()
+
+
+def has_english_text(text: str) -> bool:
+    return any(is_latin_letter(c) for c in text)
+
+def skip_row_result(row: int, reason: str) -> RowResult:
+    return RowResult(
+        row=row,
+        updates=[
+            (row, COL_POSITIVE_TOTAL, -1),
+            (row, COL_NEGATIVE_TOTAL, -1),
+            (row, COL_POSITIVE_RAW, reason),
+            (row, COL_NEGATIVE_RAW, reason),
+        ],
+    )
 
 def load_prompt_template(path: Path) -> str:
     if not path.is_file():
@@ -178,22 +238,181 @@ def render_prompt(template: str, essay: str) -> str:
     return template.replace("PLACE ESSAY HERE", essay)
 
 
+def exponential_backoff_seconds(attempt: int) -> float:
+    """Seconds to wait before retry attempt (0-indexed): base * multiplier^attempt."""
+    return min(RETRY_BASE_SECONDS * (RETRY_MULTIPLIER**attempt), RETRY_MAX_SECONDS)
+
+
+def parse_retry_after_header(exc: BaseException) -> float | None:
+    response = getattr(exc, "response", None)
+    headers = getattr(response, "headers", None) if response is not None else None
+    if not headers:
+        return None
+    retry_after = headers.get("retry-after") or headers.get("Retry-After")
+    if not retry_after:
+        return None
+    try:
+        return min(float(retry_after), RETRY_MAX_SECONDS)
+    except ValueError:
+        return None
+
+
+def retry_wait_seconds(exc: BaseException, attempt: int) -> float:
+    """Exponential backoff, bumped up by Retry-After when the server asks for longer."""
+    wait = exponential_backoff_seconds(attempt)
+    header_wait = parse_retry_after_header(exc)
+    if header_wait is not None:
+        wait = max(wait, header_wait)
+    # Jitter spreads out retries when many workers hit 429 at once.
+    wait += random.uniform(0, min(wait * 0.25, 5.0))
+    return min(wait, RETRY_MAX_SECONDS)
+
+
+def call_with_retries(
+    label: str,
+    fn: Callable[[], T],
+    *,
+    max_retries: int = MAX_API_RETRIES,
+) -> T:
+    for attempt in range(max_retries):
+        try:
+            return fn()
+        except RateLimitError as exc:
+            if attempt + 1 >= max_retries:
+                raise
+            wait = retry_wait_seconds(exc, attempt)
+            print(
+                f"  {label}: rate limited (429), exponential backoff {wait:.1f}s "
+                f"(attempt {attempt + 1}/{max_retries})"
+            )
+            time.sleep(wait)
+        except APIStatusError as exc:
+            if exc.status_code not in RETRYABLE_HTTP_STATUS or attempt + 1 >= max_retries:
+                raise
+            wait = retry_wait_seconds(exc, attempt)
+            print(
+                f"  {label}: HTTP {exc.status_code}, exponential backoff {wait:.1f}s "
+                f"(attempt {attempt + 1}/{max_retries})"
+            )
+            time.sleep(wait)
+        except (APITimeoutError, APIConnectionError) as exc:
+            if attempt + 1 >= max_retries:
+                raise
+            wait = retry_wait_seconds(exc, attempt)
+            print(
+                f"  {label}: {type(exc).__name__}, exponential backoff {wait:.1f}s "
+                f"(attempt {attempt + 1}/{max_retries})"
+            )
+            time.sleep(wait)
+        except HttpError as exc:
+            status = getattr(getattr(exc, "resp", None), "status", None)
+            if status not in RETRYABLE_HTTP_STATUS or attempt + 1 >= max_retries:
+                raise
+            wait = retry_wait_seconds(exc, attempt)
+            print(
+                f"  {label}: Sheets HTTP {status}, exponential backoff {wait:.1f}s "
+                f"(attempt {attempt + 1}/{max_retries})"
+            )
+            time.sleep(wait)
+    raise RuntimeError(f"{label}: exceeded retry limit")
+
+
 def call_chatgpt(client: OpenAI, prompt: str, model: str) -> str:
-    response = client.chat.completions.create(
-        model=model,
-        messages=[
-            {
-                "role": "system",
-                "content": (
-                    "You are a helpful assistant that answers briefly unless asked otherwise."
-                ),
-            },
-            {"role": "user", "content": prompt},
-        ],
+    def _request() -> str:
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a helpful assistant that answers briefly unless asked otherwise."
+                    ),
+                },
+                {"role": "user", "content": prompt},
+            ],
+        )
+        if not response.choices:
+            raise RuntimeError("OpenAI returned no choices")
+        return (response.choices[0].message.content or "").strip()
+
+    return call_with_retries("OpenAI", _request)
+
+
+@dataclass
+class RowJob:
+    row: int
+    essay: str
+
+
+@dataclass
+class RowResult:
+    row: int
+    updates: list[tuple[int, str, str | int]] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+    dry_run: bool = False
+
+
+def score_row(
+    job: RowJob,
+    *,
+    client: OpenAI,
+    positive_template: str,
+    negative_template: str,
+    model: str,
+    dry_run: bool,
+) -> RowResult:
+    row = job.row
+    essay = job.essay.strip()
+    non_latin_ratio = non_latin_letter_ratio(essay)
+    if should_skip_non_latin(essay):
+        print(
+            f"Row {row}: {non_latin_ratio:.0%} non-Latin letters (>20%), "
+            "writing -1 to BD and BE"
+        )
+        return skip_row_result(row, "Skipped: >20% non-Latin text")
+
+    essay_for_gpt = strip_non_english(essay)
+    if not has_english_text(essay_for_gpt):
+        print(f"Row {row}: no English text left after stripping, writing -1 to BD and BE")
+        return skip_row_result(row, "Skipped: no English text after stripping")
+
+    if len(essay_for_gpt) < len(essay):
+        print(
+            f"Row {row}: stripped non-English text "
+            f"({len(essay)} -> {len(essay_for_gpt)} chars)"
+        )
+
+    print(f"Row {row}: scoring ({len(essay_for_gpt)} chars)...")
+    if dry_run:
+        return RowResult(row=row, dry_run=True)
+
+    positive_raw = call_chatgpt(
+        client, render_prompt(positive_template, essay_for_gpt), model
     )
-    if not response.choices:
-        raise RuntimeError("OpenAI returned no choices")
-    return (response.choices[0].message.content or "").strip()
+    negative_raw = call_chatgpt(
+        client, render_prompt(negative_template, essay_for_gpt), model
+    )
+
+    positive_total = extract_total(positive_raw)
+    negative_total = extract_total(negative_raw)
+    warnings: list[str] = []
+    if positive_total is None:
+        warnings.append(f"could not parse positive total from row {row}")
+    if negative_total is None:
+        warnings.append(f"could not parse negative total from row {row}")
+    for warning in warnings:
+        print(f"  warning: {warning}")
+
+    return RowResult(
+        row=row,
+        updates=[
+            (row, COL_POSITIVE_RAW, positive_raw),
+            (row, COL_NEGATIVE_RAW, negative_raw),
+            (row, COL_POSITIVE_TOTAL, positive_total if positive_total is not None else ""),
+            (row, COL_NEGATIVE_TOTAL, negative_total if negative_total is not None else ""),
+        ],
+        warnings=warnings,
+    )
 
 
 def read_column_values(
@@ -257,8 +476,22 @@ def batch_write_cells(
     ).execute()
 
 
+def write_row_updates(
+    service,
+    sheet_id: str,
+    tab: str,
+    updates: list[tuple[int, str, str | int]],
+) -> None:
+    if not updates:
+        return
+    call_with_retries(
+        "Google Sheets write",
+        lambda: batch_write_cells(service, sheet_id, tab, updates),
+    )
+
+
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Score Essays tab with ChatGPT.")
+    parser = argparse.ArgumentParser(description="Score essays on Google Sheets with ChatGPT.")
     parser.add_argument(
         "--sheet-id",
         default=os.environ.get("ESSAYS_SHEET_ID", DEFAULT_SHEET_ID),
@@ -272,14 +505,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--start-row",
         type=int,
-        default=int(os.environ.get("ESSAYS_START_ROW", "2")),
-        help="First data row (default: 2, assumes row 1 is header)",
+        default=int(os.environ.get("ESSAYS_START_ROW", str(DEFAULT_START_ROW))),
+        help=f"First data row (default: {DEFAULT_START_ROW})",
     )
     parser.add_argument(
         "--end-row",
         type=int,
         default=None,
-        help="Last row to process (default: last non-empty B cell)",
+        help=f"Last row to process (default: last non-empty {DEFAULT_ESSAY_COLUMN} cell)",
     )
     parser.add_argument(
         "--model",
@@ -289,7 +522,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--skip-filled",
         action="store_true",
-        help="Skip rows where both S and T already have values",
+        help="Skip rows where both BD and BE already have values",
     )
     parser.add_argument(
         "--row",
@@ -298,10 +531,10 @@ def parse_args() -> argparse.Namespace:
         help="Process only this row number",
     )
     parser.add_argument(
-        "--delay",
-        type=float,
-        default=float(os.environ.get("ESSAYS_API_DELAY", "5")),
-        help="Seconds to wait between rows (default: 5)",
+        "--concurrency",
+        type=int,
+        default=int(os.environ.get("ESSAYS_CONCURRENCY", str(DEFAULT_CONCURRENCY))),
+        help=f"Rows to score in parallel (default: {DEFAULT_CONCURRENCY})",
     )
     parser.add_argument(
         "--dry-run",
@@ -323,11 +556,11 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def find_last_row(service, sheet_id: str, tab: str) -> int:
+def find_last_row(service, sheet_id: str, tab: str, essay_col: str) -> int:
     result = (
         service.spreadsheets()
         .values()
-        .get(spreadsheetId=sheet_id, range=f"'{tab}'!B:B")
+        .get(spreadsheetId=sheet_id, range=f"'{tab}'!{essay_col}:{essay_col}")
         .execute()
     )
     rows = result.get("values", [])
@@ -348,7 +581,9 @@ def main() -> None:
     negative_template = load_prompt_template(args.negative_prompt)
     print(f"Prompts: {args.positive_prompt} | {args.negative_prompt}")
 
-    end_row = args.end_row or find_last_row(service, args.sheet_id, args.tab)
+    end_row = args.end_row or find_last_row(
+        service, args.sheet_id, args.tab, DEFAULT_ESSAY_COLUMN
+    )
     start_row = args.row if args.row else args.start_row
     if args.row:
         end_row = args.row
@@ -357,15 +592,17 @@ def main() -> None:
         return
 
     essays = read_column_values(
-        service, args.sheet_id, args.tab, "B", start_row, end_row
+        service, args.sheet_id, args.tab, DEFAULT_ESSAY_COLUMN, start_row, end_row
+    )
+    skip_flags = read_column_values(
+        service, args.sheet_id, args.tab, COL_SKIP_FLAG, start_row, end_row
     )
     existing = read_existing_outputs(
         service, args.sheet_id, args.tab, OUTPUT_COLUMNS, start_row, end_row
     )
 
-    processed = 0
+    jobs: list[RowJob] = []
     skipped = 0
-    cells_written = 0
 
     for offset, essay in enumerate(essays):
         row = start_row + offset
@@ -374,60 +611,52 @@ def main() -> None:
             skipped += 1
             continue
 
+        if (skip_flags[offset] or "").strip().upper() == "Y":
+            print(f"Row {row}: skip (AZ is Y)")
+            skipped += 1
+            continue
+
         if args.skip_filled:
             p_val = (existing[COL_POSITIVE_TOTAL][offset] or "").strip()
             q_val = (existing[COL_NEGATIVE_TOTAL][offset] or "").strip()
             if p_val and q_val:
-                print(f"Row {row}: skip (S and T already filled)")
+                print(f"Row {row}: skip (BD and BE already filled)")
                 skipped += 1
                 continue
 
-        row_updates: list[tuple[int, str, str | int]] = []
+        jobs.append(RowJob(row=row, essay=essay))
 
-        if has_arabic_skip(essay):
-            print(f"Row {row}: Arabic text detected, writing -1 to S and T")
-            row_updates = [
-                (row, COL_POSITIVE_TOTAL, -1),
-                (row, COL_NEGATIVE_TOTAL, -1),
-                (row, COL_POSITIVE_RAW, "Skipped: Arabic text (>=10 chars)"),
-                (row, COL_NEGATIVE_RAW, "Skipped: Arabic text (>=10 chars)"),
-            ]
-        else:
-            print(f"Row {row}: scoring ({len(essay)} chars)...")
-            if args.dry_run:
-                processed += 1
+    if not jobs:
+        print(f"No rows to process (skipped {skipped}).")
+        return
+
+    concurrency = max(1, args.concurrency)
+    print(f"Processing {len(jobs)} row(s) with concurrency={concurrency}")
+
+    processed = 0
+    cells_written = 0
+    write_lock = threading.Lock()
+
+    def run_job(job: RowJob) -> RowResult:
+        return score_row(
+            job,
+            client=client,
+            positive_template=positive_template,
+            negative_template=negative_template,
+            model=args.model,
+            dry_run=args.dry_run,
+        )
+
+    with ThreadPoolExecutor(max_workers=concurrency) as pool:
+        futures = [pool.submit(run_job, job) for job in jobs]
+        for future in as_completed(futures):
+            result = future.result()
+            processed += 1
+            if args.dry_run or not result.updates:
                 continue
-
-            positive_raw = call_chatgpt(
-                client, render_prompt(positive_template, essay), args.model
-            )
-            negative_raw = call_chatgpt(
-                client, render_prompt(negative_template, essay), args.model
-            )
-
-            positive_total = extract_total(positive_raw)
-            negative_total = extract_total(negative_raw)
-
-            if positive_total is None:
-                print(f"  warning: could not parse positive total from row {row}")
-            if negative_total is None:
-                print(f"  warning: could not parse negative total from row {row}")
-
-            row_updates = [
-                (row, COL_POSITIVE_RAW, positive_raw),
-                (row, COL_NEGATIVE_RAW, negative_raw),
-                (row, COL_POSITIVE_TOTAL, positive_total if positive_total is not None else ""),
-                (row, COL_NEGATIVE_TOTAL, negative_total if negative_total is not None else ""),
-            ]
-
-        if not args.dry_run and row_updates:
-            batch_write_cells(service, args.sheet_id, args.tab, row_updates)
-            cells_written += len(row_updates)
-
-        processed += 1
-
-        if args.delay and offset < len(essays) - 1:
-            time.sleep(args.delay)
+            with write_lock:
+                write_row_updates(service, args.sheet_id, args.tab, result.updates)
+                cells_written += len(result.updates)
 
     if args.dry_run:
         print(f"Dry run complete: would process {processed} row(s), skip {skipped}.")

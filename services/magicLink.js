@@ -3,6 +3,7 @@ const { eq, lt } = require('drizzle-orm');
 const { sendEmail } = require('./email');
 const { getDb, isDatabaseEnabled } = require('../db/index');
 const { magicLinks } = require('../db/schema');
+const { formatErrorForLog } = require('../utils/errorLogging');
 const {
   AESOP_EMAIL,
   FONT_HEADING,
@@ -15,6 +16,28 @@ const {
 const magicLinkStore = new Map();
 
 const MAGIC_LINK_EXPIRY_MS = 15 * 60 * 1000;
+
+function magicLinkSiteOrigin() {
+  const raw = (
+    process.env.PORTAL_BASE_URL ||
+    process.env.BASE_URL ||
+    'http://localhost:3000'
+  ).trim();
+  return raw.replace(/\/+$/, '');
+}
+
+function isFlyProduction() {
+  return Boolean(process.env.FLY_APP_NAME);
+}
+
+function localDevMagicLinkOrigin() {
+  const port = Number.parseInt(process.env.PORT || '3000', 10);
+  return `http://localhost:${Number.isFinite(port) ? port : 3000}`;
+}
+
+function shouldPersistMagicLinksInDb() {
+  return isDatabaseEnabled() && isFlyProduction();
+}
 
 function generateToken() {
   return crypto.randomBytes(32).toString('hex');
@@ -42,7 +65,7 @@ async function cleanupExpiredTokensInDb() {
 }
 
 async function readMagicLinkRecord(token) {
-  if (isDatabaseEnabled()) {
+  if (shouldPersistMagicLinksInDb()) {
     const db = getDb();
     if (db) {
       try {
@@ -57,7 +80,7 @@ async function readMagicLinkRecord(token) {
           };
         }
       } catch (error) {
-        console.error('[magic-link] DB read failed; checking memory fallback:', error.message);
+        console.error('[magic-link] DB read failed; checking memory fallback:', formatErrorForLog(error));
       }
     }
   }
@@ -66,7 +89,7 @@ async function readMagicLinkRecord(token) {
 }
 
 async function writeMagicLinkRecord(token, { email, userId, expiresAt }) {
-  if (isDatabaseEnabled()) {
+  if (shouldPersistMagicLinksInDb()) {
     const db = getDb();
     if (db) {
       try {
@@ -83,7 +106,7 @@ async function writeMagicLinkRecord(token, { email, userId, expiresAt }) {
         }
         return;
       } catch (error) {
-        console.error('[magic-link] DB store failed; using memory fallback:', error.message);
+        console.error('[magic-link] DB store failed; using memory fallback:', formatErrorForLog(error));
       }
     }
   }
@@ -102,13 +125,16 @@ async function writeMagicLinkRecord(token, { email, userId, expiresAt }) {
 }
 
 async function markMagicLinkUsed(token) {
-  if (isDatabaseEnabled()) {
+  if (shouldPersistMagicLinksInDb()) {
     const db = getDb();
-    if (!db) {
-      return;
+    if (db) {
+      try {
+        await db.update(magicLinks).set({ used: true }).where(eq(magicLinks.token, token));
+        return;
+      } catch (error) {
+        console.error('[magic-link] DB mark-used failed; using memory fallback:', formatErrorForLog(error));
+      }
     }
-    await db.update(magicLinks).set({ used: true }).where(eq(magicLinks.token, token));
-    return;
   }
 
   const linkData = magicLinkStore.get(token);
@@ -118,13 +144,16 @@ async function markMagicLinkUsed(token) {
 }
 
 async function deleteMagicLinkRecord(token) {
-  if (isDatabaseEnabled()) {
+  if (shouldPersistMagicLinksInDb()) {
     const db = getDb();
-    if (!db) {
-      return;
+    if (db) {
+      try {
+        await db.delete(magicLinks).where(eq(magicLinks.token, token));
+        return;
+      } catch (error) {
+        console.error('[magic-link] DB delete failed; using memory fallback:', formatErrorForLog(error));
+      }
     }
-    await db.delete(magicLinks).where(eq(magicLinks.token, token));
-    return;
   }
 
   magicLinkStore.delete(token);
@@ -180,16 +209,14 @@ async function verifyMagicLink(token) {
   };
 }
 
-function magicLinkSiteOrigin() {
-  const raw = (
-    process.env.PORTAL_BASE_URL ||
-    process.env.BASE_URL ||
-    'http://localhost:3000'
-  ).trim();
-  return raw.replace(/\/+$/, '');
-}
-
 async function sendMagicLinkEmail(email, token) {
+  if (!isFlyProduction()) {
+    const magicLink = `${localDevMagicLinkOrigin()}/verify.html?token=${token}`;
+    console.log(`[magic-link] sign-in link for ${email}:`);
+    console.log(magicLink);
+    return;
+  }
+
   const origin = magicLinkSiteOrigin();
   const magicLink = `${origin}/verify.html?token=${token}`;
 
@@ -220,7 +247,7 @@ async function sendMagicLinkEmail(email, token) {
         If you did not request this email, you may disregard it.
       </p>
   `;
-  const emailHtml = wrapAesopEmail(innerHtml, { title: emailSubject, showContactFooter: false });
+  const emailHtml = wrapAesopEmail(innerHtml, { title: emailSubject });
 
   const emailText = [
     'AESOP Afghanistan — Student portal',
