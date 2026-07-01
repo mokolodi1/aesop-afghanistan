@@ -147,6 +147,14 @@ function normalizeFilter(filter) {
   if (!filter || typeof filter !== "object") {
     return null;
   }
+  if (Array.isArray(filter.aesopIds)) {
+    const aesopIds = filter.aesopIds
+      .map((id) => String(id ?? "").trim())
+      .filter(Boolean);
+    if (aesopIds.length > 0) {
+      return { aesopIds };
+    }
+  }
   const column = typeof filter.column === "string" ? filter.column.trim() : "";
   const values = Array.isArray(filter.values)
     ? filter.values.map((v) => String(v ?? "").trim()).filter(Boolean)
@@ -372,9 +380,15 @@ async function resolveAdmissionsRecipients(filter) {
     broadcastRecipientCount: recipients.length - duplicateEmailSkips.length,
   };
   if (normalizedFilter) {
-    console.info(
-      `[admissions-email] filter ${normalizedFilter.column}=${normalizedFilter.values.join(",")}: ${matchedCount} row(s) matched, ${recipients.length} email(s) will be sent`,
-    );
+    if (Array.isArray(normalizedFilter.aesopIds)) {
+      console.info(
+        `[admissions-email] filter aesopIds (${normalizedFilter.aesopIds.length} id(s)): ${matchedCount} row(s) matched, ${recipients.length} email(s) will be sent`,
+      );
+    } else {
+      console.info(
+        `[admissions-email] filter ${normalizedFilter.column}=${normalizedFilter.values.join(",")}: ${matchedCount} row(s) matched, ${recipients.length} email(s) will be sent`,
+      );
+    }
   } else {
     console.info(
       `[admissions-email] all applicants: ${matchedCount} row(s) with email, ${recipients.length} email(s) will be sent`,

@@ -1,8 +1,22 @@
 const config = require("../config/secrets");
 const { formatEasternSheetTimestamp } = require("../utils/dingSheetTime");
+const {
+  classifyVoiceMemoDuration,
+  voiceMemoDurationWarning,
+  formatVoiceMemoDurationLabel,
+} = require("../utils/voiceMemoDuration");
 const { findProfileById } = require("./googleSheets");
-const { getVoiceMemoFileForAesopId, streamVoiceMemoFile } = require("./googleDrive");
-const { getApplicantRowByAesopId, getVoiceMemoSheetConfig } = require("./voiceMemoSync");
+const {
+  getVoiceMemoFileForAesopId,
+  streamVoiceMemoFile,
+  getVoiceMemoDurationSeconds,
+} = require("./googleDrive");
+const {
+  getApplicantRowByAesopId,
+  getVoiceMemoSheetConfig,
+  getVoiceMemoDriveScanOptions,
+  getVoiceMemoDurationLimits,
+} = require("./voiceMemoSync");
 
 /**
  * @param {string} email
@@ -45,6 +59,13 @@ async function verifyPortalVoiceMemoSession({ userId, email }) {
  *   submittedAt: string|null,
  *   fileName: string|null,
  *   submissionInstructions: string,
+ *   hasRecording: boolean,
+ *   durationSeconds: number|null,
+ *   durationLabel: string|null,
+ *   durationStatus: 'valid'|'too_short'|'too_long'|'unknown',
+ *   durationWarning: string|null,
+ *   minDurationSeconds: number,
+ *   maxDurationSeconds: number,
  * }>}
  */
 async function getPortalVoiceMemoStatus({ userId, email }) {
@@ -56,6 +77,8 @@ async function getPortalVoiceMemoStatus({ userId, email }) {
   }
 
   const cfg = getVoiceMemoSheetConfig();
+  const durationLimits = getVoiceMemoDurationLimits(cfg.voiceMemo);
+  const scanOptions = getVoiceMemoDriveScanOptions(cfg.voiceMemo);
   const submissionInstructions = String(cfg.voiceMemo.submissionInstructions || "").trim();
   const applicant = await getApplicantRowByAesopId(profile.id || userId);
   if (!applicant) {
@@ -72,13 +95,13 @@ async function getPortalVoiceMemoStatus({ userId, email }) {
   let submittedAt = applicant.submittedAt.trim() || null;
   let fileName = null;
   let hasRecording = false;
+  let durationSeconds = null;
+  let durationStatus = "unknown";
+  let durationWarning = null;
 
   const folderId = String(cfg.voiceMemo.driveFolderId || "").trim();
   if (folderId) {
-    const driveFile = await getVoiceMemoFileForAesopId(folderId, applicant.aesopId, {
-      extension: cfg.voiceMemo.fileExtension || "m4a",
-      submissionTimeSource: cfg.voiceMemo.submissionTimeSource || "createdTime",
-    });
+    const driveFile = await getVoiceMemoFileForAesopId(folderId, applicant.aesopId, scanOptions);
     if (driveFile) {
       fileName = driveFile.fileName;
       hasRecording = true;
@@ -86,6 +109,9 @@ async function getPortalVoiceMemoStatus({ userId, email }) {
         submitted = true;
         submittedAt = submittedAt || formatEasternSheetTimestamp(driveFile.submittedAt);
       }
+      durationSeconds = await getVoiceMemoDurationSeconds(driveFile.fileId);
+      durationStatus = classifyVoiceMemoDuration(durationSeconds, durationLimits);
+      durationWarning = voiceMemoDurationWarning(durationStatus, durationLimits);
     }
   }
 
@@ -96,6 +122,12 @@ async function getPortalVoiceMemoStatus({ userId, email }) {
     fileName,
     hasRecording,
     submissionInstructions,
+    durationSeconds,
+    durationLabel: formatVoiceMemoDurationLabel(durationSeconds),
+    durationStatus,
+    durationWarning,
+    minDurationSeconds: durationLimits.minSeconds,
+    maxDurationSeconds: durationLimits.maxSeconds,
   };
 }
 
@@ -112,6 +144,7 @@ async function getPortalVoiceMemoStream({ userId, email, rangeHeader = "" }) {
   }
 
   const cfg = getVoiceMemoSheetConfig();
+  const scanOptions = getVoiceMemoDriveScanOptions(cfg.voiceMemo);
   const applicant = await getApplicantRowByAesopId(profile.id || userId);
   if (!applicant) {
     const error = new Error("Voice memo is not available for your account.");
@@ -133,10 +166,7 @@ async function getPortalVoiceMemoStream({ userId, email, rangeHeader = "" }) {
     throw error;
   }
 
-  const driveFile = await getVoiceMemoFileForAesopId(folderId, applicant.aesopId, {
-    extension: cfg.voiceMemo.fileExtension || "m4a",
-    submissionTimeSource: cfg.voiceMemo.submissionTimeSource || "createdTime",
-  });
+  const driveFile = await getVoiceMemoFileForAesopId(folderId, applicant.aesopId, scanOptions);
 
   if (!driveFile) {
     const error = new Error("No voice memo file was found for your account.");

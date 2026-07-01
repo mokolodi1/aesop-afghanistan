@@ -1,5 +1,6 @@
 const fs = require("fs");
 const path = require("path");
+const { DEFAULT_VOICE_MEMO_FILE_EXTENSIONS_CSV } = require("../utils/voiceMemoExtensions");
 
 let secrets = null;
 
@@ -129,6 +130,13 @@ function buildVoiceMemoConfig(fileSection) {
   return {
     driveFolderId: envOr("VOICE_MEMO_DRIVE_FOLDER_ID", "driveFolderId", ""),
     fileExtension: envOr("VOICE_MEMO_FILE_EXTENSION", "fileExtension", "m4a"),
+    fileExtensions: envOr(
+      "VOICE_MEMO_FILE_EXTENSIONS",
+      "fileExtensions",
+      DEFAULT_VOICE_MEMO_FILE_EXTENSIONS_CSV,
+    ),
+    minDurationSeconds: envOr("VOICE_MEMO_MIN_DURATION_SECONDS", "minDurationSeconds", "30"),
+    maxDurationSeconds: envOr("VOICE_MEMO_MAX_DURATION_SECONDS", "maxDurationSeconds", "120"),
     round2ColumnHeader: envOr("VOICE_MEMO_ROUND2_COLUMN_HEADER", "round2ColumnHeader", "Round 2"),
     linksColumnHeader: normalizeVoiceMemoColumnHeader(
       envOr("VOICE_MEMO_LINKS_COLUMN_HEADER", "linksColumnHeader", ""),

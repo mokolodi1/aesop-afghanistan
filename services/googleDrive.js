@@ -1,18 +1,45 @@
 const { google } = require("googleapis");
 const { buildServiceAccountJwt } = require("./googleAuth");
+const { parseVoiceMemoFileExtensions, DEFAULT_VOICE_MEMO_FILE_EXTENSIONS } = require("../utils/voiceMemoExtensions");
 
 const DRIVE_READONLY_SCOPE = "https://www.googleapis.com/auth/drive.readonly";
 
 /**
- * @param {string} extension
+ * @param {string|string[]} extensionOrList
  * @returns {RegExp}
  */
-function buildVoiceMemoFilenamePattern(extension) {
-  const ext = String(extension || "m4a")
-    .trim()
-    .replace(/^\./, "")
-    .replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return new RegExp(`^(.+)\\.${ext}$`, "i");
+function buildVoiceMemoFilenamePattern(extensionOrList) {
+  const rawList = Array.isArray(extensionOrList)
+    ? extensionOrList
+    : String(extensionOrList || "m4a")
+        .split(/[,|\s]+/)
+        .map((part) => part.trim())
+        .filter(Boolean);
+  const extensions = rawList.length ? rawList : ["m4a"];
+  const extGroup = extensions
+    .map((extension) =>
+      String(extension || "")
+        .trim()
+        .replace(/^\./, "")
+        .replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
+    )
+    .filter(Boolean)
+    .join("|");
+  return new RegExp(`^(.+)\\.(${extGroup})$`, "i");
+}
+
+/**
+ * @param {{ extension?: string, extensions?: string[], submissionTimeSource?: 'createdTime'|'modifiedTime' }} options
+ * @returns {{ extensions: string[], submissionTimeSource: 'createdTime'|'modifiedTime' }}
+ */
+function normalizeVoiceMemoScanOptions(options = {}) {
+  const extensions = parseVoiceMemoFileExtensions(
+    options.extensions ?? options.extension,
+    DEFAULT_VOICE_MEMO_FILE_EXTENSIONS,
+  );
+  const submissionTimeSource =
+    options.submissionTimeSource === "modifiedTime" ? "modifiedTime" : "createdTime";
+  return { extensions, submissionTimeSource };
 }
 
 /**
@@ -78,10 +105,8 @@ async function scanVoiceMemoFolder(folderId, options = {}) {
     throw new Error("voiceMemo.driveFolderId is required.");
   }
 
-  const extension = options.extension || "m4a";
-  const submissionTimeSource =
-    options.submissionTimeSource === "modifiedTime" ? "modifiedTime" : "createdTime";
-  const filenamePattern = buildVoiceMemoFilenamePattern(extension);
+  const { extensions, submissionTimeSource } = normalizeVoiceMemoScanOptions(options);
+  const filenamePattern = buildVoiceMemoFilenamePattern(extensions);
 
   const auth = await buildServiceAccountJwt([DRIVE_READONLY_SCOPE]);
   const drive = google.drive({ version: "v3", auth });
@@ -215,6 +240,18 @@ function resolveVoiceMemoStreamMimeType(fileName, driveMimeType) {
   if (name.endsWith(".m4a")) {
     return "audio/mp4";
   }
+  if (name.endsWith(".aac")) {
+    return "audio/aac";
+  }
+  if (name.endsWith(".mp3")) {
+    return "audio/mpeg";
+  }
+  if (name.endsWith(".ogg")) {
+    return "audio/ogg";
+  }
+  if (name.endsWith(".opus")) {
+    return "audio/opus";
+  }
   if (name.endsWith(".mp4")) {
     return "audio/mp4";
   }
@@ -270,10 +307,119 @@ async function streamVoiceMemoFile(fileId, rangeHeader) {
   };
 }
 
+/**
+ * @param {string} fileId
+ * @param {{ timeoutMs?: number }} [options]
+ * @returns {Promise<number|null>} duration in seconds, or null if unknown
+ */
+async function getVoiceMemoDurationSeconds(fileId, options = {}) {
+  const normalizedFileId = String(fileId || "").trim();
+  if (!normalizedFileId) {
+    return null;
+  }
+
+  const timeoutMs = Number.isFinite(options.timeoutMs) ? options.timeoutMs : 15000;
+
+  try {
+    return await Promise.race([
+      readVoiceMemoDurationSeconds(normalizedFileId),
+      new Promise((resolve) => {
+        setTimeout(() => resolve(null), timeoutMs);
+      }),
+    ]);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * @param {string} fileId
+ * @returns {Promise<number|null>}
+ */
+async function readVoiceMemoDurationSeconds(fileId) {
+  const auth = await buildServiceAccountJwt([DRIVE_READONLY_SCOPE]);
+  const drive = google.drive({ version: "v3", auth });
+
+  const meta = await drive.files.get({
+    fileId,
+    fields: "mimeType,name,size,videoMediaMetadata(durationMillis)",
+    supportsAllDrives: true,
+  });
+
+  const durationMillis = meta.data.videoMediaMetadata?.durationMillis;
+  if (durationMillis != null && Number.isFinite(Number(durationMillis)) && Number(durationMillis) > 0) {
+    return Number(durationMillis) / 1000;
+  }
+
+  const fileName = String(meta.data.name || "");
+  const mimeType = resolveVoiceMemoStreamMimeType(fileName, meta.data.mimeType);
+  const sizeRaw = meta.data.size;
+  const size =
+    sizeRaw != null && String(sizeRaw).trim() !== "" ? Number.parseInt(String(sizeRaw), 10) : undefined;
+
+  const media = await drive.files.get(
+    { fileId, alt: "media", supportsAllDrives: true },
+    {
+      responseType: "stream",
+      headers: { Range: "bytes=0-262143" },
+    },
+  );
+
+  try {
+    const { parseStream } = await import("music-metadata");
+    const metadata = await parseStream(
+      media.data,
+      { mimeType, size: Number.isFinite(size) ? size : undefined },
+      { duration: true },
+    );
+    const duration = metadata?.format?.duration;
+    if (duration == null || !Number.isFinite(duration) || duration < 0) {
+      return null;
+    }
+    return duration;
+  } finally {
+    if (media.data && typeof media.data.destroy === "function") {
+      media.data.destroy();
+    }
+  }
+}
+
+/**
+ * @param {string[]} fileIds
+ * @param {{ concurrency?: number, timeoutMs?: number }} [options]
+ * @returns {Promise<Map<string, number|null>>}
+ */
+async function resolveVoiceMemoDurationsMap(fileIds, options = {}) {
+  const uniqueIds = [...new Set(fileIds.map((id) => String(id || "").trim()).filter(Boolean))];
+  const map = new Map();
+  if (uniqueIds.length === 0) {
+    return map;
+  }
+
+  const concurrency = Math.min(Math.max(Number(options.concurrency) || 4, 1), 8);
+  let index = 0;
+
+  async function worker() {
+    while (index < uniqueIds.length) {
+      const current = uniqueIds[index];
+      index += 1;
+      const duration = await getVoiceMemoDurationSeconds(current, options);
+      map.set(current, duration);
+    }
+  }
+
+  await Promise.all(Array.from({ length: Math.min(concurrency, uniqueIds.length) }, () => worker()));
+  return map;
+}
+
 module.exports = {
   DRIVE_READONLY_SCOPE,
+  normalizeVoiceMemoScanOptions,
+  buildVoiceMemoFilenamePattern,
   scanVoiceMemoFolder,
   listVoiceMemoFiles,
   getVoiceMemoFileForAesopId,
   streamVoiceMemoFile,
+  getVoiceMemoDurationSeconds,
+  resolveVoiceMemoDurationsMap,
 };

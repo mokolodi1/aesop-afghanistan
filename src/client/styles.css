@@ -1711,6 +1711,60 @@ button:disabled {
   margin-top: 16px;
 }
 
+.portal-admin-stat-count-btn {
+  appearance: none;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  padding: 4px 12px;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  background: #f5f5f4;
+  color: inherit;
+}
+
+.portal-admin-stat-count-btn:hover:not(:disabled) {
+  border-color: #d6d3d1;
+}
+
+.portal-admin-stat-count-btn.is-active {
+  box-shadow: 0 0 0 2px #1c1917;
+}
+
+.portal-admin-stat-count-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.portal-admin-stat-row--active dt {
+  font-weight: 700;
+}
+
+.portal-admin-application-category-panel {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid #e7e5e4;
+}
+
+.portal-admin-application-category-panel-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.portal-admin-application-email-btn {
+  white-space: nowrap;
+}
+
+.portal-admin-emails-id-list-filter {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
 .portal-voice-memo-accordion {
   margin-top: 0;
 }
@@ -1723,6 +1777,21 @@ button:disabled {
 .portal-voice-memo-player {
   width: 100%;
   max-width: 100%;
+}
+
+.portal-voice-memo-duration-warning {
+  margin: 0 0 12px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid #fca5a5;
+  background: #fef2f2;
+  color: #991b1b;
+  font-size: 0.95rem;
+  line-height: 1.45;
+}
+
+.portal-admin-stat-row--section dt {
+  font-weight: 700;
 }
 
 .portal-ding-tab-panel--help .portal-ding-help-intro--embedded {

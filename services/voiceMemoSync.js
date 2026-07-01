@@ -1,6 +1,21 @@
 const config = require("../config/secrets");
+const { google } = require("googleapis");
 const { formatEasternSheetTimestamp } = require("../utils/dingSheetTime");
-const { scanVoiceMemoFolder } = require("./googleDrive");
+const {
+  VOICE_MEMO_MIN_DURATION_SEC,
+  VOICE_MEMO_MAX_DURATION_SEC,
+  classifyVoiceMemoDuration,
+  formatVoiceMemoDurationLabel,
+} = require("../utils/voiceMemoDuration");
+const {
+  DEFAULT_VOICE_MEMO_FILE_EXTENSIONS,
+  parseVoiceMemoFileExtensions,
+} = require("../utils/voiceMemoExtensions");
+const { buildServiceAccountJwt } = require("./googleAuth");
+const {
+  scanVoiceMemoFolder,
+  resolveVoiceMemoDurationsMap,
+} = require("./googleDrive");
 const {
   initGoogleSheets,
   getWorksheetByTitle,
@@ -52,6 +67,98 @@ function voiceMemoHeaderCandidates(configuredHeader, knownHeaders) {
 }
 
 /**
+ * @param {string} sheetName
+ * @returns {string}
+ */
+function escapeSheetRangeName(sheetName) {
+  return `'${String(sheetName || "").replace(/'/g, "''")}'`;
+}
+
+/**
+ * Load Applicants rows with one Sheets values API call (much faster than getRows() on large tabs).
+ * @returns {Promise<{
+ *   headerValues: string[],
+ *   dataRows: string[][],
+ *   columns: { round1: number, round2: number, links: number, date: number },
+ *   cfg: ReturnType<typeof getVoiceMemoSheetConfig>,
+ * }>}
+ */
+async function loadApplicantsDataForStats() {
+  const cfg = getVoiceMemoSheetConfig();
+  const doc = await initGoogleSheets();
+  const worksheet = await getWorksheetByTitle(doc, cfg.sheetName);
+  if (!worksheet) {
+    throw new Error(`Sheet "${cfg.sheetName}" was not found.`);
+  }
+
+  await worksheet.loadHeaderRow(cfg.headerRowNum);
+  const headerValues = Array.isArray(worksheet.headerValues) ? worksheet.headerValues : [];
+  const columns = {
+    round1: resolveHeaderColumnIndex(headerValues, cfg.round1Header),
+    round2: resolveHeaderColumnIndex(headerValues, cfg.round2Header),
+    links: resolveHeaderColumnIndex(
+      headerValues,
+      voiceMemoHeaderCandidates(cfg.linksHeader, VOICE_NOTE_LINK_HEADERS),
+    ),
+    date: resolveHeaderColumnIndex(
+      headerValues,
+      voiceMemoHeaderCandidates(cfg.dateHeader, VOICE_NOTE_DATE_HEADERS),
+    ),
+  };
+
+  const sheetId = String(config.googleSheets?.sheetId || "").trim();
+  if (!sheetId) {
+    throw new Error("googleSheets.sheetId is not configured.");
+  }
+
+  const auth = await buildServiceAccountJwt(["https://www.googleapis.com/auth/spreadsheets.readonly"]);
+  const sheets = google.sheets({ version: "v4", auth });
+  const startRow = cfg.headerRowNum + 1;
+  const range = `${escapeSheetRangeName(cfg.sheetName)}!A${startRow}:ZZ`;
+  const response = await sheets.spreadsheets.values.get({
+    spreadsheetId: sheetId,
+    range,
+    majorDimension: "ROWS",
+  });
+
+  return {
+    headerValues,
+    dataRows: Array.isArray(response.data.values) ? response.data.values : [],
+    columns,
+    cfg,
+  };
+}
+
+/**
+ * @param {Record<string, unknown>} [voiceMemo]
+ * @returns {{ extensions: string[], submissionTimeSource: 'createdTime'|'modifiedTime' }}
+ */
+function getVoiceMemoDriveScanOptions(voiceMemo = {}) {
+  const vm = voiceMemo && typeof voiceMemo === "object" ? voiceMemo : {};
+  const extensions = parseVoiceMemoFileExtensions(
+    vm.fileExtensions ?? vm.fileExtension,
+    DEFAULT_VOICE_MEMO_FILE_EXTENSIONS,
+  );
+  const submissionTimeSource =
+    vm.submissionTimeSource === "modifiedTime" ? "modifiedTime" : "createdTime";
+  return { extensions, submissionTimeSource };
+}
+
+/**
+ * @param {Record<string, unknown>} [voiceMemo]
+ * @returns {{ minSeconds: number, maxSeconds: number }}
+ */
+function getVoiceMemoDurationLimits(voiceMemo = {}) {
+  const vm = voiceMemo && typeof voiceMemo === "object" ? voiceMemo : {};
+  const minRaw = Number.parseInt(String(vm.minDurationSeconds ?? VOICE_MEMO_MIN_DURATION_SEC), 10);
+  const maxRaw = Number.parseInt(String(vm.maxDurationSeconds ?? VOICE_MEMO_MAX_DURATION_SEC), 10);
+  const minSeconds = Number.isFinite(minRaw) && minRaw > 0 ? minRaw : VOICE_MEMO_MIN_DURATION_SEC;
+  const maxSeconds =
+    Number.isFinite(maxRaw) && maxRaw > minSeconds ? maxRaw : VOICE_MEMO_MAX_DURATION_SEC;
+  return { minSeconds, maxSeconds };
+}
+
+/**
  * @returns {{
  *   voiceMemo: Record<string, unknown>,
  *   sheetName: string,
@@ -76,6 +183,7 @@ function getVoiceMemoSheetConfig() {
     sheetName: gs.admissionsSheetName || "Applicants",
     headerRowNum: Math.max(1, parseInt(String(gs.admissionsHeaderRow || "1"), 10) || 1),
     idColumnIndex: resolveColumnIndex(gs.admissionsIdColumn || "A"),
+    nameColumnIndex: resolveColumnIndex(gs.admissionsNameColumn || "C"),
     emailColumnIndex: resolveColumnIndex(gs.admissionsEmailColumn || "D"),
     round1Header: voiceMemo.round1ColumnHeader || "Round 1",
     round2Header: voiceMemo.round2ColumnHeader || "Round 2",
@@ -109,34 +217,192 @@ function classifyRound1ApplicationStatus(rawValue, cfg) {
 }
 
 /**
- * Count Round 1 application outcomes on the Applicants sheet.
- * @returns {Promise<{ sheetName: string, round1Column: string, accepted: number, rejected: number, pending: number, total: number }>}
+ * @typedef {{ name: string, aesopId: string, email: string, durationSeconds?: number|null, durationLabel?: string|null, fileName?: string|null }} ApplicationStatPerson
+ */
+
+/**
+ * Count Round 1 outcomes and Round 2 voice memo submission durations.
+ * @returns {Promise<{
+ *   sheetName: string,
+ *   round1Column: string,
+ *   accepted: number,
+ *   rejected: number,
+ *   pending: number,
+ *   total: number,
+ *   voiceMemo: {
+ *     submitted: number,
+ *     validDuration: number,
+ *     tooShort: number,
+ *     tooLong: number,
+ *     unknownDuration: number,
+ *     minDurationSeconds: number,
+ *     maxDurationSeconds: number,
+ *     fileExtensions: string[],
+ *   },
+ *   lists: Record<string, ApplicationStatPerson[]>,
+ * }>}
  */
 async function getRound1ApplicationStats() {
-  const { worksheet, columns, cfg } = await loadApplicantsWorksheet();
-  const rows = await worksheet.getRows();
+  const startedAt = Date.now();
+  const { dataRows, columns, cfg } = await loadApplicantsDataForStats();
+  console.info(
+    `[application-stats] loaded ${dataRows.length} Applicants row(s) in ${Date.now() - startedAt}ms`,
+  );
+  const durationLimits = getVoiceMemoDurationLimits(cfg.voiceMemo);
+  const scanOptions = getVoiceMemoDriveScanOptions(cfg.voiceMemo);
+  const submittedValue = String(cfg.submittedValue || "Submitted").trim().toLowerCase();
+  const acceptedValue = cfg.acceptedValue.toLowerCase();
+
+  /** @type {Record<string, ApplicationStatPerson[]>} */
+  const lists = {
+    round1Accepted: [],
+    round1Rejected: [],
+    round1Pending: [],
+    voiceMemoSubmitted: [],
+    voiceMemoValidDuration: [],
+    voiceMemoTooShort: [],
+    voiceMemoTooLong: [],
+    voiceMemoUnknownDuration: [],
+  };
 
   let accepted = 0;
   let rejected = 0;
   let pending = 0;
   let total = 0;
 
-  for (const row of rows) {
-    const rowData = Array.isArray(row._rawData) ? row._rawData : [];
+  /** @type {Array<{ person: ApplicationStatPerson, memo: { fileId: string, fileName: string }|null, round2Submitted: boolean, round1Accepted: boolean, round1Status: 'Accepted'|'Rejected'|'Pending' }>} */
+  const applicantRows = [];
+
+  for (const rowData of dataRows) {
     const rowId = String(rowData[cfg.idColumnIndex] ?? "").trim();
     if (!rowId) {
       continue;
     }
     total += 1;
-    const status = classifyRound1ApplicationStatus(rowData[columns.round1], cfg);
-    if (status === "Accepted") {
+    const round1Status = classifyRound1ApplicationStatus(rowData[columns.round1], cfg);
+    const round1Accepted =
+      String(rowData[columns.round1] ?? "")
+        .trim()
+        .toLowerCase() === acceptedValue;
+    const person = {
+      name: String(rowData[cfg.nameColumnIndex] ?? "").trim(),
+      aesopId: rowId,
+      email: String(rowData[cfg.emailColumnIndex] ?? "").trim(),
+    };
+    if (round1Status === "Accepted") {
       accepted += 1;
-    } else if (status === "Rejected") {
+      lists.round1Accepted.push(person);
+    } else if (round1Status === "Rejected") {
       rejected += 1;
+      lists.round1Rejected.push(person);
     } else {
       pending += 1;
+      lists.round1Pending.push(person);
+    }
+    applicantRows.push({
+      person,
+      memo: null,
+      round2Submitted:
+        String(rowData[columns.round2] ?? "")
+          .trim()
+          .toLowerCase() === submittedValue,
+      round1Accepted,
+      round1Status,
+    });
+  }
+
+  const folderId = String(cfg.voiceMemo.driveFolderId || "").trim();
+  /** @type {Map<string, { aesopId: string, fileId: string, webViewLink: string, submittedAt: Date, fileName: string }>} */
+  let memosById = new Map();
+  if (folderId) {
+    const driveStartedAt = Date.now();
+    const scan = await scanVoiceMemoFolder(folderId, scanOptions);
+    memosById = scan.memosById;
+    console.info(
+      `[application-stats] scanned Drive folder (${memosById.size} memo(s)) in ${Date.now() - driveStartedAt}ms`,
+    );
+  }
+
+  for (const entry of applicantRows) {
+    const memo = findVoiceMemoInScan(memosById, entry.person.aesopId);
+    entry.memo = memo
+      ? { fileId: memo.fileId, fileName: memo.fileName }
+      : null;
+  }
+
+  let submitted = 0;
+  let validDuration = 0;
+  let tooShort = 0;
+  let tooLong = 0;
+  let unknownDuration = 0;
+  /** @type {Set<string>} */
+  const memoFileIds = new Set();
+  /** @type {Array<{ person: ApplicationStatPerson, memo: { fileId: string, fileName: string } }>} */
+  const memoEntries = [];
+
+  for (const entry of applicantRows) {
+    if (!entry.round1Accepted) {
+      continue;
+    }
+    const hasSubmission = entry.round2Submitted || Boolean(entry.memo);
+    if (!hasSubmission) {
+      continue;
+    }
+    submitted += 1;
+    lists.voiceMemoSubmitted.push({ ...entry.person });
+
+    if (!entry.memo) {
+      unknownDuration += 1;
+      lists.voiceMemoUnknownDuration.push({ ...entry.person });
+      continue;
+    }
+
+    memoFileIds.add(entry.memo.fileId);
+    memoEntries.push({
+      person: entry.person,
+      memo: entry.memo,
+    });
+  }
+
+  const durationStartedAt = Date.now();
+  const durationByFileId = await resolveVoiceMemoDurationsMap([...memoFileIds]);
+  console.info(
+    `[application-stats] resolved ${memoFileIds.size} voice memo duration(s) in ${Date.now() - durationStartedAt}ms`,
+  );
+
+  for (const entry of memoEntries) {
+    const durationSeconds = durationByFileId.get(entry.memo.fileId) ?? null;
+    const durationStatus = classifyVoiceMemoDuration(durationSeconds, durationLimits);
+    const personWithDuration = {
+      ...entry.person,
+      durationSeconds: durationSeconds ?? null,
+      durationLabel: formatVoiceMemoDurationLabel(durationSeconds),
+      fileName: entry.memo.fileName,
+    };
+    if (durationStatus === "valid") {
+      validDuration += 1;
+      lists.voiceMemoValidDuration.push(personWithDuration);
+    } else if (durationStatus === "too_short") {
+      tooShort += 1;
+      lists.voiceMemoTooShort.push(personWithDuration);
+    } else if (durationStatus === "too_long") {
+      tooLong += 1;
+      lists.voiceMemoTooLong.push(personWithDuration);
+    } else {
+      unknownDuration += 1;
+      lists.voiceMemoUnknownDuration.push(personWithDuration);
     }
   }
+
+  for (const key of Object.keys(lists)) {
+    lists[key].sort(
+      (a, b) =>
+        a.name.localeCompare(b.name, undefined, { sensitivity: "base" }) ||
+        a.aesopId.localeCompare(b.aesopId, undefined, { sensitivity: "base" }),
+    );
+  }
+
+  console.info(`[application-stats] completed in ${Date.now() - startedAt}ms`);
 
   return {
     sheetName: cfg.sheetName,
@@ -145,6 +411,17 @@ async function getRound1ApplicationStats() {
     rejected,
     pending,
     total,
+    voiceMemo: {
+      submitted,
+      validDuration,
+      tooShort,
+      tooLong,
+      unknownDuration,
+      minDurationSeconds: durationLimits.minSeconds,
+      maxDurationSeconds: durationLimits.maxSeconds,
+      fileExtensions: scanOptions.extensions,
+    },
+    lists,
   };
 }
 
@@ -216,11 +493,33 @@ async function getApplicantRowByAesopId(aesopId) {
 }
 
 /**
+ * @param {Map<string, { aesopId: string, fileId: string, webViewLink: string, submittedAt: Date, fileName: string }>} memoById
+ * @param {string} aesopId
+ */
+function findVoiceMemoInScan(memoById, aesopId) {
+  const direct = memoById.get(aesopId);
+  if (direct) {
+    return direct;
+  }
+  const normalizedLower = String(aesopId || "").trim().toLowerCase();
+  if (!normalizedLower) {
+    return null;
+  }
+  for (const [candidateId, memo] of memoById.entries()) {
+    if (candidateId.toLowerCase() === normalizedLower) {
+      return memo;
+    }
+  }
+  return null;
+}
+
+/**
  * Build Drive audit warnings against Applicants AESOP IDs.
  * @param {Set<string>} applicantIds
  * @param {Awaited<ReturnType<typeof scanVoiceMemoFolder>>} scan
+ * @param {string[]} [extensions]
  */
-function buildVoiceMemoDriveWarnings(applicantIds, scan) {
+function buildVoiceMemoDriveWarnings(applicantIds, scan, extensions = DEFAULT_VOICE_MEMO_FILE_EXTENSIONS) {
   const unmatchedFiles = scan.parsedFiles
     .filter((file) => !applicantIds.has(file.aesopId))
     .map((file) => ({ aesopId: file.aesopId, fileName: file.fileName }))
@@ -238,8 +537,9 @@ function buildVoiceMemoDriveWarnings(applicantIds, scan) {
     );
   }
   if (scan.invalidFileNames.length > 0) {
+    const extLabel = extensions.map((ext) => `{AESOP_ID}.${ext}`).join(" or ");
     warnings.push(
-      `${scan.invalidFileNames.length} file${scan.invalidFileNames.length === 1 ? "" : "s"} in the Drive folder are not named like {AESOP_ID}.m4a and were ignored.`,
+      `${scan.invalidFileNames.length} file${scan.invalidFileNames.length === 1 ? "" : "s"} in the Drive folder are not named like ${extLabel} and were ignored.`,
     );
   }
 
@@ -262,10 +562,8 @@ async function syncVoiceMemoRound2Status() {
     throw new Error("voiceMemo.driveFolderId is not configured.");
   }
 
-  const scan = await scanVoiceMemoFolder(folderId, {
-    extension: cfg.voiceMemo.fileExtension || "m4a",
-    submissionTimeSource: cfg.voiceMemo.submissionTimeSource || "createdTime",
-  });
+  const scanOptions = getVoiceMemoDriveScanOptions(cfg.voiceMemo);
+  const scan = await scanVoiceMemoFolder(folderId, scanOptions);
   const memoById = scan.memosById;
 
   const { worksheet, columns, cfg: sheetCfg } = await loadApplicantsWorksheet();
@@ -286,7 +584,7 @@ async function syncVoiceMemoRound2Status() {
     }
   }
 
-  const driveWarnings = buildVoiceMemoDriveWarnings(applicantIds, scan);
+  const driveWarnings = buildVoiceMemoDriveWarnings(applicantIds, scan, scanOptions.extensions);
   /** @type {Array<{ gridRowIdx: number, round2: string, links: string, submittedAt: string }>} */
   const pending = [];
   let skippedUpToDate = 0;
@@ -302,7 +600,7 @@ async function syncVoiceMemoRound2Status() {
       continue;
     }
 
-    const memo = memoById.get(aesopId);
+    const memo = findVoiceMemoInScan(memoById, aesopId);
     if (!memo) {
       skippedNoFile += 1;
       continue;
@@ -391,6 +689,8 @@ module.exports = {
   loadApplicantsWorksheet,
   getApplicantRowByAesopId,
   getVoiceMemoSheetConfig,
+  getVoiceMemoDriveScanOptions,
+  getVoiceMemoDurationLimits,
   classifyRound1ApplicationStatus,
   getRound1ApplicationStats,
   buildVoiceMemoDriveWarnings,

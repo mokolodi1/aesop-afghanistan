@@ -2216,13 +2216,25 @@ async function loadAdmissionsSheet() {
 
 /**
  * @param {Array<{ id: string, name: string, email: string, fields: Record<string, string> }>} rows
- * @param {{ column?: string, values?: string[] }|null|undefined} filter
+ * @param {{ column?: string, values?: string[], aesopIds?: string[] }|null|undefined} filter
  */
 function filterAdmissionsRows(rows, filter) {
   if (!Array.isArray(rows)) {
     return [];
   }
-  if (!filter || !filter.column || !Array.isArray(filter.values) || filter.values.length === 0) {
+  if (!filter || typeof filter !== "object") {
+    return rows;
+  }
+  if (Array.isArray(filter.aesopIds) && filter.aesopIds.length > 0) {
+    const want = new Set(
+      filter.aesopIds.map((id) => String(id ?? "").trim().toLowerCase()).filter(Boolean),
+    );
+    if (want.size === 0) {
+      return rows;
+    }
+    return rows.filter((row) => want.has(String(row.id || "").trim().toLowerCase()));
+  }
+  if (!filter.column || !Array.isArray(filter.values) || filter.values.length === 0) {
     return rows;
   }
   const column = String(filter.column).trim();

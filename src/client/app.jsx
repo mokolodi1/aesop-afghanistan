@@ -143,6 +143,18 @@ const PORTAL_SESSION_MS = 60 * 60 * 1000;
 const PORTAL_ADMIN_SESSION_MS = 7 * 24 * 60 * 60 * 1000;
 const PORTAL_SESSION_EXPIRES_AT_KEY = 'studentPortalSessionExpiresAt';
 const PORTAL_ADMIN_SESSION_LOCAL_KEY = 'studentPortalAdminPersistedSession';
+const PORTAL_ADMIN_EMAIL_RECIPIENT_LIST_KEY = 'portalAdminEmailRecipientList';
+
+const APPLICATION_STAT_CATEGORY_LABELS = {
+  round1Accepted: 'Round 1 accepted',
+  round1Rejected: 'Round 1 rejected',
+  round1Pending: 'Round 1 pending',
+  voiceMemoSubmitted: 'Voice memos submitted',
+  voiceMemoValidDuration: 'Valid voice memo length',
+  voiceMemoTooShort: 'Voice memo too short',
+  voiceMemoTooLong: 'Voice memo too long',
+  voiceMemoUnknownDuration: 'Voice memo duration unknown',
+};
 
 function isPortalAdminSession() {
   if (readSessionField('studentPortalIsAdmin') === '1') {
@@ -2344,6 +2356,11 @@ function PortalVoiceMemoSection({ studentUserId, studentEmail, enabled }) {
               ) : null}
               {voiceMemoStatus.submitted ? (
                 <>
+                  {voiceMemoStatus.durationWarning ? (
+                    <p className="portal-voice-memo-duration-warning" role="alert">
+                      {voiceMemoStatus.durationWarning}
+                    </p>
+                  ) : null}
                   {voiceMemoStatus.submittedAt ? (
                     <p className="portal-field-hint">
                       Submitted on <strong>{voiceMemoStatus.submittedAt}</strong>
@@ -2353,6 +2370,11 @@ function PortalVoiceMemoSection({ studentUserId, studentEmail, enabled }) {
                           (<span className="portal-admin-mono">{voiceMemoStatus.fileName}</span>)
                         </>
                       ) : null}
+                    </p>
+                  ) : null}
+                  {voiceMemoStatus.durationLabel ? (
+                    <p className="portal-field-hint">
+                      Recording length: <strong>{voiceMemoStatus.durationLabel}</strong>
                     </p>
                   ) : null}
                   {voiceMemoStatus.hasRecording ? (
@@ -2810,6 +2832,98 @@ function PortalAdminViewAs() {
   );
 }
 
+function PortalAdminApplicationCategoryRow({
+  categoryKey,
+  label,
+  count,
+  activeCategory,
+  onSelectCategory,
+  statusClassName = '',
+}) {
+  const isActive = activeCategory === categoryKey;
+  const disabled = !count;
+  return (
+    <div className={`portal-admin-stat-row${isActive ? ' portal-admin-stat-row--active' : ''}`}>
+      <dt>{label}</dt>
+      <dd>
+        <button
+          type="button"
+          className={`portal-admin-stat-count-btn${statusClassName ? ` ${statusClassName}` : ''}${
+            isActive ? ' is-active' : ''
+          }`}
+          disabled={disabled}
+          onClick={() => onSelectCategory(isActive ? null : categoryKey)}
+          aria-expanded={isActive}
+          aria-label={`${label}: ${count ?? 0}. ${isActive ? 'Hide list' : 'Show list'}`}
+        >
+          {count ?? 0}
+        </button>
+      </dd>
+    </div>
+  );
+}
+
+function PortalAdminApplicationCategoryPanel({ categoryKey, people, onEmailGroup }) {
+  if (!categoryKey || !Array.isArray(people)) {
+    return null;
+  }
+  const label = APPLICATION_STAT_CATEGORY_LABELS[categoryKey] || categoryKey;
+  const emailableCount = people.filter((person) => String(person.email || '').trim()).length;
+  const showRecordingColumn = people.some(
+    (person) => person.durationLabel || person.fileName,
+  );
+
+  return (
+    <section className="portal-admin-application-category-panel" aria-label={label}>
+      <div className="portal-admin-application-category-panel-head">
+        <h4 className="portal-admin-subheading">{label}</h4>
+        <button
+          type="button"
+          className="portal-btn portal-btn--secondary portal-admin-application-email-btn"
+          disabled={emailableCount === 0}
+          onClick={() => onEmailGroup(people, label)}
+        >
+          Compose email to this group ({emailableCount})
+        </button>
+      </div>
+      {people.length === 0 ? (
+        <p className="portal-admin-status">No applicants in this category.</p>
+      ) : (
+        <div className="portal-admin-table-wrap">
+          <table className="portal-admin-table portal-admin-application-category-table">
+            <thead>
+              <tr>
+                <th scope="col">Name</th>
+                <th scope="col">AESOP ID</th>
+                <th scope="col">Email</th>
+                {showRecordingColumn ? <th scope="col">Recording</th> : null}
+              </tr>
+            </thead>
+            <tbody>
+              {people.map((person) => (
+                <tr key={person.aesopId}>
+                  <td>{person.name || '—'}</td>
+                  <td className="portal-admin-mono">{person.aesopId}</td>
+                  <td>{person.email || '—'}</td>
+                  {showRecordingColumn ? (
+                    <td>
+                      {person.durationLabel
+                        ? person.durationLabel
+                        : person.fileName
+                          ? person.fileName
+                          : '—'}
+                    </td>
+                  ) : null}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  );
+}
+
 function PortalAdminPage() {
   const { isAdmin } = usePortalClassGrade();
   const signedIn = isPortalSessionCompleteSync();
@@ -2840,6 +2954,7 @@ function PortalAdminPage() {
   const [round1StatsLoading, setRound1StatsLoading] = useState(false);
   const [round1StatsError, setRound1StatsError] = useState('');
   const [round1StatsResult, setRound1StatsResult] = useState(null);
+  const [activeApplicationCategory, setActiveApplicationCategory] = useState(null);
 
   useEffect(() => {
     if (!signedIn || !isAdmin || activeTab !== 'overview') {
@@ -2978,6 +3093,7 @@ function PortalAdminPage() {
     setRound1StatsLoading(true);
     setRound1StatsError('');
     setRound1StatsResult(null);
+    setActiveApplicationCategory(null);
     try {
       const data = await adminApiPost('/api/portal-admin/applications/round1-stats');
       setRound1StatsResult(data.stats || null);
@@ -3115,8 +3231,11 @@ function PortalAdminPage() {
             <div className="portal-admin-voice-memo-sync">
               <h3 className="portal-admin-subheading">Voice memos</h3>
               <p className="portal-admin-hint">
-                Check Google Drive for <code>{'{AESOP ID}'}.m4a</code> files and update the Applicants
-                sheet: Round 2, Voice note link, and Voice note last updated.
+                Check Google Drive for voice notes named like{' '}
+                <code>{'{AESOP ID}'}.m4a</code>, <code>{'{AESOP ID}'}.aac</code>,{' '}
+                <code>{'{AESOP ID}'}.mp3</code>, <code>{'{AESOP ID}'}.ogg</code>, or{' '}
+                <code>{'{AESOP ID}'}.opus</code> and update the Applicants sheet: Round 2, Voice
+                note link, and Voice note last updated.
               </p>
               <button
                 type="button"
@@ -3133,13 +3252,32 @@ function PortalAdminPage() {
               ) : null}
               {voiceMemoSyncResult ? (
                 <>
-                  <p className="portal-admin-status" role="status">
-                    Updated {voiceMemoSyncResult.updated ?? 0} row
-                    {voiceMemoSyncResult.updated === 1 ? '' : 's'}.{' '}
-                    {voiceMemoSyncResult.skippedUpToDate ?? 0} already up to date.{' '}
-                    {voiceMemoSyncResult.driveFileCount ?? 0} matched voice note
-                    {voiceMemoSyncResult.driveFileCount === 1 ? '' : 's'} in Drive.
-                  </p>
+                  <dl className="portal-admin-stats portal-admin-stats--compact" role="status">
+                    <div className="portal-admin-stat-row">
+                      <dt>Wrote Round 2, link, and date</dt>
+                      <dd>{voiceMemoSyncResult.updated ?? 0}</dd>
+                    </div>
+                    <div className="portal-admin-stat-row">
+                      <dt>Already up to date</dt>
+                      <dd>{voiceMemoSyncResult.skippedUpToDate ?? 0}</dd>
+                    </div>
+                    <div className="portal-admin-stat-row">
+                      <dt>Skipped — no voice note in Drive</dt>
+                      <dd>{voiceMemoSyncResult.skippedNoFile ?? 0}</dd>
+                    </div>
+                    <div className="portal-admin-stat-row">
+                      <dt>Skipped — Round 1 not accepted</dt>
+                      <dd>{voiceMemoSyncResult.skippedNotAccepted ?? 0}</dd>
+                    </div>
+                    <div className="portal-admin-stat-row">
+                      <dt>Skipped — no AESOP ID</dt>
+                      <dd>{voiceMemoSyncResult.skippedNoId ?? 0}</dd>
+                    </div>
+                    <div className="portal-admin-stat-row">
+                      <dt>Matched voice notes in Drive</dt>
+                      <dd>{voiceMemoSyncResult.driveFileCount ?? 0}</dd>
+                    </div>
+                  </dl>
                   {Array.isArray(voiceMemoSyncResult.warnings) && voiceMemoSyncResult.warnings.length > 0 ? (
                     <div className="portal-admin-voice-memo-warnings" role="alert">
                       <p className="portal-admin-voice-memo-warnings-title">Drive warnings</p>
@@ -3184,8 +3322,18 @@ function PortalAdminPage() {
               <h3 className="portal-admin-subheading">Application status (Round 1)</h3>
               <p className="portal-admin-hint">
                 Count applicants on the <strong>Applicants</strong> sheet by the <strong>Round 1</strong>{' '}
-                column (Accepted / Rejected / Pending).
+                column (Accepted / Rejected / Pending). Voice memo counts include Round 1 accepted
+                applicants with a submission and check recording length (
+                {round1StatsResult?.voiceMemo?.minDurationSeconds ?? 30} sec–
+                {Math.floor((round1StatsResult?.voiceMemo?.maxDurationSeconds ?? 120) / 60)} min).
+                Click a number to list applicants and compose a bulk email to that group. The first
+                check may take up to a minute on a large Applicants sheet.
               </p>
+              {round1StatsLoading ? (
+                <p className="portal-admin-status" role="status">
+                  Loading Applicants sheet, scanning Drive, and checking voice memo lengths…
+                </p>
+              ) : null}
               <button
                 type="button"
                 className="portal-btn portal-btn--secondary"
@@ -3200,6 +3348,7 @@ function PortalAdminPage() {
                 </p>
               ) : null}
               {round1StatsResult ? (
+                <>
                 <dl className="portal-admin-stats portal-admin-application-stats-panel">
                   <div className="portal-admin-stat-row">
                     <dt>Applicants sheet</dt>
@@ -3213,25 +3362,84 @@ function PortalAdminPage() {
                     <dt>Total applicants</dt>
                     <dd>{round1StatsResult.total ?? 0}</dd>
                   </div>
-                  <div className="portal-admin-stat-row">
-                    <dt>Accepted</dt>
-                    <dd className="portal-application-status portal-application-status--accepted">
-                      {round1StatsResult.accepted ?? 0}
-                    </dd>
-                  </div>
-                  <div className="portal-admin-stat-row">
-                    <dt>Rejected</dt>
-                    <dd className="portal-application-status portal-application-status--rejected">
-                      {round1StatsResult.rejected ?? 0}
-                    </dd>
-                  </div>
-                  <div className="portal-admin-stat-row">
-                    <dt>Pending</dt>
-                    <dd className="portal-application-status portal-application-status--pending">
-                      {round1StatsResult.pending ?? 0}
-                    </dd>
-                  </div>
+                  <PortalAdminApplicationCategoryRow
+                    categoryKey="round1Accepted"
+                    label="Accepted"
+                    count={round1StatsResult.accepted ?? 0}
+                    activeCategory={activeApplicationCategory}
+                    onSelectCategory={setActiveApplicationCategory}
+                    statusClassName="portal-application-status portal-application-status--accepted"
+                  />
+                  <PortalAdminApplicationCategoryRow
+                    categoryKey="round1Rejected"
+                    label="Rejected"
+                    count={round1StatsResult.rejected ?? 0}
+                    activeCategory={activeApplicationCategory}
+                    onSelectCategory={setActiveApplicationCategory}
+                    statusClassName="portal-application-status portal-application-status--rejected"
+                  />
+                  <PortalAdminApplicationCategoryRow
+                    categoryKey="round1Pending"
+                    label="Pending"
+                    count={round1StatsResult.pending ?? 0}
+                    activeCategory={activeApplicationCategory}
+                    onSelectCategory={setActiveApplicationCategory}
+                    statusClassName="portal-application-status portal-application-status--pending"
+                  />
+                  {round1StatsResult.voiceMemo ? (
+                    <>
+                      <PortalAdminApplicationCategoryRow
+                        categoryKey="voiceMemoSubmitted"
+                        label="Voice memos submitted"
+                        count={round1StatsResult.voiceMemo.submitted ?? 0}
+                        activeCategory={activeApplicationCategory}
+                        onSelectCategory={setActiveApplicationCategory}
+                      />
+                      <PortalAdminApplicationCategoryRow
+                        categoryKey="voiceMemoValidDuration"
+                        label={`Valid length (${round1StatsResult.voiceMemo.minDurationSeconds ?? 30} sec–${Math.floor((round1StatsResult.voiceMemo.maxDurationSeconds ?? 120) / 60)} min)`}
+                        count={round1StatsResult.voiceMemo.validDuration ?? 0}
+                        activeCategory={activeApplicationCategory}
+                        onSelectCategory={setActiveApplicationCategory}
+                        statusClassName="portal-application-status portal-application-status--accepted"
+                      />
+                      <PortalAdminApplicationCategoryRow
+                        categoryKey="voiceMemoTooShort"
+                        label={`Shorter than ${round1StatsResult.voiceMemo.minDurationSeconds ?? 30} sec`}
+                        count={round1StatsResult.voiceMemo.tooShort ?? 0}
+                        activeCategory={activeApplicationCategory}
+                        onSelectCategory={setActiveApplicationCategory}
+                        statusClassName="portal-application-status portal-application-status--rejected"
+                      />
+                      <PortalAdminApplicationCategoryRow
+                        categoryKey="voiceMemoTooLong"
+                        label={`Longer than ${Math.floor((round1StatsResult.voiceMemo.maxDurationSeconds ?? 120) / 60)} min`}
+                        count={round1StatsResult.voiceMemo.tooLong ?? 0}
+                        activeCategory={activeApplicationCategory}
+                        onSelectCategory={setActiveApplicationCategory}
+                        statusClassName="portal-application-status portal-application-status--rejected"
+                      />
+                      {(round1StatsResult.voiceMemo.unknownDuration ?? 0) > 0 ? (
+                        <PortalAdminApplicationCategoryRow
+                          categoryKey="voiceMemoUnknownDuration"
+                          label="Duration unknown"
+                          count={round1StatsResult.voiceMemo.unknownDuration ?? 0}
+                          activeCategory={activeApplicationCategory}
+                          onSelectCategory={setActiveApplicationCategory}
+                          statusClassName="portal-application-status portal-application-status--pending"
+                        />
+                      ) : null}
+                    </>
+                  ) : null}
                 </dl>
+                {activeApplicationCategory && round1StatsResult.lists ? (
+                  <PortalAdminApplicationCategoryPanel
+                    categoryKey={activeApplicationCategory}
+                    people={round1StatsResult.lists[activeApplicationCategory] || []}
+                    onEmailGroup={openBulkEmailForApplicantList}
+                  />
+                ) : null}
+                </>
               ) : null}
             </div>
           </section>
@@ -3534,11 +3742,72 @@ function detectGlobalEmailPlaceholders(subject, body, rowColumnLabels) {
   });
 }
 
-function buildEmailFilterPayload(filterAll, filterColumn, filterValue) {
+function buildEmailFilterPayload(filterAll, filterColumn, filterValue, aesopIds = null) {
+  if (Array.isArray(aesopIds) && aesopIds.length > 0) {
+    return { aesopIds };
+  }
   if (filterAll || !filterColumn || !filterValue) {
     return null;
   }
   return { column: filterColumn, values: [filterValue] };
+}
+
+function storeAdminEmailRecipientList({ aesopIds, label }) {
+  if (typeof sessionStorage === 'undefined') {
+    return;
+  }
+  const ids = Array.isArray(aesopIds)
+    ? [...new Set(aesopIds.map((id) => String(id || '').trim()).filter(Boolean))]
+    : [];
+  if (ids.length === 0) {
+    return;
+  }
+  sessionStorage.setItem(
+    PORTAL_ADMIN_EMAIL_RECIPIENT_LIST_KEY,
+    JSON.stringify({
+      aesopIds: ids,
+      label: String(label || '').trim() || 'Selected applicants',
+      at: Date.now(),
+    }),
+  );
+}
+
+function readAdminEmailRecipientList() {
+  if (typeof sessionStorage === 'undefined') {
+    return null;
+  }
+  const raw = sessionStorage.getItem(PORTAL_ADMIN_EMAIL_RECIPIENT_LIST_KEY);
+  if (!raw) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(raw);
+    const aesopIds = Array.isArray(parsed?.aesopIds)
+      ? parsed.aesopIds.map((id) => String(id || '').trim()).filter(Boolean)
+      : [];
+    if (aesopIds.length === 0) {
+      return null;
+    }
+    return {
+      aesopIds,
+      label: String(parsed?.label || '').trim() || 'Selected applicants',
+    };
+  } catch {
+    return null;
+  } finally {
+    sessionStorage.removeItem(PORTAL_ADMIN_EMAIL_RECIPIENT_LIST_KEY);
+  }
+}
+
+function openBulkEmailForApplicantList(people, label) {
+  const aesopIds = (people || [])
+    .map((person) => String(person?.aesopId || person?.id || '').trim())
+    .filter(Boolean);
+  if (aesopIds.length === 0) {
+    return;
+  }
+  storeAdminEmailRecipientList({ aesopIds, label });
+  window.location.assign('/admin/emails');
 }
 
 const EMAIL_BODY_MARKDOWN_LINK_RE =
@@ -3990,7 +4259,13 @@ function ApplicantsSheetDebugPanel({
           <li>Recipient count unavailable — see Review section for the error.</li>
         ) : sendCount != null ? (
           <>
-            {recipientStats?.filter ? (
+            {recipientStats?.filter?.aesopIds ? (
+              <li>
+                Filter: <strong>{recipientStats.filter.aesopIds.length}</strong> selected AESOP ID
+                {recipientStats.filter.aesopIds.length === 1 ? '' : 's'}:{' '}
+                <strong>{recipientStats.rowsAfterFilter ?? 0}</strong> row(s) matched
+              </li>
+            ) : recipientStats?.filter ? (
               <li>
                 Filter <strong>{recipientStats.filter.column}</strong> ={' '}
                 {recipientStats.filter.values?.join(', ')}:{' '}
@@ -4602,6 +4877,8 @@ function PortalAdminEmailsPage() {
   const [filterAll, setFilterAll] = useState(true);
   const [filterColumn, setFilterColumn] = useState('');
   const [filterValue, setFilterValue] = useState('');
+  const [aesopIdsFilter, setAesopIdsFilter] = useState(null);
+  const [recipientListLabel, setRecipientListLabel] = useState('');
 
   const [subject, setSubject] = useState('');
   const [body, setBody] = useState('');
@@ -4624,7 +4901,7 @@ function PortalAdminEmailsPage() {
   const [campaignId, setCampaignId] = useState(null);
   const [campaignStatus, setCampaignStatus] = useState(null);
 
-  const filterPayload = buildEmailFilterPayload(filterAll, filterColumn, filterValue);
+  const filterPayload = buildEmailFilterPayload(filterAll, filterColumn, filterValue, aesopIdsFilter);
   const filterColumnLabels = metadata?.filterColumns || metadata?.columns || [];
   const variableColumnLabels = metadata?.variableColumns || [];
   const globalPlaceholders = detectGlobalEmailPlaceholders(subject, body, variableColumnLabels);
@@ -4641,7 +4918,23 @@ function PortalAdminEmailsPage() {
     setTestSuccess('');
     setTestPreviewRecipient(null);
     setTestError('');
-  }, [subject, body, JSON.stringify(globalVars), filterAll, filterColumn, filterValue]);
+  }, [subject, body, JSON.stringify(globalVars), filterAll, filterColumn, filterValue, JSON.stringify(aesopIdsFilter)]);
+
+  useEffect(() => {
+    if (!signedIn || !isAdmin) {
+      return undefined;
+    }
+    const pendingList = readAdminEmailRecipientList();
+    if (!pendingList) {
+      return undefined;
+    }
+    setFilterAll(false);
+    setFilterColumn('');
+    setFilterValue('');
+    setAesopIdsFilter(pendingList.aesopIds);
+    setRecipientListLabel(pendingList.label);
+    return undefined;
+  }, [signedIn, isAdmin]);
 
   useEffect(() => {
     if (!signedIn || !isAdmin) {
@@ -4676,7 +4969,11 @@ function PortalAdminEmailsPage() {
     if (!signedIn || !isAdmin || group !== 'admissions') {
       return undefined;
     }
-    if (!filterAll && (!filterColumn || !filterValue)) {
+    if (
+      !filterAll &&
+      (!filterColumn || !filterValue) &&
+      !(Array.isArray(aesopIdsFilter) && aesopIdsFilter.length > 0)
+    ) {
       setRecipients([]);
       setRecipientCount(0);
       setRecipientStats(null);
@@ -4712,7 +5009,7 @@ function PortalAdminEmailsPage() {
     return () => {
       cancelled = true;
     };
-  }, [signedIn, isAdmin, group, filterAll, filterColumn, filterValue]);
+  }, [signedIn, isAdmin, group, filterAll, filterColumn, filterValue, JSON.stringify(aesopIdsFilter)]);
 
   useEffect(() => {
     if (!campaignId || !signedIn || !isAdmin) {
@@ -4919,12 +5216,33 @@ function PortalAdminEmailsPage() {
                 if (e.target.checked) {
                   setFilterColumn('');
                   setFilterValue('');
+                  setAesopIdsFilter(null);
+                  setRecipientListLabel('');
                 }
               }}
             />
             All rows with an email
           </label>
-          {!filterAll ? (
+          {Array.isArray(aesopIdsFilter) && aesopIdsFilter.length > 0 ? (
+            <div className="portal-admin-emails-id-list-filter">
+              <p className="portal-admin-status">
+                Recipient list:{' '}
+                <strong>{recipientListLabel || 'Selected applicants'}</strong> ({aesopIdsFilter.length}{' '}
+                AESOP ID{aesopIdsFilter.length === 1 ? '' : 's'})
+              </p>
+              <button
+                type="button"
+                className="portal-btn portal-btn--secondary"
+                onClick={() => {
+                  setAesopIdsFilter(null);
+                  setRecipientListLabel('');
+                  setFilterAll(true);
+                }}
+              >
+                Clear list filter
+              </button>
+            </div>
+          ) : !filterAll ? (
             <div className="portal-admin-emails-filter-row">
               <label className="portal-admin-emails-field">
                 <span className="portal-admin-emails-label">Column</span>
@@ -4934,6 +5252,8 @@ function PortalAdminEmailsPage() {
                   onChange={(e) => {
                     setFilterColumn(e.target.value);
                     setFilterValue('');
+                    setAesopIdsFilter(null);
+                    setRecipientListLabel('');
                   }}
                 >
                   <option value="">Select column…</option>
@@ -4949,7 +5269,11 @@ function PortalAdminEmailsPage() {
                 <select
                   className="portal-admin-emails-select"
                   value={filterValue}
-                  onChange={(e) => setFilterValue(e.target.value)}
+                  onChange={(e) => {
+                    setFilterValue(e.target.value);
+                    setAesopIdsFilter(null);
+                    setRecipientListLabel('');
+                  }}
                   disabled={!filterColumn}
                 >
                   <option value="">Select value…</option>
@@ -5064,7 +5388,12 @@ function PortalAdminEmailsPage() {
                   {sendEstimate.batches} batch{sendEstimate.batches === 1 ? '' : 'es'}).
                 </p>
               ) : null}
-              {!filterAll && filterColumn && filterValue ? (
+              {Array.isArray(aesopIdsFilter) && aesopIdsFilter.length > 0 ? (
+                <p className="portal-admin-hint">
+                  Recipient list: {recipientListLabel || 'Selected applicants'} (
+                  {aesopIdsFilter.length} AESOP ID{aesopIdsFilter.length === 1 ? '' : 's'})
+                </p>
+              ) : !filterAll && filterColumn && filterValue ? (
                 <p className="portal-admin-hint">
                   Filter: {filterColumn} = {filterValue}
                 </p>
