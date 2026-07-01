@@ -1676,6 +1676,41 @@ button:disabled {
   border: 1px solid #fcd34d;
 }
 
+.portal-application-status {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 0.92rem;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.portal-application-status--accepted {
+  color: #166534;
+  background: #dcfce7;
+  border: 1px solid #86efac;
+}
+
+.portal-application-status--rejected {
+  color: #991b1b;
+  background: #fee2e2;
+  border: 1px solid #fca5a5;
+}
+
+.portal-application-status--pending {
+  color: #78350f;
+  background: #fef3c7;
+  border: 1px solid #fcd34d;
+}
+
+.portal-admin-application-stats {
+  margin-top: 28px;
+}
+
+.portal-admin-application-stats-panel {
+  margin-top: 16px;
+}
+
 .portal-voice-memo-accordion {
   margin-top: 0;
 }

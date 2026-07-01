@@ -107,6 +107,7 @@ const PORTAL_SESSION_STORAGE_KEYS = [
   'studentPortalIsAdmin',
   'studentPortalIsApplied',
   'studentPortalPeopleStatus',
+  'studentPortalApplicationStatus',
 ];
 
 const PORTAL_IMPERSONATING_KEY = 'studentPortalImpersonating';
@@ -302,6 +303,17 @@ function backupCurrentPortalSessionForImpersonation() {
   sessionStorage.setItem(PORTAL_ADMIN_SESSION_BACKUP_KEY, JSON.stringify(backup));
 }
 
+function applicationStatusClassName(status) {
+  const normalized = String(status || '').trim().toLowerCase();
+  if (normalized === 'accepted') {
+    return ' portal-application-status--accepted';
+  }
+  if (normalized === 'rejected') {
+    return ' portal-application-status--rejected';
+  }
+  return ' portal-application-status--pending';
+}
+
 function applyPortalSessionFromApi(data, options = {}) {
   if (typeof sessionStorage === 'undefined') {
     return;
@@ -391,6 +403,13 @@ function applyPortalSessionFromApi(data, options = {}) {
   } else {
     sessionStorage.removeItem('studentPortalIsApplied');
     sessionStorage.removeItem('studentPortalPeopleStatus');
+  }
+  const applicationStatusFromApi =
+    typeof data.applicationStatus === 'string' ? data.applicationStatus.trim() : '';
+  if (isApplicantFromApi && applicationStatusFromApi) {
+    sessionStorage.setItem('studentPortalApplicationStatus', applicationStatusFromApi);
+  } else {
+    sessionStorage.removeItem('studentPortalApplicationStatus');
   }
   if (isTeacherFromApi && teachingFromApi) {
     sessionStorage.setItem('studentPortalTeacherClasses', teachingFromApi);
@@ -508,6 +527,7 @@ async function loadPortalClassGradeFromApi() {
       isApplied: false,
       isApplicant: false,
       peopleStatus: '',
+      applicationStatus: '',
     });
   }
   if (portalClassGradeInFlight) {
@@ -528,6 +548,7 @@ async function loadPortalClassGradeFromApi() {
           isApplied: false,
           isApplicant: false,
           peopleStatus: '',
+          applicationStatus: '',
         };
       }
       const response = await fetch('/api/portal-class-grade', {
@@ -547,6 +568,7 @@ async function loadPortalClassGradeFromApi() {
           isApplied: false,
           isApplicant: false,
           peopleStatus: '',
+          applicationStatus: '',
         };
       }
       const classSection = typeof data.classSection === 'string' ? data.classSection.trim() : '';
@@ -563,6 +585,8 @@ async function loadPortalClassGradeFromApi() {
           : resolveClientPeopleStatus(userId, '');
       const isApplicant = data.isApplicant === true;
       const isApplied = isApplicant || data.isApplied === true || isAppliedPeopleStatus(peopleStatus);
+      const applicationStatus =
+        typeof data.applicationStatus === 'string' ? data.applicationStatus.trim() : '';
       sessionStorage.setItem('studentPortalClass', isApplied ? '' : classSection);
       sessionStorage.setItem('studentPortalGrade', isApplied ? '' : calculatedGrade);
       writeClassGradesToSession(isApplied ? [] : classGrades);
@@ -589,6 +613,11 @@ async function loadPortalClassGradeFromApi() {
           sessionStorage.removeItem('studentPortalTeacherClasses');
         }
       }
+      if (isApplicant && applicationStatus) {
+        sessionStorage.setItem('studentPortalApplicationStatus', applicationStatus);
+      } else {
+        sessionStorage.removeItem('studentPortalApplicationStatus');
+      }
       return {
         classSection: isApplied ? '' : classSection,
         calculatedGrade: isApplied ? '' : calculatedGrade,
@@ -599,6 +628,7 @@ async function loadPortalClassGradeFromApi() {
         isApplied,
         isApplicant,
         peopleStatus,
+        applicationStatus,
       };
     } catch {
       return {
@@ -611,6 +641,7 @@ async function loadPortalClassGradeFromApi() {
         isApplied: false,
         isApplicant: false,
         peopleStatus: '',
+        applicationStatus: '',
       };
     } finally {
       portalClassGradeInFlight = null;
@@ -627,6 +658,9 @@ function usePortalClassGrade() {
   const [teacherClasses, setTeacherClasses] = useState(() => readSessionField('studentPortalTeacherClasses'));
   const [isApplied, setIsApplied] = useState(() => readPortalIsApplied());
   const [isApplicant, setIsApplicant] = useState(false);
+  const [applicationStatus, setApplicationStatus] = useState(() =>
+    readSessionField('studentPortalApplicationStatus'),
+  );
   const [peopleStatus, setPeopleStatus] = useState(() =>
     resolveClientPeopleStatus(
       readSessionField('studentPortalUserId'),
@@ -649,6 +683,7 @@ function usePortalClassGrade() {
         isApplied: applied,
         isApplicant: applicant,
         peopleStatus: status,
+        applicationStatus: appStatus,
       }) => {
         if (cancelled) return;
         setStudentClass(classSection);
@@ -660,6 +695,7 @@ function usePortalClassGrade() {
         setIsApplied(applied);
         setIsApplicant(applicant);
         setPeopleStatus(status);
+        setApplicationStatus(appStatus || '');
       },
     );
     return () => {
@@ -677,6 +713,7 @@ function usePortalClassGrade() {
     isApplied,
     isApplicant,
     peopleStatus,
+    applicationStatus,
   };
 }
 
@@ -2424,6 +2461,7 @@ function PortalHubPage() {
     showTeacherFields,
     hasStudentCategory,
     isApplied,
+    applicationStatus,
   } = usePortalProfileSections();
   const signedIn = isPortalSessionCompleteSync();
   const impersonating = isPortalImpersonating();
@@ -2529,6 +2567,16 @@ function PortalHubPage() {
                 <div className="portal-hub-meta-row">
                   <dt className="portal-hub-meta-label">Phone on file</dt>
                   <dd className="portal-hub-meta-value">{studentPhone}</dd>
+                </div>
+              ) : null}
+              {applicationStatus ? (
+                <div className="portal-hub-meta-row">
+                  <dt className="portal-hub-meta-label">Application Status</dt>
+                  <dd
+                    className={`portal-hub-meta-value portal-application-status${applicationStatusClassName(applicationStatus)}`}
+                  >
+                    {applicationStatus}
+                  </dd>
                 </div>
               ) : null}
             </dl>
@@ -2789,6 +2837,10 @@ function PortalAdminPage() {
   const [voiceMemoSyncError, setVoiceMemoSyncError] = useState('');
   const [voiceMemoSyncResult, setVoiceMemoSyncResult] = useState(null);
 
+  const [round1StatsLoading, setRound1StatsLoading] = useState(false);
+  const [round1StatsError, setRound1StatsError] = useState('');
+  const [round1StatsResult, setRound1StatsResult] = useState(null);
+
   useEffect(() => {
     if (!signedIn || !isAdmin || activeTab !== 'overview') {
       return undefined;
@@ -2919,6 +2971,20 @@ function PortalAdminPage() {
       setVoiceMemoSyncError(err.message || 'Voice memo sync failed.');
     } finally {
       setVoiceMemoSyncLoading(false);
+    }
+  };
+
+  const runRound1StatsCheck = async () => {
+    setRound1StatsLoading(true);
+    setRound1StatsError('');
+    setRound1StatsResult(null);
+    try {
+      const data = await adminApiPost('/api/portal-admin/applications/round1-stats');
+      setRound1StatsResult(data.stats || null);
+    } catch (err) {
+      setRound1StatsError(err.message || 'Could not load application status counts.');
+    } finally {
+      setRound1StatsLoading(false);
     }
   };
 
@@ -3112,6 +3178,60 @@ function PortalAdminPage() {
                     </div>
                   ) : null}
                 </>
+              ) : null}
+            </div>
+            <div className="portal-admin-voice-memo-sync portal-admin-application-stats">
+              <h3 className="portal-admin-subheading">Application status (Round 1)</h3>
+              <p className="portal-admin-hint">
+                Count applicants on the <strong>Applicants</strong> sheet by the <strong>Round 1</strong>{' '}
+                column (Accepted / Rejected / Pending).
+              </p>
+              <button
+                type="button"
+                className="portal-btn portal-btn--secondary"
+                disabled={round1StatsLoading}
+                onClick={runRound1StatsCheck}
+              >
+                {round1StatsLoading ? 'Checking application status…' : 'Check application status'}
+              </button>
+              {round1StatsError ? (
+                <p className="portal-admin-status portal-admin-status--error" role="alert">
+                  {round1StatsError}
+                </p>
+              ) : null}
+              {round1StatsResult ? (
+                <dl className="portal-admin-stats portal-admin-application-stats-panel">
+                  <div className="portal-admin-stat-row">
+                    <dt>Applicants sheet</dt>
+                    <dd>{round1StatsResult.sheetName || 'Applicants'}</dd>
+                  </div>
+                  <div className="portal-admin-stat-row">
+                    <dt>Round 1 column</dt>
+                    <dd>{round1StatsResult.round1Column || 'Round 1'}</dd>
+                  </div>
+                  <div className="portal-admin-stat-row">
+                    <dt>Total applicants</dt>
+                    <dd>{round1StatsResult.total ?? 0}</dd>
+                  </div>
+                  <div className="portal-admin-stat-row">
+                    <dt>Accepted</dt>
+                    <dd className="portal-application-status portal-application-status--accepted">
+                      {round1StatsResult.accepted ?? 0}
+                    </dd>
+                  </div>
+                  <div className="portal-admin-stat-row">
+                    <dt>Rejected</dt>
+                    <dd className="portal-application-status portal-application-status--rejected">
+                      {round1StatsResult.rejected ?? 0}
+                    </dd>
+                  </div>
+                  <div className="portal-admin-stat-row">
+                    <dt>Pending</dt>
+                    <dd className="portal-application-status portal-application-status--pending">
+                      {round1StatsResult.pending ?? 0}
+                    </dd>
+                  </div>
+                </dl>
               ) : null}
             </div>
           </section>

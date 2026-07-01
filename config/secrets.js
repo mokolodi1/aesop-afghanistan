@@ -28,7 +28,7 @@ function buildGoogleSheetsConfig(fileSection) {
     idColumn: envOr("GOOGLE_ID_COLUMN", "idColumn", "B"),
     nameColumn: envOr("GOOGLE_NAME_COLUMN", "nameColumn", "C"),
     emailColumn: envOr("GOOGLE_EMAIL_COLUMN", "emailColumn", "D"),
-    phoneColumn: envOr("GOOGLE_PHONE_COLUMN", "phoneColumn", "E"),
+    phoneColumn: envOr("GOOGLE_PHONE_COLUMN", "phoneColumn", "F"),
     /** People sheet column for manual portal role (e.g. Admin). Blank or OFF disables. */
     peopleRoleColumn: envOr("GOOGLE_PEOPLE_ROLE_COLUMN", "peopleRoleColumn", "S"),
     /** Header label on People sheet for manual admin flag (used with loadHeaderRow). */
@@ -144,6 +144,7 @@ function buildVoiceMemoConfig(fileSection) {
     ),
     round1ColumnHeader: envOr("VOICE_MEMO_ROUND1_COLUMN_HEADER", "round1ColumnHeader", "Round 1"),
     round1AcceptedValue: envOr("VOICE_MEMO_ROUND1_ACCEPTED_VALUE", "round1AcceptedValue", "Accepted"),
+    round1RejectedValue: envOr("VOICE_MEMO_ROUND1_REJECTED_VALUE", "round1RejectedValue", "Rejected"),
     submittedValue: envOr("VOICE_MEMO_SUBMITTED_VALUE", "submittedValue", "Submitted"),
     submissionTimeSource: envOr(
       "VOICE_MEMO_SUBMISSION_TIME_SOURCE",

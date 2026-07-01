@@ -64,6 +64,7 @@ function voiceMemoHeaderCandidates(configuredHeader, knownHeaders) {
  *   dateHeader: string,
  *   submittedValue: string,
  *   acceptedValue: string,
+ *   rejectedValue: string,
  *   onlyIfRound1Accepted: boolean,
  * }}
  */
@@ -82,7 +83,68 @@ function getVoiceMemoSheetConfig() {
     dateHeader: voiceMemo.dateOfSubmissionColumnHeader || "Voice note last updated",
     submittedValue: voiceMemo.submittedValue || "Submitted",
     acceptedValue: String(voiceMemo.round1AcceptedValue || "Accepted").trim(),
+    rejectedValue: String(voiceMemo.round1RejectedValue || "Rejected").trim(),
     onlyIfRound1Accepted: voiceMemo.onlyIfRound1Accepted !== false,
+  };
+}
+
+/**
+ * @param {string} rawValue
+ * @param {ReturnType<typeof getVoiceMemoSheetConfig>} [cfg]
+ * @returns {'Accepted' | 'Rejected' | 'Pending'}
+ */
+function classifyRound1ApplicationStatus(rawValue, cfg) {
+  const resolved = cfg || getVoiceMemoSheetConfig();
+  const value = String(rawValue ?? "").trim();
+  if (!value) {
+    return "Pending";
+  }
+  if (value.toLowerCase() === resolved.acceptedValue.toLowerCase()) {
+    return "Accepted";
+  }
+  if (value.toLowerCase() === resolved.rejectedValue.toLowerCase()) {
+    return "Rejected";
+  }
+  return "Pending";
+}
+
+/**
+ * Count Round 1 application outcomes on the Applicants sheet.
+ * @returns {Promise<{ sheetName: string, round1Column: string, accepted: number, rejected: number, pending: number, total: number }>}
+ */
+async function getRound1ApplicationStats() {
+  const { worksheet, columns, cfg } = await loadApplicantsWorksheet();
+  const rows = await worksheet.getRows();
+
+  let accepted = 0;
+  let rejected = 0;
+  let pending = 0;
+  let total = 0;
+
+  for (const row of rows) {
+    const rowData = Array.isArray(row._rawData) ? row._rawData : [];
+    const rowId = String(rowData[cfg.idColumnIndex] ?? "").trim();
+    if (!rowId) {
+      continue;
+    }
+    total += 1;
+    const status = classifyRound1ApplicationStatus(rowData[columns.round1], cfg);
+    if (status === "Accepted") {
+      accepted += 1;
+    } else if (status === "Rejected") {
+      rejected += 1;
+    } else {
+      pending += 1;
+    }
+  }
+
+  return {
+    sheetName: cfg.sheetName,
+    round1Column: cfg.round1Header,
+    accepted,
+    rejected,
+    pending,
+    total,
   };
 }
 
@@ -329,5 +391,7 @@ module.exports = {
   loadApplicantsWorksheet,
   getApplicantRowByAesopId,
   getVoiceMemoSheetConfig,
+  classifyRound1ApplicationStatus,
+  getRound1ApplicationStats,
   buildVoiceMemoDriveWarnings,
 };

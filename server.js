@@ -49,7 +49,12 @@ const {
   verifyPostmarkWebhookAuth,
   handlePostmarkWebhook,
 } = require('./services/postmarkWebhooks');
-const { syncVoiceMemoRound2Status, getApplicantRowByAesopId } = require('./services/voiceMemoSync');
+const {
+  syncVoiceMemoRound2Status,
+  getApplicantRowByAesopId,
+  classifyRound1ApplicationStatus,
+  getRound1ApplicationStats,
+} = require('./services/voiceMemoSync');
 const {
   getPortalVoiceMemoStatus,
   getPortalVoiceMemoStream,
@@ -101,6 +106,22 @@ function resolvePortalContactEmail() {
  * @param {{ userId: string, email: string, name: string, peopleStatus?: string }} params
  * @returns {Promise<{ isTeacher: boolean, teacherClasses: string, classSection: string, calculatedGrade: string, classGrades: Array<{ classSection: string, calculatedGrade: string }>, isApplied: boolean, isApplicant: boolean, peopleStatus: string }>}
  */
+async function resolveApplicationStatus(userId, isApplicant) {
+  if (!isApplicant || !userId) {
+    return '';
+  }
+  try {
+    const applicant = await getApplicantRowByAesopId(userId);
+    if (!applicant) {
+      return '';
+    }
+    return classifyRound1ApplicationStatus(applicant.round1);
+  } catch (error) {
+    console.warn('Applicants Round 1 status lookup failed:', formatErrorForLog(error));
+    return '';
+  }
+}
+
 async function resolvePortalRoleAndGrade({ userId, email, name, peopleStatus = '' }) {
   const resolvedStatus = resolvePeopleStatus(userId, peopleStatus);
 
@@ -474,6 +495,7 @@ app.post('/api/verify-magic-link', verifyRateLimiter, async (req, res) => {
         peopleStatus: profile?.peopleStatus,
       });
       const isAdmin = isPortalAdmin({ email: emailFromSheet, portalRole: profile?.portalRole });
+      const applicationStatus = await resolveApplicationStatus(studentUserId, isApplicant);
 
       if (studentUserId) {
         recordPeopleLastLogin(studentUserId).catch((loginErr) => {
@@ -496,6 +518,7 @@ app.post('/api/verify-magic-link', verifyRateLimiter, async (req, res) => {
         isAdmin,
         isApplied,
         isApplicant,
+        applicationStatus,
         peopleStatus,
         message: 'Magic link verified successfully',
       });
@@ -778,6 +801,7 @@ app.post('/api/portal-class-grade', portalClassGradeRateLimiter, async (req, res
       peopleStatus: profile?.peopleStatus,
     });
     const isAdmin = isPortalAdmin({ email: profileEmail, portalRole: profile?.portalRole });
+    const applicationStatus = await resolveApplicationStatus(userId, isApplicant);
 
     res.json({
       success: true,
@@ -789,6 +813,7 @@ app.post('/api/portal-class-grade', portalClassGradeRateLimiter, async (req, res
       isAdmin,
       isApplied,
       isApplicant,
+      applicationStatus,
       peopleStatus,
     });
   } catch (error) {
@@ -1084,6 +1109,7 @@ app.post('/api/portal-admin/impersonate', portalAdminRateLimiter, async (req, re
       peopleStatus: targetProfile.peopleStatus,
     });
     const effectiveIsTeacher = !isApplied && viewRole === 'teacher';
+    const applicationStatus = await resolveApplicationStatus(targetUserId, isApplicant);
     res.json({
       success: true,
       email: emailFromSheet,
@@ -1099,6 +1125,7 @@ app.post('/api/portal-admin/impersonate', portalAdminRateLimiter, async (req, re
       isAdmin: false,
       isApplied,
       isApplicant,
+      applicationStatus,
       peopleStatus,
       viewRole,
       actualIsTeacher: isTeacher,
@@ -1360,6 +1387,21 @@ app.post('/api/portal-admin/voice-memo/sync', portalAdminRateLimiter, async (req
     console.error('Error syncing voice memos:', formatErrorForLog(error));
     const status = error.statusCode || 500;
     res.status(status).json({ error: error.message || 'Could not sync voice memos.' });
+  }
+});
+
+app.post('/api/portal-admin/applications/round1-stats', portalAdminRateLimiter, async (req, res) => {
+  try {
+    const profile = await requirePortalAdmin(res, req.body);
+    if (!profile) {
+      return;
+    }
+    const stats = await getRound1ApplicationStats();
+    res.json({ success: true, stats });
+  } catch (error) {
+    console.error('Error loading Round 1 application stats:', formatErrorForLog(error));
+    const status = error.statusCode || 500;
+    res.status(status).json({ error: error.message || 'Could not load application status counts.' });
   }
 });
 
