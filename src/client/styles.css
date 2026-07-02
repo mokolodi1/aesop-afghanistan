@@ -383,6 +383,152 @@ button:disabled {
 .portal-header-col--brand {
   justify-self: start;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.portal-language-toggle {
+  flex-shrink: 0;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 700;
+  font-family:
+    'Space Grotesk',
+    ui-sans-serif,
+    system-ui,
+    sans-serif;
+  color: var(--aesop-teal-dark);
+  background: var(--aesop-card);
+  border: 1.5px solid rgba(0, 128, 128, 0.35);
+  border-radius: 999px;
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease;
+}
+
+.portal-language-toggle:hover {
+  background: rgba(0, 128, 128, 0.08);
+  border-color: var(--aesop-teal);
+}
+
+.portal-language-toggle:focus-visible {
+  outline: 2px solid var(--aesop-teal);
+  outline-offset: 2px;
+}
+
+body.portal-locale-fa .portal-page,
+body.portal-locale-fa .portal-card,
+body.portal-locale-fa .portal-header,
+body.portal-locale-fa .portal-footer,
+body.portal-locale-fa .portal-main {
+  font-family:
+    'Vazirmatn',
+    'Raleway',
+    ui-sans-serif,
+    system-ui,
+    sans-serif;
+}
+
+html[dir='rtl'] body.portal-body,
+html[dir='rtl'] .portal-page {
+  direction: rtl;
+}
+
+html[dir='rtl'] .portal-header-brand-text,
+html[dir='rtl'] .portal-header-title,
+html[dir='rtl'] .portal-header-kicker,
+html[dir='rtl'] .portal-welcome,
+html[dir='rtl'] .portal-page-title,
+html[dir='rtl'] .portal-signin-heading,
+html[dir='rtl'] .portal-signin-lead,
+html[dir='rtl'] .portal-hub-intro,
+html[dir='rtl'] .portal-hub-purpose-text,
+html[dir='rtl'] .portal-intent-banner-text,
+html[dir='rtl'] .portal-intent-banner-title,
+html[dir='rtl'] .portal-field-hint,
+html[dir='rtl'] .portal-field-error,
+html[dir='rtl'] .portal-session-banner-text,
+html[dir='rtl'] .portal-hub-footnote,
+html[dir='rtl'] .portal-ding-tab-panel,
+html[dir='rtl'] .portal-header-tagline,
+html[dir='rtl'] .portal-voice-memo-pending-note,
+html[dir='rtl'] .portal-voice-memo-duration-warning,
+html[dir='rtl'] .magic-link-request-inner .status {
+  text-align: start;
+}
+
+html[dir='rtl'] .portal-ding-tab,
+html[dir='rtl'] .portal-hub-purpose-toggle,
+html[dir='rtl'] .portal-class-accordion-tab {
+  text-align: start;
+}
+
+html[dir='rtl'] .portal-header-tagline {
+  justify-content: flex-start;
+}
+
+html[dir='rtl'] .portal-section-links,
+html[dir='rtl'] .portal-footer,
+html[dir='rtl'] .portal-hub-meta-panel,
+html[dir='rtl'] .portal-header-id-meta {
+  direction: rtl;
+}
+
+html[dir='rtl'] .portal-calendar-table th,
+html[dir='rtl'] .portal-calendar-table td {
+  text-align: start;
+}
+
+html[dir='rtl'] .portal-hub-meta-label,
+html[dir='rtl'] .portal-header-id-label {
+  letter-spacing: 0.04em;
+}
+
+html[dir='rtl'] .portal-language-toggle {
+  font-family:
+    'Vazirmatn',
+    'Space Grotesk',
+    ui-sans-serif,
+    system-ui,
+    sans-serif;
+}
+
+html[dir='rtl'] .portal-header-col--brand {
+  align-items: flex-start;
+}
+
+.portal-ltr,
+.portal-header-id-mono,
+.portal-header-id-email,
+.portal-hub-meta-mono,
+.portal-admin-mono,
+.portal-ltr-input {
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+
+.portal-header-id-mono,
+.portal-header-id-email,
+.portal-hub-meta-mono {
+  text-align: left;
+}
+
+.portal-ltr-input {
+  text-align: left;
+}
+
+html[dir='rtl'] .portal-remember-id {
+  direction: rtl;
+}
+
+html[dir='rtl'] .portal-ding-tab-chevron,
+html[dir='rtl'] .portal-hub-purpose-chevron,
+html[dir='rtl'] .portal-class-accordion-chevron {
+  transform: scaleX(-1);
 }
 
 .portal-header-col--logo {
@@ -580,7 +726,7 @@ button:disabled {
   font-size: 14px;
   font-weight: 600;
   color: var(--aesop-ink);
-  text-align: right;
+  text-align: end;
   line-height: 1.35;
   word-break: break-word;
 }
@@ -670,7 +816,7 @@ button:disabled {
   gap: 2px;
   justify-content: flex-start;
   min-width: 0;
-  text-align: left;
+  text-align: start;
 }
 
 .portal-header-title {
@@ -680,7 +826,7 @@ button:disabled {
   letter-spacing: -0.035em;
   color: var(--aesop-ink);
   line-height: 1.15;
-  text-align: left;
+  text-align: start;
 }
 
 .portal-header-kicker {
@@ -696,7 +842,7 @@ button:disabled {
   text-transform: uppercase;
   color: var(--aesop-teal);
   line-height: 1.3;
-  text-align: left;
+  text-align: start;
 }
 
 .portal-header-tagline {
@@ -954,7 +1100,7 @@ button:disabled {
   background: transparent;
   cursor: pointer;
   font: inherit;
-  text-align: left;
+  text-align: start;
   color: inherit;
 }
 
@@ -1205,7 +1351,7 @@ button:disabled {
   padding: 14px 18px;
   font-size: 15px;
   font-weight: 600;
-  text-align: left;
+  text-align: start;
   border: none;
   background: var(--aesop-warm-tint);
   color: var(--aesop-ink);
@@ -1606,7 +1752,7 @@ button:disabled {
   padding: 14px 18px;
   font-size: 15px;
   font-weight: 600;
-  text-align: left;
+  text-align: start;
   border: none;
   background: var(--aesop-warm-tint);
   color: var(--aesop-ink);
@@ -1674,6 +1820,13 @@ button:disabled {
   color: #78350f;
   background: #fef3c7;
   border: 1px solid #fcd34d;
+}
+
+.portal-voice-memo-pending-note {
+  margin: 0 0 12px;
+  color: var(--aesop-text-muted);
+  font-size: 0.92rem;
+  line-height: 1.45;
 }
 
 .portal-application-status {
@@ -1788,6 +1941,49 @@ button:disabled {
   color: #991b1b;
   font-size: 0.95rem;
   line-height: 1.45;
+}
+
+.portal-calendar-section {
+  margin-top: 16px;
+}
+
+.portal-calendar-accordion {
+  margin-top: 0;
+}
+
+.portal-calendar-panel {
+  padding-top: 4px;
+}
+
+.portal-calendar-scroll {
+  overflow-x: auto;
+  margin-top: 4px;
+}
+
+.portal-calendar-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.92rem;
+}
+
+.portal-calendar-table th,
+.portal-calendar-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid hsla(11.73, 82.49%, 57.45%, 0.15);
+  text-align: left;
+  vertical-align: top;
+}
+
+.portal-calendar-table th {
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--aesop-text-muted);
+}
+
+.portal-calendar-table tbody tr:last-child td {
+  border-bottom: none;
 }
 
 .portal-admin-stat-row--section dt {
@@ -2141,7 +2337,7 @@ button:disabled {
   .portal-header-brand {
     flex: none;
     width: 100%;
-    text-align: left;
+    text-align: start;
   }
 }
 

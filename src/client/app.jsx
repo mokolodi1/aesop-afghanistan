@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
   isValidAfghanistanPhoneNumber,
@@ -12,7 +12,60 @@ import {
   filterDingPhoneInputChars,
 } from '../../utils/validation';
 import { paragraphDirection } from '../shared/emailTextDirection.js';
+import {
+  getStoredPortalLocale,
+  setStoredPortalLocale,
+  translatePortalText,
+  translateApplicationStatusLabel,
+  translateVoiceMemoDurationWarning,
+  applyPortalDocumentLocale,
+} from './portalI18n.js';
 import './styles.css';
+
+const PortalLanguageContext = React.createContext({
+  locale: 'en',
+  toggleLocale: () => {},
+  t: (key, params) => translatePortalText('en', key, params),
+});
+
+function PortalLanguageProvider({ children }) {
+  const [locale, setLocale] = useState(() => getStoredPortalLocale());
+
+  useEffect(() => {
+    applyPortalDocumentLocale(locale);
+  }, [locale]);
+
+  const toggleLocale = useCallback(() => {
+    setLocale((current) => {
+      const next = current === 'en' ? 'fa' : 'en';
+      setStoredPortalLocale(next);
+      return next;
+    });
+  }, []);
+
+  const t = useCallback((key, params) => translatePortalText(locale, key, params), [locale]);
+  const value = useMemo(() => ({ locale, toggleLocale, t }), [locale, toggleLocale, t]);
+
+  return <PortalLanguageContext.Provider value={value}>{children}</PortalLanguageContext.Provider>;
+}
+
+function usePortalI18n() {
+  return useContext(PortalLanguageContext);
+}
+
+function PortalLanguageToggle() {
+  const { locale, toggleLocale, t } = usePortalI18n();
+  return (
+    <button
+      type="button"
+      className="portal-language-toggle"
+      onClick={toggleLocale}
+      aria-label={t('language.toggleAria')}
+    >
+      {locale === 'en' ? t('language.switchToDari') : t('language.switchToEnglish')}
+    </button>
+  );
+}
 
 function isPortalHostname() {
   if (typeof window === 'undefined') return false;
@@ -1526,6 +1579,8 @@ function formatPortalDingHistoryAt(atMs) {
 }
 
 function MagicLinkRequestForm({ inputId, submitLabel }) {
+  const { locale, t } = usePortalI18n();
+  const resolvedSubmitLabel = submitLabel || t('magicLink.submit');
   const [userId, setUserId] = useState(() => readRememberedUserId());
   const [rememberUserId, setRememberUserId] = useState(() => readRememberUserIdEnabled());
   const [status, setStatus] = useState({ type: '', text: '' });
@@ -1551,11 +1606,11 @@ function MagicLinkRequestForm({ inputId, submitLabel }) {
     const trimmedUserId = userId.trim();
 
     if (!trimmedUserId || trimmedUserId.length > 100) {
-      setStatus({ type: 'error', text: 'Please enter a valid ID.' });
+      setStatus({ type: 'error', text: t('magicLink.invalidId') });
       return;
     }
 
-    setStatus({ type: 'loading', text: 'Checking ID and sending magic link...' });
+    setStatus({ type: 'loading', text: t('magicLink.sending') });
     setIsSubmitting(true);
 
     try {
@@ -1570,7 +1625,7 @@ function MagicLinkRequestForm({ inputId, submitLabel }) {
       if (!response.ok) {
         const errText =
           response.status >= 500
-            ? data.error || 'Internal error. Please try again.'
+            ? data.error || t('magicLink.networkError')
             : data.error || data.message || 'Request failed.';
         setStatus({ type: 'error', text: errText });
         return;
@@ -1593,7 +1648,7 @@ function MagicLinkRequestForm({ inputId, submitLabel }) {
       sessionStorage.setItem('studentPortalPendingMagicUserId', trimmedUserId);
       persistRememberUserId(trimmedUserId, rememberUserId);
     } catch {
-      setStatus({ type: 'error', text: 'Internal error. Please try again.' });
+      setStatus({ type: 'error', text: t('magicLink.networkError') });
     } finally {
       setIsSubmitting(false);
     }
@@ -1602,14 +1657,16 @@ function MagicLinkRequestForm({ inputId, submitLabel }) {
   return (
     <div className="magic-link-request-inner">
       <div className="form-group">
-        <label htmlFor={inputId}>AESOP ID</label>
+        <label htmlFor={inputId}>{t('magicLink.aesopId')}</label>
         <input
           type="text"
           id={inputId}
           name="userId"
           required
           autoComplete="username"
-          placeholder="Enter your ID"
+          placeholder={t('magicLink.enterId')}
+          dir={locale === 'fa' ? 'ltr' : undefined}
+          className={locale === 'fa' ? 'portal-ltr-input' : undefined}
           value={userId}
           onChange={handleUserIdChange}
           disabled={isSubmitting}
@@ -1629,10 +1686,10 @@ function MagicLinkRequestForm({ inputId, submitLabel }) {
           onChange={handleRememberChange}
           disabled={isSubmitting}
         />
-        <span>Remember my ID</span>
+        <span>{t('magicLink.rememberId')}</span>
       </label>
       <button type="button" onClick={requestMagicLink} disabled={!canSubmit}>
-        {submitLabel}
+        {resolvedSubmitLabel}
       </button>
       <div className={`status ${status.type || ''}`} aria-live="polite">
         {status.text}
@@ -1878,20 +1935,21 @@ function VerifyMagicLinkApp() {
  * Student only when the role is known (from the Classroom sync / sheets).
  */
 function PortalRoleBadge({ isTeacher, hasStudentCategory, isAdmin, isApplied, className }) {
+  const { t } = usePortalI18n();
   if (isAdmin) {
     const classes = ['portal-role-badge', 'portal-role-badge--admin', className].filter(Boolean).join(' ');
-    return <span className={classes}>Admin</span>;
+    return <span className={classes}>{t('role.admin')}</span>;
   }
   if (isApplied) {
     const classes = ['portal-role-badge', 'portal-role-badge--applied', className].filter(Boolean).join(' ');
-    return <span className={classes}>Applicant</span>;
+    return <span className={classes}>{t('role.applicant')}</span>;
   }
   if (!isTeacher && !hasStudentCategory) {
     return null;
   }
   const variant = isTeacher ? 'portal-role-badge--teacher' : 'portal-role-badge--student';
   const classes = ['portal-role-badge', variant, className].filter(Boolean).join(' ');
-  return <span className={classes}>{isTeacher ? 'Teacher' : 'Student'}</span>;
+  return <span className={classes}>{isTeacher ? t('role.teacher') : t('role.student')}</span>;
 }
 
 function parsePortalClassList(raw) {
@@ -2011,6 +2069,7 @@ function PortalClassGradeList({
 }
 
 function PortalLayout({ children }) {
+  const { t } = usePortalI18n();
   const portalHomeHref = portalHubHref();
   const signedIn = isPortalSessionCompleteSync();
   const impersonating = isPortalImpersonating();
@@ -2042,20 +2101,21 @@ function PortalLayout({ children }) {
               <span className="portal-header-brand-accent" aria-hidden="true" />
               <div className="portal-header-brand-text">
                 <p className="portal-header-kicker">AESOP Afghanistan</p>
-                <h1 className="portal-header-title">Student Portal</h1>
+                <h1 className="portal-header-title">{t('header.studentPortal')}</h1>
                 <p className="portal-header-tagline">
-                  <span className="portal-header-tagline-part">Education</span>
+                  <span className="portal-header-tagline-part">{t('header.taglineEducation')}</span>
                   <span className="portal-header-tagline-dot" aria-hidden="true">
                     ·
                   </span>
-                  <span className="portal-header-tagline-part">Service</span>
+                  <span className="portal-header-tagline-part">{t('header.taglineService')}</span>
                   <span className="portal-header-tagline-dot" aria-hidden="true">
                     ·
                   </span>
-                  <span className="portal-header-tagline-part">Community</span>
+                  <span className="portal-header-tagline-part">{t('header.taglineCommunity')}</span>
                 </p>
               </div>
             </div>
+            <PortalLanguageToggle />
           </div>
           <div className="portal-header-col portal-header-col--logo">
             {impersonating ? (
@@ -2077,7 +2137,7 @@ function PortalLayout({ children }) {
                 </button>
               </div>
             ) : (
-              <a href={portalHomeHref} className="portal-header-logo-link" aria-label="AESOP Afghanistan Student Portal — home">
+              <a href={portalHomeHref} className="portal-header-logo-link" aria-label={t('header.homeAria')}>
                 <img
                   className="portal-logo portal-logo--header-center"
                   src="/images/aesop-logo.webp"
@@ -2094,17 +2154,17 @@ function PortalLayout({ children }) {
               <div className="portal-header-student-wrap">
                 <dl
                   className="portal-header-id-meta"
-                  aria-label={impersonating ? `${impersonationRoleLabel} profile` : 'Your profile'}
+                  aria-label={impersonating ? `${impersonationRoleLabel} profile` : t('header.yourProfile')}
                 >
-                  <dt className="portal-header-id-label">Full name</dt>
+                  <dt className="portal-header-id-label">{t('header.fullName')}</dt>
                   <dd className="portal-header-id-value">{fullNameDisplay}</dd>
-                  <dt className="portal-header-id-label">AESOP ID</dt>
-                  <dd className="portal-header-id-value portal-header-id-mono">{aesopId || dash}</dd>
-                  <dt className="portal-header-id-label">Email</dt>
-                  <dd className="portal-header-id-value portal-header-id-email">{headerEmail || dash}</dd>
+                  <dt className="portal-header-id-label">{t('header.aesopId')}</dt>
+                  <dd className="portal-header-id-value portal-header-id-mono portal-ltr">{aesopId || dash}</dd>
+                  <dt className="portal-header-id-label">{t('header.email')}</dt>
+                  <dd className="portal-header-id-value portal-header-id-email portal-ltr">{headerEmail || dash}</dd>
                   {showStudentFields ? (
                     <>
-                      <dt className="portal-header-id-label">Class</dt>
+                      <dt className="portal-header-id-label">{t('header.class')}</dt>
                       <dd className="portal-header-id-value">
                         <PortalMultiClassList
                           value={studentClass}
@@ -2112,13 +2172,13 @@ function PortalLayout({ children }) {
                           emptyDisplay={dash}
                         />
                       </dd>
-                      <dt className="portal-header-id-label">Grade</dt>
+                      <dt className="portal-header-id-label">{t('header.grade')}</dt>
                       <dd className="portal-header-id-value">{gradeDisplay}</dd>
                     </>
                   ) : null}
                   {showTeacherFields ? (
                     <>
-                      <dt className="portal-header-id-label">Teaching</dt>
+                      <dt className="portal-header-id-label">{t('header.teaching')}</dt>
                       <dd className="portal-header-id-value">
                         <PortalMultiClassList
                           value={teacherClasses}
@@ -2131,7 +2191,7 @@ function PortalLayout({ children }) {
                 </dl>
                 {impersonating ? null : (
                   <button type="button" className="portal-header-logout" onClick={() => logOutPortalClient()}>
-                    Log off
+                    {t('header.logOff')}
                   </button>
                 )}
               </div>
@@ -2153,38 +2213,43 @@ function PortalLayout({ children }) {
   );
 }
 
-function PortalSectionLinks({ current, isAdmin }) {
+function PortalSectionLinks({ current, isAdmin, showEditDingLink = true }) {
+  const { t } = usePortalI18n();
   const hubHref = portalHubHref();
   return (
-    <nav className="portal-section-links" aria-label="Portal navigation">
+    <nav className="portal-section-links" aria-label={t('nav.portalNav')}>
       <a href={hubHref} className={current === 'hub' ? 'is-current' : undefined}>
-        Profile
+        {t('nav.profile')}
       </a>
-      <span className="portal-section-links-sep" aria-hidden="true">
-        ·
-      </span>
-      <a href="/profile" className={current === 'profile' ? 'is-current' : undefined}>
-        Edit Ding
-      </a>
+      {showEditDingLink ? (
+        <>
+          <span className="portal-section-links-sep" aria-hidden="true">
+            ·
+          </span>
+          <a href="/profile" className={current === 'profile' ? 'is-current' : undefined}>
+            {t('nav.editDing')}
+          </a>
+        </>
+      ) : null}
       {isAdmin ? (
         <>
           <span className="portal-section-links-sep" aria-hidden="true">
             ·
           </span>
           <a href="/admin" className={current === 'admin' ? 'is-current' : undefined}>
-            Admin
+            {t('nav.admin')}
           </a>
           <span className="portal-section-links-sep" aria-hidden="true">
             ·
           </span>
           <a href="/admin/emails" className={current === 'admin-emails' ? 'is-current' : undefined}>
-            Compose
+            {t('nav.compose')}
           </a>
           <span className="portal-section-links-sep" aria-hidden="true">
             ·
           </span>
           <a href="/admin/campaigns" className={current === 'admin-campaigns' ? 'is-current' : undefined}>
-            Campaigns
+            {t('nav.campaigns')}
           </a>
         </>
       ) : null}
@@ -2199,7 +2264,8 @@ function usePortalStudentRecord() {
   const [studentPhone] = useState(() => readSessionField('studentPortalPhone'));
   const [newDingNumber, setNewDingNumber] = useState(() => readSessionField('studentPortalNewDingNumber'));
 
-  const canUpdateDing = studentUserId.length > 0 && studentEmail.length > 0;
+  const canUpdateDing =
+    studentUserId.length > 0 && studentEmail.length > 0 && !readPortalIsApplied();
   return {
     studentName,
     studentEmail,
@@ -2212,29 +2278,31 @@ function usePortalStudentRecord() {
 }
 
 function PortalIntentNotice({ intent }) {
+  const { t } = usePortalI18n();
   if (intent !== 'profile' && intent !== 'faq') return null;
-  const title = intent === 'profile' ? 'Edit Ding' : 'FAQs';
+  const title = intent === 'profile' ? t('intent.editDing') : t('intent.faq');
   return (
     <div className="portal-intent-banner" role="status">
       <p className="portal-intent-banner-title">
-        {intent === 'profile' ? 'Sign in to manage your Ding number' : 'Sign in for account-specific help'}
+        {intent === 'profile' ? t('intent.signInProfileTitle') : t('intent.signInGenericTitle')}
       </p>
       <p className="portal-intent-banner-text">
-        You opened a link related to <strong>{title}</strong>.{' '}
+        {t('intent.openedLink', { title })}{' '}
         <a href="#portal-magic-link-form" className="portal-intent-inline-link">
-          Request a magic link
+          {t('intent.requestMagicLink')}
         </a>{' '}
-        with your AESOP ID—we&apos;ll email you a one-time link. The{' '}
+        {t('intent.magicLinkHelpBeforeFaq')}{' '}
         <a href="/faq" className="portal-intent-inline-link">
-          FAQs page
+          {t('intent.faq')}
         </a>{' '}
-        does not require signing in.
+        {t('intent.magicLinkHelpAfterFaq')}
       </p>
     </div>
   );
 }
 
 function PortalVoiceMemoSection({ studentUserId, studentEmail, enabled }) {
+  const { locale, t } = usePortalI18n();
   const [voiceMemoOpen, setVoiceMemoOpen] = useState(false);
   const [voiceMemoLoading, setVoiceMemoLoading] = useState(false);
   const [voiceMemoError, setVoiceMemoError] = useState('');
@@ -2279,14 +2347,14 @@ function PortalVoiceMemoSection({ studentUserId, studentEmail, enabled }) {
           return;
         }
         if (!response.ok) {
-          setVoiceMemoError(data.error || 'Could not load voice memo status.');
+          setVoiceMemoError(data.error || t('voiceMemo.loadError'));
           setVoiceMemoStatus(null);
           return;
         }
         setVoiceMemoStatus(data);
       } catch {
         if (!cancelled) {
-          setVoiceMemoError('Network error. Please try again.');
+          setVoiceMemoError(t('voiceMemo.networkError'));
           setVoiceMemoStatus(null);
         }
       } finally {
@@ -2298,7 +2366,19 @@ function PortalVoiceMemoSection({ studentUserId, studentEmail, enabled }) {
     return () => {
       cancelled = true;
     };
-  }, [enabled, studentUserId, studentEmail]);
+  }, [enabled, studentUserId, studentEmail, t]);
+
+  const voiceMemoDurationWarning = useMemo(() => {
+    if (!voiceMemoStatus?.durationStatus) {
+      return voiceMemoStatus?.durationWarning || null;
+    }
+    return (
+      translateVoiceMemoDurationWarning(locale, voiceMemoStatus.durationStatus, {
+        minSeconds: voiceMemoStatus.minDurationSeconds,
+        maxSeconds: voiceMemoStatus.maxDurationSeconds,
+      }) || voiceMemoStatus.durationWarning
+    );
+  }, [locale, voiceMemoStatus]);
 
   useEffect(() => {
     setVoiceMemoAudioError('');
@@ -2309,7 +2389,7 @@ function PortalVoiceMemoSection({ studentUserId, studentEmail, enabled }) {
   }
 
   return (
-    <section className="portal-voice-memo-section" aria-label="Round 2 voice memo">
+    <section className="portal-voice-memo-section" aria-label={t('voiceMemo.sectionAria')}>
       <div
         className={`portal-voice-memo-status${
           voiceMemoStatus.submitted
@@ -2319,13 +2399,16 @@ function PortalVoiceMemoSection({ studentUserId, studentEmail, enabled }) {
         role="status"
       >
         {voiceMemoLoading
-          ? 'Checking voice memo status…'
+          ? t('voiceMemo.checking')
           : voiceMemoStatus.submitted
-            ? 'Submitted'
-            : 'Not submitted yet'}
+            ? t('voiceMemo.submitted')
+            : t('voiceMemo.notSubmitted')}
       </div>
+      {!voiceMemoLoading && !voiceMemoStatus.submitted ? (
+        <p className="portal-voice-memo-pending-note">{t('voiceMemo.pendingNote')}</p>
+      ) : null}
 
-      <div className="portal-ding-accordion portal-voice-memo-accordion" aria-label="Voice memo">
+      <div className="portal-ding-accordion portal-voice-memo-accordion" aria-label={t('voiceMemo.accordionAria')}>
         <div className="portal-ding-accordion-item">
           <button
             type="button"
@@ -2337,7 +2420,7 @@ function PortalVoiceMemoSection({ studentUserId, studentEmail, enabled }) {
             className={`portal-ding-tab${voiceMemoOpen ? ' is-active' : ''}`}
             onClick={() => setVoiceMemoOpen((open) => !open)}
           >
-            <span className="portal-ding-tab-label">Voice memo</span>
+            <span className="portal-ding-tab-label">{t('voiceMemo.label')}</span>
             <span className="portal-ding-tab-chevron" aria-hidden="true">
               {voiceMemoOpen ? '▼' : '▶'}
             </span>
@@ -2356,14 +2439,15 @@ function PortalVoiceMemoSection({ studentUserId, studentEmail, enabled }) {
               ) : null}
               {voiceMemoStatus.submitted ? (
                 <>
-                  {voiceMemoStatus.durationWarning ? (
+                  {voiceMemoDurationWarning ? (
                     <p className="portal-voice-memo-duration-warning" role="alert">
-                      {voiceMemoStatus.durationWarning}
+                      {voiceMemoDurationWarning}
                     </p>
                   ) : null}
                   {voiceMemoStatus.submittedAt ? (
                     <p className="portal-field-hint">
-                      Submitted on <strong>{voiceMemoStatus.submittedAt}</strong>
+                      {t('voiceMemo.submittedOn')}{' '}
+                      <strong>{voiceMemoStatus.submittedAt}</strong>
                       {voiceMemoStatus.fileName ? (
                         <>
                           {' '}
@@ -2374,7 +2458,7 @@ function PortalVoiceMemoSection({ studentUserId, studentEmail, enabled }) {
                   ) : null}
                   {voiceMemoStatus.durationLabel ? (
                     <p className="portal-field-hint">
-                      Recording length: <strong>{voiceMemoStatus.durationLabel}</strong>
+                      {t('voiceMemo.recordingLength')}: <strong>{voiceMemoStatus.durationLabel}</strong>
                     </p>
                   ) : null}
                   {voiceMemoStatus.hasRecording ? (
@@ -2391,29 +2475,147 @@ function PortalVoiceMemoSection({ studentUserId, studentEmail, enabled }) {
                           controls
                           preload="metadata"
                           src={voiceMemoStreamSrc}
-                          onError={() =>
-                            setVoiceMemoAudioError(
-                              'Could not play your voice memo. Please try again or contact support.',
-                            )
-                          }
+                          onError={() => setVoiceMemoAudioError(t('voiceMemo.audioPlayError'))}
                         >
-                          Your browser does not support audio playback.
+                          {t('voiceMemo.audioUnsupported')}
                         </audio>
                       ) : null}
                     </>
                   ) : (
-                    <p className="portal-field-hint">
-                      Your submission is recorded, but the audio file is not available to play yet. Please
-                      check again later.
-                    </p>
+                    <p className="portal-field-hint">{t('voiceMemo.audioUnavailable')}</p>
                   )}
                 </>
               ) : (
-                <p className="portal-field-hint">
-                  {voiceMemoStatus.submissionInstructions ||
-                    'Submit your Round 2 voice memo using the instructions you received by email. Once it is received, this page will show Submitted and you can listen to your recording here.'}
-                </p>
+                <>
+                  <p className="portal-field-hint">{t('voiceMemo.pendingNote')}</p>
+                  <p className="portal-field-hint">
+                    {voiceMemoStatus.submissionInstructions || t('voiceMemo.submissionDefault')}
+                  </p>
+                </>
               )}
+            </div>
+          ) : null}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function PortalCalendarSection({ studentUserId, studentEmail, enabled }) {
+  const { t } = usePortalI18n();
+  const [calendarOpen, setCalendarOpen] = useState(false);
+  const [calendarLoading, setCalendarLoading] = useState(false);
+  const [calendarError, setCalendarError] = useState('');
+  const [calendarEntries, setCalendarEntries] = useState([]);
+  const [calendarLoaded, setCalendarLoaded] = useState(false);
+
+  useEffect(() => {
+    if (!enabled || !calendarOpen) {
+      return undefined;
+    }
+    let cancelled = false;
+    setCalendarLoading(true);
+    setCalendarError('');
+    (async () => {
+      try {
+        const response = await fetch('/api/portal-calendar', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId: studentUserId, email: studentEmail }),
+        });
+        const data = await response.json();
+        if (cancelled) {
+          return;
+        }
+        if (!response.ok) {
+          setCalendarError(data.error || t('calendar.loadError'));
+          setCalendarEntries([]);
+          setCalendarLoaded(true);
+          return;
+        }
+        if (data.eligible !== true) {
+          setCalendarEntries([]);
+          setCalendarLoaded(true);
+          return;
+        }
+        setCalendarEntries(Array.isArray(data.entries) ? data.entries : []);
+        setCalendarLoaded(true);
+      } catch {
+        if (!cancelled) {
+          setCalendarError(t('calendar.networkError'));
+          setCalendarEntries([]);
+          setCalendarLoaded(true);
+        }
+      } finally {
+        if (!cancelled) {
+          setCalendarLoading(false);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [enabled, calendarOpen, studentUserId, studentEmail, t]);
+
+  if (!enabled) {
+    return null;
+  }
+
+  return (
+    <section className="portal-calendar-section" aria-label={t('calendar.sectionAria')}>
+      <div className="portal-ding-accordion portal-calendar-accordion" aria-label={t('calendar.accordionAria')}>
+        <div className="portal-ding-accordion-item">
+          <button
+            type="button"
+            role="tab"
+            id="application-calendar-tab"
+            aria-selected={calendarOpen}
+            aria-controls="application-calendar-panel"
+            aria-expanded={calendarOpen}
+            className={`portal-ding-tab${calendarOpen ? ' is-active' : ''}`}
+            onClick={() => setCalendarOpen((open) => !open)}
+          >
+            <span className="portal-ding-tab-label">{t('calendar.label')}</span>
+            <span className="portal-ding-tab-chevron" aria-hidden="true">
+              {calendarOpen ? '▼' : '▶'}
+            </span>
+          </button>
+          {calendarOpen ? (
+            <div
+              id="application-calendar-panel"
+              role="tabpanel"
+              aria-labelledby="application-calendar-tab"
+              className="portal-ding-panel portal-calendar-panel"
+            >
+              {calendarLoading ? <p className="portal-field-hint">{t('calendar.loading')}</p> : null}
+              {calendarError ? (
+                <p className="portal-field-error" role="alert">
+                  {calendarError}
+                </p>
+              ) : null}
+              {!calendarLoading && calendarLoaded && calendarEntries.length === 0 && !calendarError ? (
+                <p className="portal-field-hint">{t('calendar.empty')}</p>
+              ) : null}
+              {!calendarLoading && calendarEntries.length > 0 ? (
+                <div className="portal-calendar-scroll">
+                  <table className="portal-calendar-table">
+                    <thead>
+                      <tr>
+                        <th scope="col">{t('calendar.process')}</th>
+                        <th scope="col">{t('calendar.date')}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {calendarEntries.map((entry, index) => (
+                        <tr key={`${entry.process}-${entry.date}-${index}`}>
+                          <td>{entry.process || '—'}</td>
+                          <td>{entry.date || '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : null}
             </div>
           ) : null}
         </div>
@@ -2471,6 +2673,7 @@ function PortalAdminImpersonateActions({ targetUserId, isTeacher = false, compac
 }
 
 function PortalHubPage() {
+  const { locale, t } = usePortalI18n();
   const { studentName, studentUserId, studentEmail, studentPhone, newDingNumber } = usePortalStudentRecord();
   const {
     studentClass,
@@ -2491,6 +2694,8 @@ function PortalHubPage() {
   const intent = typeof window !== 'undefined' ? getPortalUrlIntent() : '';
   const [aboutPortalOpenSignedIn, setAboutPortalOpenSignedIn] = useState(false);
   const [aboutPortalOpenSignout, setAboutPortalOpenSignout] = useState(false);
+  const welcomeName =
+    studentName.trim() || (isApplied ? t('hub.welcomeApplicant') : t('hub.welcomeStudent'));
 
   useEffect(() => {
     if (!signedIn && intent) {
@@ -2503,9 +2708,13 @@ function PortalHubPage() {
       <div className="portal-card portal-content portal-hub-card">
         {signedIn ? (
           <>
-            <PortalSectionLinks current="hub" isAdmin={showAdminFeatures} />
+            <PortalSectionLinks
+              current="hub"
+              isAdmin={showAdminFeatures}
+              showEditDingLink={!isApplied}
+            />
             <h2 className="portal-welcome">
-              {`Welcome, ${studentName || (isApplied ? 'Applicant' : 'Student')}!`}
+              {t('hub.welcomeNamed', { name: welcomeName })}
               <PortalRoleBadge
                 isTeacher={showTeacherFields && isTeacher}
                 hasStudentCategory={showStudentFields && hasStudentCategory}
@@ -2514,26 +2723,26 @@ function PortalHubPage() {
                 className="portal-welcome-role"
               />
             </h2>
-            <dl className="portal-hub-meta portal-hub-meta-panel" aria-label="Your account">
+            <dl className="portal-hub-meta portal-hub-meta-panel" aria-label={t('hub.yourAccount')}>
               <div className="portal-hub-meta-row">
-                <dt className="portal-hub-meta-label">AESOP ID</dt>
-                <dd className="portal-hub-meta-value portal-hub-meta-mono">{studentUserId || '—'}</dd>
+                <dt className="portal-hub-meta-label">{t('header.aesopId')}</dt>
+                <dd className="portal-hub-meta-value portal-hub-meta-mono portal-ltr">{studentUserId || '—'}</dd>
               </div>
               <div className="portal-hub-meta-row">
-                <dt className="portal-hub-meta-label">Email</dt>
-                <dd className="portal-hub-meta-value">{studentEmail || '—'}</dd>
+                <dt className="portal-hub-meta-label">{t('header.email')}</dt>
+                <dd className="portal-hub-meta-value portal-ltr">{studentEmail || '—'}</dd>
               </div>
               <div className="portal-hub-meta-row">
-                <dt className="portal-hub-meta-label">Ding number</dt>
+                <dt className="portal-hub-meta-label">{t('hub.dingNumber')}</dt>
                 <dd
-                  className={`portal-hub-meta-value portal-hub-meta-mono${newDingNumber.trim() ? '' : ' portal-hub-meta-empty'}`}
+                  className={`portal-hub-meta-value portal-hub-meta-mono portal-ltr${newDingNumber.trim() ? '' : ' portal-hub-meta-empty'}`}
                 >
-                  {newDingNumber.trim() ? newDingNumber.trim() : 'Not set yet'}
+                  {newDingNumber.trim() ? newDingNumber.trim() : t('hub.notSetYet')}
                 </dd>
               </div>
               {showStudentFields ? (
                 <div className="portal-hub-meta-row">
-                  <dt className="portal-hub-meta-label">Class</dt>
+                  <dt className="portal-hub-meta-label">{t('header.class')}</dt>
                   <dd
                     className={`portal-hub-meta-value${
                       studentClass.trim() || classGrades.length > 0 ? '' : ' portal-hub-meta-empty'
@@ -2545,7 +2754,7 @@ function PortalHubPage() {
               ) : null}
               {showStudentFields ? (
                 <div className="portal-hub-meta-row">
-                  <dt className="portal-hub-meta-label">Grade</dt>
+                  <dt className="portal-hub-meta-label">{t('header.grade')}</dt>
                   <dd
                     className={`portal-hub-meta-value${
                       classGrades.length > 0 || studentGrade.trim() ? '' : ' portal-hub-meta-empty'
@@ -2561,7 +2770,7 @@ function PortalHubPage() {
               ) : null}
               {showTeacherFields ? (
                 <div className="portal-hub-meta-row">
-                  <dt className="portal-hub-meta-label">Teaching</dt>
+                  <dt className="portal-hub-meta-label">{t('header.teaching')}</dt>
                   <dd
                     className={`portal-hub-meta-value${teacherClasses.trim() ? '' : ' portal-hub-meta-empty'}`}
                   >
@@ -2574,7 +2783,7 @@ function PortalHubPage() {
               ) : null}
               {showStudentFields || showTeacherFields || showAdminFeatures ? (
                 <div className="portal-hub-meta-row">
-                  <dt className="portal-hub-meta-label">Category</dt>
+                  <dt className="portal-hub-meta-label">{t('header.category')}</dt>
                   <dd className="portal-hub-meta-value">
                     <PortalRoleBadge
                       isTeacher={showTeacherFields && isTeacher}
@@ -2587,17 +2796,17 @@ function PortalHubPage() {
               ) : null}
               {studentPhone ? (
                 <div className="portal-hub-meta-row">
-                  <dt className="portal-hub-meta-label">Phone on file</dt>
+                  <dt className="portal-hub-meta-label">{t('hub.phoneOnFile')}</dt>
                   <dd className="portal-hub-meta-value">{studentPhone}</dd>
                 </div>
               ) : null}
               {applicationStatus ? (
                 <div className="portal-hub-meta-row">
-                  <dt className="portal-hub-meta-label">Application Status</dt>
+                  <dt className="portal-hub-meta-label">{t('hub.applicationStatus')}</dt>
                   <dd
                     className={`portal-hub-meta-value portal-application-status${applicationStatusClassName(applicationStatus)}`}
                   >
-                    {applicationStatus}
+                    {translateApplicationStatusLabel(locale, applicationStatus)}
                   </dd>
                 </div>
               ) : null}
@@ -2607,6 +2816,13 @@ function PortalHubPage() {
               studentEmail={studentEmail}
               enabled={signedIn && studentUserId.length > 0 && studentEmail.length > 0}
             />
+            <PortalCalendarSection
+              studentUserId={studentUserId}
+              studentEmail={studentEmail}
+              enabled={
+                signedIn && isApplied && studentUserId.length > 0 && studentEmail.length > 0
+              }
+            />
             {isTeacher || showAdminFeatures ? (
               <PortalTeacherRoster
                 rosterEnabled={isTeacher || showAdminFeatures}
@@ -2614,7 +2830,7 @@ function PortalHubPage() {
               />
             ) : null}
             {showStudentFields && signedIn ? <PortalStudentGrades isStudent /> : null}
-            <section className="portal-hub-purpose portal-hub-purpose-collapsible" aria-label="About this portal">
+            <section className="portal-hub-purpose portal-hub-purpose-collapsible" aria-label={t('hub.aboutPortal')}>
               <button
                 type="button"
                 className="portal-hub-purpose-toggle"
@@ -2623,7 +2839,7 @@ function PortalHubPage() {
                 aria-controls="portal-hub-purpose-signedin-panel"
                 onClick={() => setAboutPortalOpenSignedIn((open) => !open)}
               >
-                <span className="portal-hub-purpose-heading">About this portal</span>
+                <span className="portal-hub-purpose-heading">{t('hub.aboutPortal')}</span>
                 <span className="portal-hub-purpose-chevron" aria-hidden="true">
                   {aboutPortalOpenSignedIn ? '▼' : '▶'}
                 </span>
@@ -2634,11 +2850,18 @@ function PortalHubPage() {
                 hidden={!aboutPortalOpenSignedIn}
               >
                 <p className="portal-hub-purpose-text">
-                  This secure student portal is where you sign in with a magic link—there is no password to remember on this
-                  site. Use it to update your Afghanistan <strong>Ding</strong> phone number when it changes (with
-                  confirmation), review past Ding updates, request help if you need a non-Afghan number for Ding, and read{' '}
-                  <a href="/faq">frequently asked questions</a>. Your AESOP ID, email, and Ding number above summarize what
-                  we have on file—open <a href="/profile">Edit Ding</a> to change your Ding number.
+                  {isApplied ? (
+                    <>
+                      {t('hub.aboutApplicantPrefix')}{' '}
+                      <a href="/faq">{t('hub.faqLink')}</a>.
+                    </>
+                  ) : (
+                    <>
+                      {t('hub.aboutStudentPrefix')}{' '}
+                      <a href="/faq">{t('hub.faqLink')}</a>. {t('hub.aboutStudentSuffix')}{' '}
+                      <a href="/profile">{t('nav.editDing')}</a> {t('hub.aboutStudentEnd')}
+                    </>
+                  )}
                 </p>
               </div>
             </section>
@@ -2646,17 +2869,18 @@ function PortalHubPage() {
         ) : (
           <>
             <PortalIntentNotice intent={intent} />
-            <PortalSectionLinks current="hub" isAdmin={showAdminFeatures} />
-            <h2 className="portal-welcome portal-welcome-signout">Student Portal</h2>
+            <PortalSectionLinks
+              current="hub"
+              isAdmin={showAdminFeatures}
+              showEditDingLink={!isApplied}
+            />
+            <h2 className="portal-welcome portal-welcome-signout">{t('hub.studentPortalTitle')}</h2>
             <div id="portal-magic-link-form" className="portal-signin-panel">
-              <h3 className="portal-signin-heading">Connect with your AESOP ID</h3>
-              <p className="portal-signin-lead">
-                Enter the student ID AESOP gave you. We&apos;ll email a magic link; open it on this device to finish signing
-                in.
-              </p>
-              <MagicLinkRequestForm inputId="portalMagicUserId" submitLabel="Email me a magic link" />
+              <h3 className="portal-signin-heading">{t('hub.signInHeading')}</h3>
+              <p className="portal-signin-lead">{t('hub.signInLead')}</p>
+              <MagicLinkRequestForm inputId="portalMagicUserId" />
             </div>
-            <section className="portal-hub-purpose portal-hub-purpose-collapsible" aria-label="About this portal">
+            <section className="portal-hub-purpose portal-hub-purpose-collapsible" aria-label={t('hub.aboutPortal')}>
               <button
                 type="button"
                 className="portal-hub-purpose-toggle"
@@ -2665,7 +2889,7 @@ function PortalHubPage() {
                 aria-controls="portal-hub-purpose-signout-panel"
                 onClick={() => setAboutPortalOpenSignout((open) => !open)}
               >
-                <span className="portal-hub-purpose-heading">About this portal</span>
+                <span className="portal-hub-purpose-heading">{t('hub.aboutPortal')}</span>
                 <span className="portal-hub-purpose-chevron" aria-hidden="true">
                   {aboutPortalOpenSignout ? '▼' : '▶'}
                 </span>
@@ -2675,22 +2899,21 @@ function PortalHubPage() {
                 className="portal-hub-purpose-panel"
                 hidden={!aboutPortalOpenSignout}
               >
+                <p className="portal-hub-purpose-text">{t('hub.aboutGuestLine1')}</p>
                 <p className="portal-hub-purpose-text">
-                  The AESOP Student Portal helps you update your Afghanistan <strong>Ding</strong> number, see Ding number
-                  history after you sign in, and read <a href="/faq">FAQs</a>—using a magic link, not a password on this site.
-                </p>
-                <p className="portal-hub-purpose-text">
-                  Portal sections: <a href={portalHubHref()}>Profile</a>, <a href="/profile">Edit Ding</a>, and{' '}
-                  <a href="/faq">FAQ</a>. Not connected?{' '}
+                  {t('hub.aboutGuestSectionsLead')}{' '}
+                  <a href={portalHubHref()}>{t('nav.profile')}</a>,{' '}
+                  <a href="/profile">{t('nav.editDing')}</a>, {t('hub.aboutGuestAnd')}{' '}
+                  <a href="/faq">{t('intent.faq')}</a>. {t('hub.aboutGuestNotConnected')}{' '}
                   <a href="#portal-magic-link-form" className="portal-intent-inline-link">
-                    Request a magic link
+                    {t('intent.requestMagicLink')}
                   </a>{' '}
-                  above with your AESOP ID.
+                  {t('hub.aboutGuestRequestAbove')}
                 </p>
               </div>
             </section>
             <p className="portal-hub-footnote">
-              Prefer the main site?{' '}
+              {t('hub.preferMainSite')}{' '}
               <a href="https://aesopafghanistan.org/">aesopafghanistan.org</a>
             </p>
           </>
@@ -2701,6 +2924,7 @@ function PortalHubPage() {
 }
 
 function PortalGuestProfilePage() {
+  const { t } = usePortalI18n();
   const intent = typeof window !== 'undefined' ? getPortalUrlIntent() : '';
   const { isAdmin } = usePortalClassGrade();
 
@@ -2715,19 +2939,14 @@ function PortalGuestProfilePage() {
       <div className="portal-card portal-content portal-hub-card">
         <PortalSectionLinks current="profile" isAdmin={isAdmin} />
         {intent === 'profile' ? <PortalIntentNotice intent="profile" /> : null}
-        <p className="portal-hub-intro">
-          Sign in with your magic link to update your Afghanistan Ding number, view history, or request help with a
-          non-Afghan number.
-        </p>
+        <p className="portal-hub-intro">{t('hub.profileIntro')}</p>
         <div id="portal-magic-link-form" className="portal-signin-panel">
-          <h3 className="portal-signin-heading">Connect with your AESOP ID</h3>
-          <p className="portal-signin-lead">
-            Enter the student ID AESOP gave you. We&apos;ll email a magic link; open it on this device to finish signing in.
-          </p>
-          <MagicLinkRequestForm inputId="portalMagicUserIdProfile" submitLabel="Email me a magic link" />
+          <h3 className="portal-signin-heading">{t('hub.signInHeading')}</h3>
+          <p className="portal-signin-lead">{t('hub.signInLead')}</p>
+          <MagicLinkRequestForm inputId="portalMagicUserIdProfile" />
         </div>
         <p className="portal-hub-footnote">
-          <a href="/faq">Read FAQs</a>
+          <a href="/faq">{t('hub.readFaqs')}</a>
           <span className="portal-footer-sep" aria-hidden="true">
             {' '}
             ·{' '}
@@ -5623,25 +5842,24 @@ function PortalShellApp() {
     };
   }, [signedIn]);
 
+  let page;
   if (segment === 'admin-emails') {
-    return <PortalAdminEmailsPage />;
+    page = <PortalAdminEmailsPage />;
+  } else if (segment === 'admin-campaigns') {
+    page = <PortalAdminCampaignsPage />;
+  } else if (segment === 'admin') {
+    page = <PortalAdminPage />;
+  } else if (segment === 'profile') {
+    page = signedIn ? <PortalProfilePage /> : <PortalGuestProfilePage />;
+  } else {
+    page = <PortalHubPage />;
   }
-  if (segment === 'admin-campaigns') {
-    return <PortalAdminCampaignsPage />;
-  }
-  if (segment === 'admin') {
-    return <PortalAdminPage />;
-  }
-  if (segment === 'profile') {
-    if (signedIn) {
-      return <PortalProfilePage />;
-    }
-    return <PortalGuestProfilePage />;
-  }
-  return <PortalHubPage />;
+
+  return <PortalLanguageProvider>{page}</PortalLanguageProvider>;
 }
 
 function PortalProfilePage() {
+  const { t } = usePortalI18n();
   const {
     studentName,
     studentEmail,
@@ -5653,6 +5871,8 @@ function PortalProfilePage() {
   } = usePortalStudentRecord();
   const { isAdmin } = usePortalClassGrade();
   const showAdminFeatures = isAdmin && !isPortalImpersonating();
+  const sessionComplete = studentUserId.length > 0 && studentEmail.length > 0;
+  const isApplicantProfile = readPortalIsApplied();
 
   /** Single open accordion panel on Edit Ding (others close automatically). */
   const [activeDingPanel, setActiveDingPanel] = useState(null); // null | 'update' | 'history' | 'help'
@@ -5874,13 +6094,29 @@ function PortalProfilePage() {
   return (
     <PortalLayout>
       <div className="portal-card portal-content">
-        <PortalSectionLinks current="profile" isAdmin={showAdminFeatures} />
-        {!canUpdateDing ? (
+        <PortalSectionLinks
+          current="profile"
+          isAdmin={showAdminFeatures}
+          showEditDingLink={!isApplicantProfile}
+        />
+        {!sessionComplete ? (
           <div className="portal-session-banner" role="status">
-            <p className="portal-session-banner-title">Session incomplete</p>
+            <p className="portal-session-banner-title">{t('profile.sessionIncompleteTitle')}</p>
             <p className="portal-session-banner-text">
-              Go back to{' '}
-              <a href={portalHubHref()}>Profile</a> and connect with your AESOP ID so we can load your account.
+              {t('profile.sessionIncompletePrefix')}{' '}
+              <a href={portalHubHref()}>{t('profile.backToProfile')}</a>{' '}
+              {t('profile.sessionIncompleteSuffix')}
+            </p>
+          </div>
+        ) : null}
+
+        {sessionComplete && isApplicantProfile ? (
+          <div className="portal-session-banner" role="status">
+            <p className="portal-session-banner-title">{t('profile.applicantBlockedTitle')}</p>
+            <p className="portal-session-banner-text">
+              {t('profile.applicantBlockedPrefix')}{' '}
+              <a href={portalHubHref()}>{t('profile.backToProfile')}</a>{' '}
+              {t('profile.applicantBlockedSuffix')}
             </p>
           </div>
         ) : null}

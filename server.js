@@ -59,6 +59,7 @@ const {
   getPortalVoiceMemoStatus,
   getPortalVoiceMemoStream,
 } = require('./services/portalVoiceMemo');
+const { getPortalCalendarForApplicant } = require('./services/portalCalendar');
 const {
   sanitizeEmail,
   isValidEmail,
@@ -97,14 +98,9 @@ function resolvePortalContactEmail() {
 }
 
 /**
- * Resolve a signed-in user's role, class/section, and calculated grade.
- *
- * When the Google Classroom sync is enabled and Postgres is configured, Classroom
- * roles and grades come from the database (daily sync). People profile, Ding data,
- * and legacy tabs remain on Google Sheets.
- *
- * @param {{ userId: string, email: string, name: string, peopleStatus?: string }} params
- * @returns {Promise<{ isTeacher: boolean, teacherClasses: string, classSection: string, calculatedGrade: string, classGrades: Array<{ classSection: string, calculatedGrade: string }>, isApplied: boolean, isApplicant: boolean, peopleStatus: string }>}
+ * @param {string} userId
+ * @param {boolean} isApplicant
+ * @returns {Promise<string>}
  */
 async function resolveApplicationStatus(userId, isApplicant) {
   if (!isApplicant || !userId) {
@@ -241,6 +237,26 @@ async function verifyPortalSessionBody(userId, email) {
     return null;
   }
   return profile;
+}
+
+const PORTAL_APPLICANT_DING_MESSAGE =
+  'Applicants cannot update Ding numbers here. Ding updates are for enrolled students and teachers.';
+
+/**
+ * @param {string} userId
+ * @param {{ peopleStatus?: string }|null|undefined} [profile]
+ * @returns {Promise<boolean>}
+ */
+async function isPortalApplicantProfile(userId, profile) {
+  try {
+    const applicant = await getApplicantRowByAesopId(userId);
+    if (applicant) {
+      return true;
+    }
+  } catch (error) {
+    console.warn('Applicants sheet lookup failed during Ding access check:', formatErrorForLog(error));
+  }
+  return isAppliedPeopleStatus(resolvePeopleStatus(userId, profile?.peopleStatus || ''));
 }
 
 /**
@@ -555,6 +571,7 @@ const portalVoiceMemoStreamRateLimiter = createRateLimiter({
   windowMs: 15 * 60 * 1000,
   max: 120,
 });
+const portalCalendarRateLimiter = createRateLimiter({ name: 'portal-calendar', windowMs: 15 * 60 * 1000, max: 40 });
 
 app.post('/api/update-ding-number', dingUpdateRateLimiter, async (req, res) => {
   try {
@@ -597,6 +614,10 @@ app.post('/api/update-ding-number', dingUpdateRateLimiter, async (req, res) => {
 
     if (sanitizeEmail(profile.email) !== emailSan) {
       return res.status(403).json({ error: 'Unable to update. Please sign in again from the magic link.' });
+    }
+
+    if (await isPortalApplicantProfile(userId, profile)) {
+      return res.status(403).json({ error: PORTAL_APPLICANT_DING_MESSAGE });
     }
 
     const greetingName =
@@ -689,6 +710,10 @@ app.post('/api/portal-request-ding-help', portalDingHelpRateLimiter, async (req,
       return res.status(403).json({ error: 'Unable to send request. Please sign in again from the magic link.' });
     }
 
+    if (await isPortalApplicantProfile(userId, profile)) {
+      return res.status(403).json({ error: PORTAL_APPLICANT_DING_MESSAGE });
+    }
+
     const adminTo = resolvePortalContactEmail();
     if (!adminTo) {
       console.error('Portal Ding help: no valid portalContactEmail or email.from in configuration.');
@@ -746,6 +771,10 @@ app.post('/api/portal-ding-history', portalDingHistoryRateLimiter, async (req, r
 
     if (sanitizeEmail(profile.email) !== emailSan) {
       return res.status(403).json({ error: 'Unable to load history. Please sign in again from the magic link.' });
+    }
+
+    if (await isPortalApplicantProfile(userId, profile)) {
+      return res.status(403).json({ error: PORTAL_APPLICANT_DING_MESSAGE });
     }
 
     const entries = await getPortalDingChangeHistory(userId);
@@ -1276,7 +1305,6 @@ app.post('/api/portal-admin/email/campaign-status', portalAdminRateLimiter, asyn
   }
 });
 
-
 app.post('/api/portal-voice-memo/status', portalVoiceMemoRateLimiter, async (req, res) => {
   try {
     let { userId, email } = req.body;
@@ -1297,6 +1325,29 @@ app.post('/api/portal-voice-memo/status', portalVoiceMemoRateLimiter, async (req
     console.error('Error loading portal voice memo status:', formatErrorForLog(error));
     const status = error.statusCode || 500;
     res.status(status).json({ error: error.message || 'Could not load voice memo status.' });
+  }
+});
+
+app.post('/api/portal-calendar', portalCalendarRateLimiter, async (req, res) => {
+  try {
+    let { userId, email } = req.body;
+
+    if (!userId || typeof userId !== 'string' || !email || typeof email !== 'string') {
+      return res.status(400).json({ error: 'ID and email are required.' });
+    }
+
+    userId = sanitizeIdentifier(userId);
+    const emailSan = sanitizeEmail(email);
+    if (!userId || !emailSan) {
+      return res.status(400).json({ error: 'Invalid ID or email.' });
+    }
+
+    const calendar = await getPortalCalendarForApplicant({ userId, email: emailSan });
+    res.json({ success: true, ...calendar });
+  } catch (error) {
+    console.error('Error loading portal application calendar:', formatErrorForLog(error));
+    const status = error.statusCode || 500;
+    res.status(status).json({ error: error.message || 'Could not load application calendar.' });
   }
 });
 

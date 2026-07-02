@@ -757,6 +757,85 @@ async function getPortalDingChangeHistory(userId, options = {}) {
 }
 
 /**
+ * Read shared application calendar rows from the Calendar sheet tab.
+ * @returns {Promise<{ sheetName: string, entries: Array<{ process: string, date: string }> }>}
+ */
+async function getPortalApplicationCalendar() {
+  const gs = config.googleSheets || {};
+  const sheetName = String(gs.calendarSheetName || "Calendar").trim();
+  const headerRowNum = Math.max(1, parseInt(String(gs.calendarHeaderRow || "1"), 10) || 1);
+  const processHeader = String(gs.calendarProcessHeader || "Application process").trim();
+  const dateHeader = String(gs.calendarDateHeader || "Date").trim();
+
+  const doc = await initGoogleSheets();
+  const worksheet = await getWorksheetByTitle(doc, sheetName);
+  if (!worksheet) {
+    return { sheetName, entries: [] };
+  }
+
+  await worksheet.loadHeaderRow(headerRowNum);
+  const headerValues = Array.isArray(worksheet.headerValues) ? worksheet.headerValues : [];
+  const processIdx = headerValues.findIndex(
+    (header) => String(header || "").trim().toLowerCase() === processHeader.toLowerCase(),
+  );
+  const dateIdx = headerValues.findIndex(
+    (header) => String(header || "").trim().toLowerCase() === dateHeader.toLowerCase(),
+  );
+
+  if (processIdx < 0 || dateIdx < 0) {
+    throw new Error(
+      `Calendar sheet "${sheetName}" is missing required columns. Expected "${processHeader}" and "${dateHeader}".`,
+    );
+  }
+
+  const rows = await worksheet.getRows();
+  /** @type {Array<{ process: string, date: string, sortMs: number|null, order: number }>} */
+  const collected = [];
+  let order = 0;
+
+  for (const row of rows) {
+    const rowData = Array.isArray(row._rawData) ? row._rawData : [];
+    const process = String(rowData[processIdx] ?? "").trim();
+    const dateRaw = rowData[dateIdx];
+    const dateText = dateRaw == null ? "" : String(dateRaw).trim();
+    if (!process && !dateText) {
+      continue;
+    }
+
+    const parsedMs = parseSheetTimestamp(dateRaw);
+    let dateLabel = dateText;
+    if (parsedMs !== -Infinity && Number.isFinite(parsedMs)) {
+      dateLabel = formatEasternSheetTimestamp(new Date(parsedMs));
+    }
+
+    collected.push({
+      process,
+      date: dateLabel,
+      sortMs: parsedMs !== -Infinity && Number.isFinite(parsedMs) ? parsedMs : null,
+      order: order++,
+    });
+  }
+
+  collected.sort((a, b) => {
+    if (a.sortMs != null && b.sortMs != null && a.sortMs !== b.sortMs) {
+      return a.sortMs - b.sortMs;
+    }
+    if (a.sortMs != null && b.sortMs == null) {
+      return -1;
+    }
+    if (a.sortMs == null && b.sortMs != null) {
+      return 1;
+    }
+    return a.order - b.order;
+  });
+
+  return {
+    sheetName,
+    entries: collected.map(({ process, date }) => ({ process, date })),
+  };
+}
+
+/**
  * Append a row to the Ding changes tab: A=id, B=datetime serial, C=ding#, D=name or source label, E=note, F=phone.
  * Column D may be a fixed label (e.g. "Student portal") for self-service updates rather than a person's name.
  * Column B is a Sheets date/time serial (numeric); we apply `m/d/yyyy, h:mm:ss AM/PM` so it
@@ -2314,6 +2393,7 @@ module.exports = {
   listAllClassroomRoleRows,
   searchPeopleProfiles,
   getPortalDingChangeHistory,
+  getPortalApplicationCalendar,
   getPortalClassGradeByStudentName,
   getPortalTeacherByUserId,
   getRoleByEmail,

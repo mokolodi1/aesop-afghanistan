@@ -87,6 +87,14 @@ function buildGoogleSheetsConfig(fileSection) {
       "admissionsFilterColumns",
       "Level,Round 1,Round 2",
     ),
+    calendarSheetName: envOr("GOOGLE_CALENDAR_SHEET_NAME", "calendarSheetName", "Calendar"),
+    calendarHeaderRow: envOr("GOOGLE_CALENDAR_HEADER_ROW", "calendarHeaderRow", "1"),
+    calendarProcessHeader: envOr(
+      "GOOGLE_CALENDAR_PROCESS_HEADER",
+      "calendarProcessHeader",
+      "Application process",
+    ),
+    calendarDateHeader: envOr("GOOGLE_CALENDAR_DATE_HEADER", "calendarDateHeader", "Date"),
   };
 }
 
