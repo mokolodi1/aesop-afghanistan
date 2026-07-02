@@ -1,4 +1,4 @@
-const { findEmailById } = require('./googleSheets');
+const { findProfileById } = require('./googleSheets');
 const { generateAndStoreMagicLink, sendMagicLinkEmail } = require('./magicLink');
 const { sanitizeEmail, sanitizeIdentifier } = require('../utils/validation');
 const { formatErrorForLog } = require('../utils/errorLogging');
@@ -11,19 +11,22 @@ const { formatErrorForLog } = require('../utils/errorLogging');
 async function checkIdAndSendMagicLink(userId) {
   try {
     const sanitizedId = sanitizeIdentifier(userId);
-    const foundEmail = await findEmailById(sanitizedId);
-    
-    if (!foundEmail) {
+    const profile = await findProfileById(sanitizedId);
+
+    if (!profile?.email) {
       return { success: true, userFound: false };
     }
 
-    const sanitizedEmail = sanitizeEmail(foundEmail);
+    const sanitizedEmail = sanitizeEmail(profile.email);
 
     // Generate and store magic link
     const magicLinkData = await generateAndStoreMagicLink(sanitizedEmail, sanitizedId);
-    
+
     // Send magic link email
-    await sendMagicLinkEmail(sanitizedEmail, magicLinkData.token);
+    await sendMagicLinkEmail(sanitizedEmail, magicLinkData.token, {
+      name: profile.name,
+      userId: sanitizedId,
+    });
     
     return { success: true, userFound: true };
   } catch (error) {

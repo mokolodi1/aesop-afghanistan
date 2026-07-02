@@ -1209,6 +1209,13 @@ html[dir='rtl'] .portal-class-accordion-chevron {
   margin-top: 4px;
 }
 
+.portal-coming-soon-message {
+  margin: 16px 0 0;
+  font-size: 1.05rem;
+  line-height: 1.55;
+  color: var(--portal-text, #1a1a1a);
+}
+
 .portal-hub-lead {
   margin: 0 0 12px;
   font-size: 15px;
@@ -1314,6 +1321,11 @@ html[dir='rtl'] .portal-class-accordion-chevron {
   line-height: 1.45;
   color: var(--aesop-ink);
   word-break: break-word;
+}
+
+.portal-hub-meta-value--message {
+  font-weight: 400;
+  line-height: 1.55;
 }
 
 .portal-hub-meta-mono {
@@ -1845,6 +1857,11 @@ html[dir='rtl'] .portal-class-accordion-chevron {
 }
 
 .portal-application-status--rejected {
+  display: block;
+  padding: 12px 14px;
+  border-radius: 10px;
+  font-weight: 500;
+  line-height: 1.55;
   color: #991b1b;
   background: #fee2e2;
   border: 1px solid #fca5a5;
@@ -1984,6 +2001,11 @@ html[dir='rtl'] .portal-class-accordion-chevron {
 
 .portal-calendar-table tbody tr:last-child td {
   border-bottom: none;
+}
+
+.portal-calendar-deadline-note {
+  margin-top: 14px;
+  margin-bottom: 0;
 }
 
 .portal-admin-stat-row--section dt {
@@ -2346,6 +2368,14 @@ html[dir='rtl'] .portal-class-accordion-chevron {
  * portal's palette. Teacher uses the AESOP teal tint; Student uses a calm blue
  * tint echoing the Dashboard's blue role pill.
  */
+.portal-role-badges {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  vertical-align: middle;
+}
+
 .portal-role-badge {
   display: inline-flex;
   align-items: center;

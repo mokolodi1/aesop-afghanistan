@@ -380,7 +380,7 @@ app.post('/api/request-magic-link', magicLinkRateLimiter, async (req, res) => {
       });
       return res.json({
         success: false,
-        message: 'Your ID is invalid. Please enter a correct ID.'
+        message: INVALID_MAGIC_LINK_ID_MESSAGE,
       });
     }
 
@@ -565,6 +565,10 @@ const portalTeacherRosterRateLimiter = createRateLimiter({ name: 'portal-teacher
 const portalStudentGradesRateLimiter = createRateLimiter({ name: 'portal-student-grades', windowMs: 15 * 60 * 1000, max: 20 });
 
 const portalAdminRateLimiter = createRateLimiter({ name: 'portal-admin', windowMs: 15 * 60 * 1000, max: 200 });
+
+const INVALID_MAGIC_LINK_ID_MESSAGE =
+  'Your ID is invalid. Please enter a correct ID. Please enter the AESOP ID you received in your email.';
+
 const portalVoiceMemoRateLimiter = createRateLimiter({ name: 'portal-voice-memo', windowMs: 15 * 60 * 1000, max: 40 });
 const portalVoiceMemoStreamRateLimiter = createRateLimiter({
   name: 'portal-voice-memo-stream',
@@ -1106,7 +1110,6 @@ app.post('/api/portal-admin/impersonate', portalAdminRateLimiter, async (req, re
     if (!targetUserId) {
       return res.status(400).json({ success: false, error: 'targetUserId is required.' });
     }
-    const viewRole = req.body.viewRole === 'teacher' ? 'teacher' : 'student';
     const targetProfile = await findProfileById(targetUserId);
     if (!targetProfile) {
       return res.status(404).json({ success: false, error: 'Person not found for that AESOP ID.' });
@@ -1137,7 +1140,6 @@ app.post('/api/portal-admin/impersonate', portalAdminRateLimiter, async (req, re
       name: studentName,
       peopleStatus: targetProfile.peopleStatus,
     });
-    const effectiveIsTeacher = !isApplied && viewRole === 'teacher';
     const applicationStatus = await resolveApplicationStatus(targetUserId, isApplicant);
     res.json({
       success: true,
@@ -1149,15 +1151,13 @@ app.post('/api/portal-admin/impersonate', portalAdminRateLimiter, async (req, re
       classSection: isApplied ? '' : classSection,
       calculatedGrade: isApplied ? '' : calculatedGrade,
       classGrades: isApplied ? [] : classGrades,
-      isTeacher: effectiveIsTeacher,
-      teacherClasses: effectiveIsTeacher ? teacherClasses : '',
+      isTeacher: isApplied ? false : isTeacher,
+      teacherClasses: isApplied ? '' : teacherClasses,
       isAdmin: false,
       isApplied,
       isApplicant,
       applicationStatus,
       peopleStatus,
-      viewRole,
-      actualIsTeacher: isTeacher,
     });
   } catch (error) {
     console.error('Error in admin impersonate:', formatErrorForLog(error));

@@ -20,6 +20,7 @@ import {
   translateVoiceMemoDurationWarning,
   applyPortalDocumentLocale,
 } from './portalI18n.js';
+import { getPortalApplicationCalendarEntries } from './portalApplicationCalendar.js';
 import './styles.css';
 
 const PortalLanguageContext = React.createContext({
@@ -136,13 +137,12 @@ function resolveClientPeopleStatus(aesopId, rawStatus) {
   return '';
 }
 
+function readPortalIsApplicant() {
+  return readSessionField('studentPortalIsApplicant') === '1';
+}
+
 function readPortalIsApplied() {
-  if (readSessionField('studentPortalIsApplied') === '1') {
-    return true;
-  }
-  const aesopId = readSessionField('studentPortalUserId').trim();
-  const peopleStatus = resolveClientPeopleStatus(aesopId, readSessionField('studentPortalPeopleStatus'));
-  return isAppliedPeopleStatus(peopleStatus);
+  return readPortalIsApplicant();
 }
 
 /** Keys written when a student completes magic-link verification */
@@ -159,6 +159,7 @@ const PORTAL_SESSION_STORAGE_KEYS = [
   'studentPortalTeacherClasses',
   'studentPortalIsAdmin',
   'studentPortalIsApplied',
+  'studentPortalIsApplicant',
   'studentPortalPeopleStatus',
   'studentPortalApplicationStatus',
 ];
@@ -383,7 +384,6 @@ function applyPortalSessionFromApi(data, options = {}) {
   if (typeof sessionStorage === 'undefined') {
     return;
   }
-  const viewRole = options.viewRole;
   const allowAdmin = options.allowAdmin === true;
   const nameFromApi = typeof data.name === 'string' ? data.name.trim() : '';
   const emailFromApi = typeof data.email === 'string' ? data.email.trim() : '';
@@ -393,15 +393,7 @@ function applyPortalSessionFromApi(data, options = {}) {
   const classFromApi = typeof data.classSection === 'string' ? data.classSection.trim() : '';
   const gradeFromApi = typeof data.calculatedGrade === 'string' ? data.calculatedGrade.trim() : '';
   const classGradesFromApi = normalizeClassGrades(data.classGrades);
-  const effectiveViewRole =
-    options.viewRole === 'teacher' || data.viewRole === 'teacher'
-      ? 'teacher'
-      : options.viewRole === 'student' || data.viewRole === 'student'
-        ? 'student'
-        : data.isTeacher === true
-          ? 'teacher'
-          : 'student';
-  const isTeacherFromApi = effectiveViewRole === 'teacher' && data.isApplied !== true;
+  const isTeacherFromApi = data.isTeacher === true && data.isApplicant !== true;
   const teachingFromApi =
     typeof data.teacherClasses === 'string' ? data.teacherClasses.trim() : '';
   const peopleStatusFromApi =
@@ -409,8 +401,6 @@ function applyPortalSessionFromApi(data, options = {}) {
       ? data.peopleStatus.trim()
       : resolveClientPeopleStatus(userIdFromApi, '');
   const isApplicantFromApi = data.isApplicant === true;
-  const isAppliedFromApi =
-    isApplicantFromApi || data.isApplied === true || isAppliedPeopleStatus(peopleStatusFromApi);
 
   if (nameFromApi) {
     sessionStorage.setItem('studentPortalName', nameFromApi);
@@ -447,7 +437,7 @@ function applyPortalSessionFromApi(data, options = {}) {
   } else {
     sessionStorage.removeItem('studentPortalGrade');
   }
-  writeClassGradesToSession(isAppliedFromApi ? [] : classGradesFromApi);
+  writeClassGradesToSession(isApplicantFromApi ? [] : classGradesFromApi);
   if (isTeacherFromApi) {
     sessionStorage.setItem('studentPortalIsTeacher', '1');
   } else {
@@ -458,7 +448,8 @@ function applyPortalSessionFromApi(data, options = {}) {
   } else {
     sessionStorage.removeItem('studentPortalIsAdmin');
   }
-  if (isAppliedFromApi) {
+  if (isApplicantFromApi) {
+    sessionStorage.setItem('studentPortalIsApplicant', '1');
     sessionStorage.setItem('studentPortalIsApplied', '1');
     sessionStorage.setItem('studentPortalPeopleStatus', peopleStatusFromApi || 'applied');
     sessionStorage.removeItem('studentPortalClass');
@@ -466,6 +457,7 @@ function applyPortalSessionFromApi(data, options = {}) {
     sessionStorage.removeItem('studentPortalClassGrades');
     sessionStorage.removeItem('studentPortalTeacherClasses');
   } else {
+    sessionStorage.removeItem('studentPortalIsApplicant');
     sessionStorage.removeItem('studentPortalIsApplied');
     sessionStorage.removeItem('studentPortalPeopleStatus');
   }
@@ -484,13 +476,25 @@ function applyPortalSessionFromApi(data, options = {}) {
   touchPortalSessionExpiry();
 }
 
-function startPortalImpersonation(data, viewRole = 'student') {
+function startPortalImpersonation(data) {
   if (!isPortalImpersonating()) {
     backupCurrentPortalSessionForImpersonation();
     sessionStorage.setItem(PORTAL_IMPERSONATING_KEY, '1');
   }
-  sessionStorage.setItem(PORTAL_IMPERSONATION_ROLE_KEY, viewRole === 'teacher' ? 'teacher' : 'student');
-  applyPortalSessionFromApi(data, { viewRole });
+  sessionStorage.removeItem(PORTAL_IMPERSONATION_ROLE_KEY);
+  applyPortalSessionFromApi(data);
+}
+
+async function openPortalAsPerson(targetUserId) {
+  const trimmed = targetUserId.trim();
+  if (!trimmed) {
+    throw new Error('AESOP ID is required.');
+  }
+  const data = await adminApiPost('/api/portal-admin/impersonate', {
+    targetUserId: trimmed,
+  });
+  startPortalImpersonation(data);
+  window.location.assign(portalHubHref());
 }
 
 function stopPortalImpersonation() {
@@ -512,19 +516,6 @@ function stopPortalImpersonation() {
   }
   touchPortalSessionExpiry();
   window.location.assign('/admin');
-}
-
-async function openPortalAsPerson(targetUserId, viewRole = 'student') {
-  const trimmed = targetUserId.trim();
-  if (!trimmed) {
-    throw new Error('AESOP ID is required.');
-  }
-  const data = await adminApiPost('/api/portal-admin/impersonate', {
-    targetUserId: trimmed,
-    viewRole: viewRole === 'teacher' ? 'teacher' : 'student',
-  });
-  startPortalImpersonation(data, viewRole === 'teacher' ? 'teacher' : 'student');
-  window.location.assign(portalHubHref());
 }
 
 async function adminApiPost(path, body = {}) {
@@ -649,7 +640,7 @@ async function loadPortalClassGradeFromApi() {
           ? data.peopleStatus.trim()
           : resolveClientPeopleStatus(userId, '');
       const isApplicant = data.isApplicant === true;
-      const isApplied = isApplicant || data.isApplied === true || isAppliedPeopleStatus(peopleStatus);
+      const isApplied = isApplicant;
       const applicationStatus =
         typeof data.applicationStatus === 'string' ? data.applicationStatus.trim() : '';
       sessionStorage.setItem('studentPortalClass', isApplied ? '' : classSection);
@@ -665,11 +656,13 @@ async function loadPortalClassGradeFromApi() {
       } else {
         sessionStorage.removeItem('studentPortalIsAdmin');
       }
-      if (isApplied) {
+      if (isApplicant) {
+        sessionStorage.setItem('studentPortalIsApplicant', '1');
         sessionStorage.setItem('studentPortalIsApplied', '1');
         sessionStorage.setItem('studentPortalPeopleStatus', peopleStatus || 'applied');
         sessionStorage.removeItem('studentPortalTeacherClasses');
       } else {
+        sessionStorage.removeItem('studentPortalIsApplicant');
         sessionStorage.removeItem('studentPortalIsApplied');
         sessionStorage.removeItem('studentPortalPeopleStatus');
         if (teacherClasses) {
@@ -722,7 +715,7 @@ function usePortalClassGrade() {
   const [isTeacher, setIsTeacher] = useState(() => readSessionField('studentPortalIsTeacher') === '1');
   const [teacherClasses, setTeacherClasses] = useState(() => readSessionField('studentPortalTeacherClasses'));
   const [isApplied, setIsApplied] = useState(() => readPortalIsApplied());
-  const [isApplicant, setIsApplicant] = useState(false);
+  const [isApplicant, setIsApplicant] = useState(() => readPortalIsApplicant());
   const [applicationStatus, setApplicationStatus] = useState(() =>
     readSessionField('studentPortalApplicationStatus'),
   );
@@ -783,7 +776,6 @@ function usePortalClassGrade() {
 }
 
 function computeHasStudentCategory({
-  isTeacher,
   isApplied,
   isApplicant,
   aesopId,
@@ -792,7 +784,6 @@ function computeHasStudentCategory({
   classGrades,
 }) {
   return (
-    !isTeacher &&
     !isApplied &&
     !isApplicant &&
     aesopId !== '' &&
@@ -802,24 +793,21 @@ function computeHasStudentCategory({
 
 /** Hide student fields (class, grade) for teachers-only; hide Teaching for students-only. */
 function usePortalProfileSections() {
-  const impersonating = isPortalImpersonating();
-  const impersonationRole = readSessionField(PORTAL_IMPERSONATION_ROLE_KEY);
   const aesopId = readSessionField('studentPortalUserId').trim();
   const portalClassGrade = usePortalClassGrade();
   const { studentClass, studentGrade, classGrades, isTeacher, isApplied, isApplicant, peopleStatus } =
     portalClassGrade;
-  const isApplicantProfile = isApplicant || isApplied;
+  const hasApplicantPortalAccess = isApplicant === true;
   const hasStudentCategory = computeHasStudentCategory({
-    isTeacher,
-    isApplied,
-    isApplicant,
+    isApplied: false,
+    isApplicant: false,
     aesopId,
     studentClass,
     studentGrade,
     classGrades,
   });
 
-  if (isApplicantProfile) {
+  if (hasApplicantPortalAccess) {
     return {
       ...portalClassGrade,
       showStudentFields: false,
@@ -827,27 +815,18 @@ function usePortalProfileSections() {
       hasStudentCategory: false,
       isApplied: true,
       isApplicant: true,
+      hasApplicantPortalAccess: true,
       peopleStatus: peopleStatus || 'applied',
-    };
-  }
-
-  if (impersonating) {
-    const studentView = impersonationRole !== 'teacher';
-    return {
-      ...portalClassGrade,
-      showStudentFields: studentView,
-      showTeacherFields: !studentView,
-      hasStudentCategory: studentView,
-      isApplied: false,
     };
   }
 
   return {
     ...portalClassGrade,
-    showStudentFields: hasStudentCategory,
-    showTeacherFields: isTeacher,
-    hasStudentCategory,
+    showStudentFields: false,
+    showTeacherFields: false,
+    hasStudentCategory: false,
     isApplied: false,
+    hasApplicantPortalAccess: false,
   };
 }
 
@@ -1634,7 +1613,7 @@ function MagicLinkRequestForm({ inputId, submitLabel }) {
       if (data.success === false) {
         setStatus({
           type: 'error',
-          text: data.message || 'Your ID is invalid. Please enter a correct ID.',
+          text: data.message || t('magicLink.invalidIdNotFound'),
         });
         return;
       }
@@ -1695,6 +1674,28 @@ function MagicLinkRequestForm({ inputId, submitLabel }) {
         {status.text}
       </div>
     </div>
+  );
+}
+
+function PortalSignInOnlyContent({ inputId = 'portalMagicUserId' }) {
+  const { t } = usePortalI18n();
+  return (
+    <>
+      <h2 className="portal-welcome portal-welcome-signout">{t('hub.studentPortalTitle')}</h2>
+      <div id="portal-magic-link-form" className="portal-signin-panel">
+        <h3 className="portal-signin-heading">{t('hub.signInHeading')}</h3>
+        <p className="portal-signin-lead">{t('hub.signInLead')}</p>
+        <MagicLinkRequestForm inputId={inputId} />
+      </div>
+      <p className="portal-hub-footnote">
+        <a href="/faq">{t('hub.readFaqs')}</a>
+        <span className="portal-footer-sep" aria-hidden="true">
+          {' '}
+          ·{' '}
+        </span>
+        <a href="https://aesopafghanistan.org/">aesopafghanistan.org</a>
+      </p>
+    </>
   );
 }
 
@@ -1947,6 +1948,14 @@ function PortalRoleBadge({ isTeacher, hasStudentCategory, isAdmin, isApplied, cl
   if (!isTeacher && !hasStudentCategory) {
     return null;
   }
+  if (isTeacher && hasStudentCategory) {
+    return (
+      <span className={['portal-role-badges', className].filter(Boolean).join(' ')}>
+        <span className="portal-role-badge portal-role-badge--teacher">{t('role.teacher')}</span>
+        <span className="portal-role-badge portal-role-badge--student">{t('role.student')}</span>
+      </span>
+    );
+  }
   const variant = isTeacher ? 'portal-role-badge--teacher' : 'portal-role-badge--student';
   const classes = ['portal-role-badge', variant, className].filter(Boolean).join(' ');
   return <span className={classes}>{isTeacher ? t('role.teacher') : t('role.student')}</span>;
@@ -2073,11 +2082,10 @@ function PortalLayout({ children }) {
   const portalHomeHref = portalHubHref();
   const signedIn = isPortalSessionCompleteSync();
   const impersonating = isPortalImpersonating();
-  const impersonationRole = readSessionField(PORTAL_IMPERSONATION_ROLE_KEY);
   const fullName = readSessionField('studentPortalName').trim();
   const aesopId = readSessionField('studentPortalUserId').trim();
   const headerEmail = readSessionField('studentPortalEmail').trim();
-  const { studentClass, studentGrade, classGrades, teacherClasses, showStudentFields, showTeacherFields } =
+  const { studentClass, studentGrade, classGrades, teacherClasses, showStudentFields, showTeacherFields, hasApplicantPortalAccess } =
     usePortalProfileSections();
 
   const dash = '—';
@@ -2090,7 +2098,7 @@ function PortalLayout({ children }) {
       emptyDisplay={dash}
     />
   );
-  const impersonationRoleLabel = impersonationRole === 'teacher' ? 'teacher' : 'student';
+  const profileHeaderLabel = impersonating ? 'Person profile' : t('header.yourProfile');
 
   return (
     <div className="portal-page">
@@ -2121,9 +2129,7 @@ function PortalLayout({ children }) {
             {impersonating ? (
               <div className="portal-header-impersonation" role="status">
                 <p className="portal-header-impersonation-kicker">Admin impersonation</p>
-                <p className="portal-header-impersonation-title">
-                  You&apos;re logged in as this {impersonationRoleLabel}
-                </p>
+                <p className="portal-header-impersonation-title">You&apos;re viewing this person&apos;s profile</p>
                 <p className="portal-header-impersonation-name">{fullNameDisplay}</p>
                 <p className="portal-header-impersonation-meta">
                   {aesopId ? `AESOP ID ${aesopId}` : 'AESOP ID unavailable'}
@@ -2152,43 +2158,45 @@ function PortalLayout({ children }) {
           <div className="portal-header-col portal-header-col--student">
             {signedIn ? (
               <div className="portal-header-student-wrap">
-                <dl
-                  className="portal-header-id-meta"
-                  aria-label={impersonating ? `${impersonationRoleLabel} profile` : t('header.yourProfile')}
-                >
-                  <dt className="portal-header-id-label">{t('header.fullName')}</dt>
-                  <dd className="portal-header-id-value">{fullNameDisplay}</dd>
-                  <dt className="portal-header-id-label">{t('header.aesopId')}</dt>
-                  <dd className="portal-header-id-value portal-header-id-mono portal-ltr">{aesopId || dash}</dd>
-                  <dt className="portal-header-id-label">{t('header.email')}</dt>
-                  <dd className="portal-header-id-value portal-header-id-email portal-ltr">{headerEmail || dash}</dd>
-                  {showStudentFields ? (
-                    <>
-                      <dt className="portal-header-id-label">{t('header.class')}</dt>
-                      <dd className="portal-header-id-value">
-                        <PortalMultiClassList
-                          value={studentClass}
-                          classGrades={classGrades}
-                          emptyDisplay={dash}
-                        />
-                      </dd>
-                      <dt className="portal-header-id-label">{t('header.grade')}</dt>
-                      <dd className="portal-header-id-value">{gradeDisplay}</dd>
-                    </>
-                  ) : null}
-                  {showTeacherFields ? (
-                    <>
-                      <dt className="portal-header-id-label">{t('header.teaching')}</dt>
-                      <dd className="portal-header-id-value">
-                        <PortalMultiClassList
-                          value={teacherClasses}
-                          emptyDisplay={dash}
-                          moreAriaLabel="Additional teaching classes"
-                        />
-                      </dd>
-                    </>
-                  ) : null}
-                </dl>
+                {hasApplicantPortalAccess || impersonating ? (
+                  <dl
+                    className="portal-header-id-meta"
+                    aria-label={profileHeaderLabel}
+                  >
+                    <dt className="portal-header-id-label">{t('header.fullName')}</dt>
+                    <dd className="portal-header-id-value">{fullNameDisplay}</dd>
+                    <dt className="portal-header-id-label">{t('header.aesopId')}</dt>
+                    <dd className="portal-header-id-value portal-header-id-mono portal-ltr">{aesopId || dash}</dd>
+                    <dt className="portal-header-id-label">{t('header.email')}</dt>
+                    <dd className="portal-header-id-value portal-header-id-email portal-ltr">{headerEmail || dash}</dd>
+                    {showStudentFields ? (
+                      <>
+                        <dt className="portal-header-id-label">{t('header.class')}</dt>
+                        <dd className="portal-header-id-value">
+                          <PortalMultiClassList
+                            value={studentClass}
+                            classGrades={classGrades}
+                            emptyDisplay={dash}
+                          />
+                        </dd>
+                        <dt className="portal-header-id-label">{t('header.grade')}</dt>
+                        <dd className="portal-header-id-value">{gradeDisplay}</dd>
+                      </>
+                    ) : null}
+                    {showTeacherFields ? (
+                      <>
+                        <dt className="portal-header-id-label">{t('header.teaching')}</dt>
+                        <dd className="portal-header-id-value">
+                          <PortalMultiClassList
+                            value={teacherClasses}
+                            emptyDisplay={dash}
+                            moreAriaLabel="Additional teaching classes"
+                          />
+                        </dd>
+                      </>
+                    ) : null}
+                  </dl>
+                ) : null}
                 {impersonating ? null : (
                   <button type="button" className="portal-header-logout" onClick={() => logOutPortalClient()}>
                     {t('header.logOff')}
@@ -2265,7 +2273,7 @@ function usePortalStudentRecord() {
   const [newDingNumber, setNewDingNumber] = useState(() => readSessionField('studentPortalNewDingNumber'));
 
   const canUpdateDing =
-    studentUserId.length > 0 && studentEmail.length > 0 && !readPortalIsApplied();
+    studentUserId.length > 0 && studentEmail.length > 0 && !readPortalIsApplicant();
   return {
     studentName,
     studentEmail,
@@ -2275,30 +2283,6 @@ function usePortalStudentRecord() {
     setNewDingNumber,
     canUpdateDing,
   };
-}
-
-function PortalIntentNotice({ intent }) {
-  const { t } = usePortalI18n();
-  if (intent !== 'profile' && intent !== 'faq') return null;
-  const title = intent === 'profile' ? t('intent.editDing') : t('intent.faq');
-  return (
-    <div className="portal-intent-banner" role="status">
-      <p className="portal-intent-banner-title">
-        {intent === 'profile' ? t('intent.signInProfileTitle') : t('intent.signInGenericTitle')}
-      </p>
-      <p className="portal-intent-banner-text">
-        {t('intent.openedLink', { title })}{' '}
-        <a href="#portal-magic-link-form" className="portal-intent-inline-link">
-          {t('intent.requestMagicLink')}
-        </a>{' '}
-        {t('intent.magicLinkHelpBeforeFaq')}{' '}
-        <a href="/faq" className="portal-intent-inline-link">
-          {t('intent.faq')}
-        </a>{' '}
-        {t('intent.magicLinkHelpAfterFaq')}
-      </p>
-    </div>
-  );
 }
 
 function PortalVoiceMemoSection({ studentUserId, studentEmail, enabled }) {
@@ -2405,7 +2389,11 @@ function PortalVoiceMemoSection({ studentUserId, studentEmail, enabled }) {
             : t('voiceMemo.notSubmitted')}
       </div>
       {!voiceMemoLoading && !voiceMemoStatus.submitted ? (
-        <p className="portal-voice-memo-pending-note">{t('voiceMemo.pendingNote')}</p>
+        <div className="portal-voice-memo-instructions">
+          <p className="portal-field-hint portal-voice-memo-instructions-text">
+            {t('voiceMemo.instructionsParagraph')}
+          </p>
+        </div>
       ) : null}
 
       <div className="portal-ding-accordion portal-voice-memo-accordion" aria-label={t('voiceMemo.accordionAria')}>
@@ -2485,14 +2473,7 @@ function PortalVoiceMemoSection({ studentUserId, studentEmail, enabled }) {
                     <p className="portal-field-hint">{t('voiceMemo.audioUnavailable')}</p>
                   )}
                 </>
-              ) : (
-                <>
-                  <p className="portal-field-hint">{t('voiceMemo.pendingNote')}</p>
-                  <p className="portal-field-hint">
-                    {voiceMemoStatus.submissionInstructions || t('voiceMemo.submissionDefault')}
-                  </p>
-                </>
-              )}
+              ) : null}
             </div>
           ) : null}
         </div>
@@ -2501,61 +2482,10 @@ function PortalVoiceMemoSection({ studentUserId, studentEmail, enabled }) {
   );
 }
 
-function PortalCalendarSection({ studentUserId, studentEmail, enabled }) {
-  const { t } = usePortalI18n();
+function PortalCalendarSection({ enabled }) {
+  const { locale, t } = usePortalI18n();
   const [calendarOpen, setCalendarOpen] = useState(false);
-  const [calendarLoading, setCalendarLoading] = useState(false);
-  const [calendarError, setCalendarError] = useState('');
-  const [calendarEntries, setCalendarEntries] = useState([]);
-  const [calendarLoaded, setCalendarLoaded] = useState(false);
-
-  useEffect(() => {
-    if (!enabled || !calendarOpen) {
-      return undefined;
-    }
-    let cancelled = false;
-    setCalendarLoading(true);
-    setCalendarError('');
-    (async () => {
-      try {
-        const response = await fetch('/api/portal-calendar', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ userId: studentUserId, email: studentEmail }),
-        });
-        const data = await response.json();
-        if (cancelled) {
-          return;
-        }
-        if (!response.ok) {
-          setCalendarError(data.error || t('calendar.loadError'));
-          setCalendarEntries([]);
-          setCalendarLoaded(true);
-          return;
-        }
-        if (data.eligible !== true) {
-          setCalendarEntries([]);
-          setCalendarLoaded(true);
-          return;
-        }
-        setCalendarEntries(Array.isArray(data.entries) ? data.entries : []);
-        setCalendarLoaded(true);
-      } catch {
-        if (!cancelled) {
-          setCalendarError(t('calendar.networkError'));
-          setCalendarEntries([]);
-          setCalendarLoaded(true);
-        }
-      } finally {
-        if (!cancelled) {
-          setCalendarLoading(false);
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [enabled, calendarOpen, studentUserId, studentEmail, t]);
+  const calendarEntries = useMemo(() => getPortalApplicationCalendarEntries(locale), [locale]);
 
   if (!enabled) {
     return null;
@@ -2587,35 +2517,25 @@ function PortalCalendarSection({ studentUserId, studentEmail, enabled }) {
               aria-labelledby="application-calendar-tab"
               className="portal-ding-panel portal-calendar-panel"
             >
-              {calendarLoading ? <p className="portal-field-hint">{t('calendar.loading')}</p> : null}
-              {calendarError ? (
-                <p className="portal-field-error" role="alert">
-                  {calendarError}
-                </p>
-              ) : null}
-              {!calendarLoading && calendarLoaded && calendarEntries.length === 0 && !calendarError ? (
-                <p className="portal-field-hint">{t('calendar.empty')}</p>
-              ) : null}
-              {!calendarLoading && calendarEntries.length > 0 ? (
-                <div className="portal-calendar-scroll">
-                  <table className="portal-calendar-table">
-                    <thead>
-                      <tr>
-                        <th scope="col">{t('calendar.process')}</th>
-                        <th scope="col">{t('calendar.date')}</th>
+              <div className="portal-calendar-scroll">
+                <table className="portal-calendar-table">
+                  <thead>
+                    <tr>
+                      <th scope="col">{t('calendar.process')}</th>
+                      <th scope="col">{t('calendar.date')}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {calendarEntries.map((entry, index) => (
+                      <tr key={`${entry.process}-${entry.date}-${index}`}>
+                        <td>{entry.process}</td>
+                        <td>{entry.date}</td>
                       </tr>
-                    </thead>
-                    <tbody>
-                      {calendarEntries.map((entry, index) => (
-                        <tr key={`${entry.process}-${entry.date}-${index}`}>
-                          <td>{entry.process || '—'}</td>
-                          <td>{entry.date || '—'}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              ) : null}
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <p className="portal-field-hint portal-calendar-deadline-note">{t('calendar.deadlineNote')}</p>
             </div>
           ) : null}
         </div>
@@ -2624,18 +2544,18 @@ function PortalCalendarSection({ studentUserId, studentEmail, enabled }) {
   );
 }
 
-function PortalAdminImpersonateActions({ targetUserId, isTeacher = false, compact = false }) {
-  const [loadingRole, setLoadingRole] = useState('');
+function PortalAdminImpersonateActions({ targetUserId, compact = false }) {
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  const openAs = async (viewRole) => {
-    setLoadingRole(viewRole);
+  const openProfile = async () => {
+    setLoading(true);
     setError('');
     try {
-      await openPortalAsPerson(targetUserId, viewRole);
+      await openPortalAsPerson(targetUserId);
     } catch (err) {
-      setError(err.message || 'Could not open portal.');
-      setLoadingRole('');
+      setError(err.message || 'Could not open profile.');
+      setLoading(false);
     }
   };
 
@@ -2648,26 +2568,26 @@ function PortalAdminImpersonateActions({ targetUserId, isTeacher = false, compac
       <button
         type="button"
         className="portal-admin-action portal-admin-action--primary"
-        disabled={!!loadingRole}
-        onClick={() => openAs('student')}
+        disabled={loading}
+        onClick={openProfile}
       >
-        {loadingRole === 'student' ? 'Opening…' : 'Open as student'}
+        {loading ? 'Opening…' : 'Open profile'}
       </button>
-      {isTeacher ? (
-        <button
-          type="button"
-          className="portal-admin-action"
-          disabled={!!loadingRole}
-          onClick={() => openAs('teacher')}
-        >
-          {loadingRole === 'teacher' ? 'Opening…' : 'Open as teacher'}
-        </button>
-      ) : null}
       {error ? (
         <p className="portal-admin-status portal-admin-status--error" role="alert">
           {error}
         </p>
       ) : null}
+    </div>
+  );
+}
+
+function PortalComingSoonContent() {
+  const { t } = usePortalI18n();
+  return (
+    <div className="portal-coming-soon">
+      <h2 className="portal-welcome">{t('hub.comingSoonTitle')}</h2>
+      <p className="portal-coming-soon-message">{t('hub.comingSoonMessage')}</p>
     </div>
   );
 }
@@ -2687,15 +2607,16 @@ function PortalHubPage() {
     hasStudentCategory,
     isApplied,
     applicationStatus,
+    hasApplicantPortalAccess,
   } = usePortalProfileSections();
   const signedIn = isPortalSessionCompleteSync();
   const impersonating = isPortalImpersonating();
   const showAdminFeatures = isAdmin && !impersonating;
   const intent = typeof window !== 'undefined' ? getPortalUrlIntent() : '';
-  const [aboutPortalOpenSignedIn, setAboutPortalOpenSignedIn] = useState(false);
-  const [aboutPortalOpenSignout, setAboutPortalOpenSignout] = useState(false);
   const welcomeName =
     studentName.trim() || (isApplied ? t('hub.welcomeApplicant') : t('hub.welcomeStudent'));
+  const isRound1Accepted =
+    String(applicationStatus || '').trim().toLowerCase() === 'accepted';
 
   useEffect(() => {
     if (!signedIn && intent) {
@@ -2707,11 +2628,12 @@ function PortalHubPage() {
     <PortalLayout>
       <div className="portal-card portal-content portal-hub-card">
         {signedIn ? (
-          <>
+          hasApplicantPortalAccess ? (
+            <>
             <PortalSectionLinks
               current="hub"
               isAdmin={showAdminFeatures}
-              showEditDingLink={!isApplied}
+              showEditDingLink={false}
             />
             <h2 className="portal-welcome">
               {t('hub.welcomeNamed', { name: welcomeName })}
@@ -2810,19 +2732,21 @@ function PortalHubPage() {
                   </dd>
                 </div>
               ) : null}
+              {isRound1Accepted ? (
+                <div className="portal-hub-meta-row portal-hub-meta-row--next-steps">
+                  <dt className="portal-hub-meta-label">{t('hub.nextSteps')}</dt>
+                  <dd className="portal-hub-meta-value portal-hub-meta-value--message">
+                    {t('hub.nextStepsMessage')}
+                  </dd>
+                </div>
+              ) : null}
             </dl>
             <PortalVoiceMemoSection
               studentUserId={studentUserId}
               studentEmail={studentEmail}
               enabled={signedIn && studentUserId.length > 0 && studentEmail.length > 0}
             />
-            <PortalCalendarSection
-              studentUserId={studentUserId}
-              studentEmail={studentEmail}
-              enabled={
-                signedIn && isApplied && studentUserId.length > 0 && studentEmail.length > 0
-              }
-            />
+            <PortalCalendarSection enabled={signedIn && isRound1Accepted} />
             {isTeacher || showAdminFeatures ? (
               <PortalTeacherRoster
                 rosterEnabled={isTeacher || showAdminFeatures}
@@ -2830,129 +2754,22 @@ function PortalHubPage() {
               />
             ) : null}
             {showStudentFields && signedIn ? <PortalStudentGrades isStudent /> : null}
-            <section className="portal-hub-purpose portal-hub-purpose-collapsible" aria-label={t('hub.aboutPortal')}>
-              <button
-                type="button"
-                className="portal-hub-purpose-toggle"
-                id="portal-hub-purpose-heading"
-                aria-expanded={aboutPortalOpenSignedIn}
-                aria-controls="portal-hub-purpose-signedin-panel"
-                onClick={() => setAboutPortalOpenSignedIn((open) => !open)}
-              >
-                <span className="portal-hub-purpose-heading">{t('hub.aboutPortal')}</span>
-                <span className="portal-hub-purpose-chevron" aria-hidden="true">
-                  {aboutPortalOpenSignedIn ? '▼' : '▶'}
-                </span>
-              </button>
-              <div
-                id="portal-hub-purpose-signedin-panel"
-                className="portal-hub-purpose-panel"
-                hidden={!aboutPortalOpenSignedIn}
-              >
-                <p className="portal-hub-purpose-text">
-                  {isApplied ? (
-                    <>
-                      {t('hub.aboutApplicantPrefix')}{' '}
-                      <a href="/faq">{t('hub.faqLink')}</a>.
-                    </>
-                  ) : (
-                    <>
-                      {t('hub.aboutStudentPrefix')}{' '}
-                      <a href="/faq">{t('hub.faqLink')}</a>. {t('hub.aboutStudentSuffix')}{' '}
-                      <a href="/profile">{t('nav.editDing')}</a> {t('hub.aboutStudentEnd')}
-                    </>
-                  )}
-                </p>
-              </div>
-            </section>
-          </>
+            </>
+          ) : (
+            <>
+              {showAdminFeatures ? (
+                <PortalSectionLinks
+                  current="hub"
+                  isAdmin={showAdminFeatures}
+                  showEditDingLink={false}
+                />
+              ) : null}
+              <PortalComingSoonContent />
+            </>
+          )
         ) : (
-          <>
-            <PortalIntentNotice intent={intent} />
-            <PortalSectionLinks
-              current="hub"
-              isAdmin={showAdminFeatures}
-              showEditDingLink={!isApplied}
-            />
-            <h2 className="portal-welcome portal-welcome-signout">{t('hub.studentPortalTitle')}</h2>
-            <div id="portal-magic-link-form" className="portal-signin-panel">
-              <h3 className="portal-signin-heading">{t('hub.signInHeading')}</h3>
-              <p className="portal-signin-lead">{t('hub.signInLead')}</p>
-              <MagicLinkRequestForm inputId="portalMagicUserId" />
-            </div>
-            <section className="portal-hub-purpose portal-hub-purpose-collapsible" aria-label={t('hub.aboutPortal')}>
-              <button
-                type="button"
-                className="portal-hub-purpose-toggle"
-                id="portal-hub-purpose-signout-toggle"
-                aria-expanded={aboutPortalOpenSignout}
-                aria-controls="portal-hub-purpose-signout-panel"
-                onClick={() => setAboutPortalOpenSignout((open) => !open)}
-              >
-                <span className="portal-hub-purpose-heading">{t('hub.aboutPortal')}</span>
-                <span className="portal-hub-purpose-chevron" aria-hidden="true">
-                  {aboutPortalOpenSignout ? '▼' : '▶'}
-                </span>
-              </button>
-              <div
-                id="portal-hub-purpose-signout-panel"
-                className="portal-hub-purpose-panel"
-                hidden={!aboutPortalOpenSignout}
-              >
-                <p className="portal-hub-purpose-text">{t('hub.aboutGuestLine1')}</p>
-                <p className="portal-hub-purpose-text">
-                  {t('hub.aboutGuestSectionsLead')}{' '}
-                  <a href={portalHubHref()}>{t('nav.profile')}</a>,{' '}
-                  <a href="/profile">{t('nav.editDing')}</a>, {t('hub.aboutGuestAnd')}{' '}
-                  <a href="/faq">{t('intent.faq')}</a>. {t('hub.aboutGuestNotConnected')}{' '}
-                  <a href="#portal-magic-link-form" className="portal-intent-inline-link">
-                    {t('intent.requestMagicLink')}
-                  </a>{' '}
-                  {t('hub.aboutGuestRequestAbove')}
-                </p>
-              </div>
-            </section>
-            <p className="portal-hub-footnote">
-              {t('hub.preferMainSite')}{' '}
-              <a href="https://aesopafghanistan.org/">aesopafghanistan.org</a>
-            </p>
-          </>
+          <PortalSignInOnlyContent />
         )}
-      </div>
-    </PortalLayout>
-  );
-}
-
-function PortalGuestProfilePage() {
-  const { t } = usePortalI18n();
-  const intent = typeof window !== 'undefined' ? getPortalUrlIntent() : '';
-  const { isAdmin } = usePortalClassGrade();
-
-  useEffect(() => {
-    if (intent === 'profile') {
-      document.getElementById('portal-magic-link-form')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }
-  }, [intent]);
-
-  return (
-    <PortalLayout>
-      <div className="portal-card portal-content portal-hub-card">
-        <PortalSectionLinks current="profile" isAdmin={isAdmin} />
-        {intent === 'profile' ? <PortalIntentNotice intent="profile" /> : null}
-        <p className="portal-hub-intro">{t('hub.profileIntro')}</p>
-        <div id="portal-magic-link-form" className="portal-signin-panel">
-          <h3 className="portal-signin-heading">{t('hub.signInHeading')}</h3>
-          <p className="portal-signin-lead">{t('hub.signInLead')}</p>
-          <MagicLinkRequestForm inputId="portalMagicUserIdProfile" />
-        </div>
-        <p className="portal-hub-footnote">
-          <a href="/faq">{t('hub.readFaqs')}</a>
-          <span className="portal-footer-sep" aria-hidden="true">
-            {' '}
-            ·{' '}
-          </span>
-          <a href="https://aesopafghanistan.org/">aesopafghanistan.org</a>
-        </p>
       </div>
     </PortalLayout>
   );
@@ -2983,7 +2800,6 @@ function PortalFaqPage() {
 
 function PortalAdminViewAs() {
   const [targetUserId, setTargetUserId] = useState('');
-  const [viewRole, setViewRole] = useState('student');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -2996,19 +2812,18 @@ function PortalAdminViewAs() {
     setLoading(true);
     setError('');
     try {
-      await openPortalAsPerson(trimmed, viewRole);
+      await openPortalAsPerson(trimmed);
     } catch (err) {
-      setError(err.message || 'Could not open portal.');
+      setError(err.message || 'Could not open profile.');
       setLoading(false);
     }
   };
 
   return (
-    <section className="portal-admin-panel portal-admin-view-as-pinned" aria-label="View as student or teacher">
+    <section className="portal-admin-panel portal-admin-view-as-pinned" aria-label="Open person profile">
       <p className="portal-admin-hint">
-        Open the full student or teacher portal as any AESOP ID. You can review their profile, grades or
-        classes, and edit their Ding number. Use <strong>Back to admin page</strong> in the header when you
-        are done.
+        Open the full portal profile for any AESOP ID, including student and teacher information when
+        someone has both roles. Use <strong>Back to admin page</strong> in the header when you are done.
       </p>
       <div className="portal-admin-lookup-form">
         <label htmlFor="portal-admin-view-as-id" className="portal-admin-lookup-label">
@@ -3023,22 +2838,13 @@ function PortalAdminViewAs() {
             onChange={(event) => setTargetUserId(event.target.value)}
             placeholder="Enter AESOP ID"
           />
-          <select
-            className="portal-admin-lookup-input"
-            value={viewRole}
-            onChange={(event) => setViewRole(event.target.value)}
-            aria-label="Portal role to open"
-          >
-            <option value="student">Student view</option>
-            <option value="teacher">Teacher view</option>
-          </select>
           <button
             type="button"
             className="portal-admin-action portal-admin-action--primary"
             disabled={loading}
             onClick={openPortal}
           >
-            {loading ? 'Opening…' : 'Open portal as this person'}
+            {loading ? 'Opening…' : 'Open profile'}
           </button>
         </div>
       </div>
@@ -3326,15 +3132,8 @@ function PortalAdminPage() {
   if (!signedIn) {
     return (
       <PortalLayout>
-        <div className="portal-card portal-content portal-admin-card">
-          <PortalSectionLinks current="admin" isAdmin={false} />
-          <div className="portal-session-banner" role="status">
-            <p className="portal-session-banner-title">Sign in required</p>
-            <p className="portal-session-banner-text">
-              Admin tools require a portal session.{' '}
-              <a href={portalHubHref()}>Sign in on Profile</a> with your magic link first.
-            </p>
-          </div>
+        <div className="portal-card portal-content portal-hub-card">
+          <PortalSignInOnlyContent />
         </div>
       </PortalLayout>
     );
@@ -3715,10 +3514,7 @@ function PortalAdminPage() {
             {lookupResult?.detail ? (
               <div className="portal-admin-lookup-detail">
                 <h3 className="portal-admin-subheading">{lookupResult.detail.name || 'Student'}</h3>
-                <PortalAdminImpersonateActions
-                  targetUserId={lookupResult.detail.id}
-                  isTeacher={lookupResult.detail.isTeacher === true}
-                />
+                <PortalAdminImpersonateActions targetUserId={lookupResult.detail.id} />
                 <dl className="portal-admin-stats">
                   <div className="portal-admin-stat-row">
                     <dt>AESOP ID</dt>
@@ -4824,14 +4620,8 @@ function PortalAdminCampaignsPage() {
   if (!signedIn) {
     return (
       <PortalLayout>
-        <div className="portal-card portal-content portal-admin-card">
-          <PortalSectionLinks current="admin-campaigns" isAdmin={false} />
-          <div className="portal-session-banner" role="status">
-            <p className="portal-session-banner-title">Sign in required</p>
-            <p className="portal-session-banner-text">
-              Sign in from the portal home page to view email campaigns.
-            </p>
-          </div>
+        <div className="portal-card portal-content portal-hub-card">
+          <PortalSignInOnlyContent />
         </div>
       </PortalLayout>
     );
@@ -5344,14 +5134,8 @@ function PortalAdminEmailsPage() {
   if (!signedIn) {
     return (
       <PortalLayout>
-        <div className="portal-card portal-content portal-admin-card">
-          <PortalSectionLinks current="admin-emails" isAdmin={false} />
-          <div className="portal-session-banner" role="status">
-            <p className="portal-session-banner-title">Sign in required</p>
-            <p className="portal-session-banner-text">
-              Sign in from the portal home page to use admin email tools.
-            </p>
-          </div>
+        <div className="portal-card portal-content portal-hub-card">
+          <PortalSignInOnlyContent />
         </div>
       </PortalLayout>
     );
@@ -5850,7 +5634,7 @@ function PortalShellApp() {
   } else if (segment === 'admin') {
     page = <PortalAdminPage />;
   } else if (segment === 'profile') {
-    page = signedIn ? <PortalProfilePage /> : <PortalGuestProfilePage />;
+    page = signedIn ? <PortalProfilePage /> : <PortalHubPage />;
   } else {
     page = <PortalHubPage />;
   }
@@ -5872,7 +5656,8 @@ function PortalProfilePage() {
   const { isAdmin } = usePortalClassGrade();
   const showAdminFeatures = isAdmin && !isPortalImpersonating();
   const sessionComplete = studentUserId.length > 0 && studentEmail.length > 0;
-  const isApplicantProfile = readPortalIsApplied();
+  const hasApplicantPortalAccess = readPortalIsApplicant();
+  const isApplicantProfile = hasApplicantPortalAccess;
 
   /** Single open accordion panel on Edit Ding (others close automatically). */
   const [activeDingPanel, setActiveDingPanel] = useState(null); // null | 'update' | 'history' | 'help'
@@ -6090,6 +5875,23 @@ function PortalProfilePage() {
       setDingHelpSubmitting(false);
     }
   };
+
+  if (sessionComplete && !hasApplicantPortalAccess) {
+    return (
+      <PortalLayout>
+        <div className="portal-card portal-content">
+          {showAdminFeatures ? (
+            <PortalSectionLinks
+              current="profile"
+              isAdmin={showAdminFeatures}
+              showEditDingLink={false}
+            />
+          ) : null}
+          <PortalComingSoonContent />
+        </div>
+      </PortalLayout>
+    );
+  }
 
   return (
     <PortalLayout>

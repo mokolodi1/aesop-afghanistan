@@ -16,7 +16,7 @@ const TRANSLATIONS = {
     'nav.campaigns': 'Campaigns',
     'nav.portalNav': 'Portal navigation',
 
-    'header.studentPortal': 'Student Portal',
+    'header.studentPortal': 'AESOP Portal',
     'header.taglineEducation': 'Education',
     'header.taglineService': 'Service',
     'header.taglineCommunity': 'Community',
@@ -29,7 +29,7 @@ const TRANSLATIONS = {
     'header.category': 'Category',
     'header.logOff': 'Log off',
     'header.yourProfile': 'Your profile',
-    'header.homeAria': 'AESOP Afghanistan Student Portal — home',
+    'header.homeAria': 'AESOP Afghanistan AESOP Portal — home',
 
     'hub.welcomeNamed': 'Welcome, {{name}}!',
     'hub.welcomeApplicant': 'Applicant',
@@ -39,6 +39,9 @@ const TRANSLATIONS = {
     'hub.notSetYet': 'Not set yet',
     'hub.phoneOnFile': 'Phone on file',
     'hub.applicationStatus': 'Application Status',
+    'hub.nextSteps': 'Next steps',
+    'hub.nextStepsMessage':
+      'Dear Applicant, thank you for applying. If you want to be a successful candidate for this round of AESOP Applications, please check your emails regularly and follow the instructions shared with you there.',
     'hub.aboutPortal': 'About this portal',
     'hub.aboutApplicantPrefix':
       'This secure applicant portal is where you sign in with a magic link—there is no password to remember on this site. Check your application status, Round 2 voice memo, and the application calendar here, and read',
@@ -57,14 +60,17 @@ const TRANSLATIONS = {
     'hub.profileIntro':
       'Sign in with your magic link to update your Afghanistan Ding number, view history, or request help with a non-Afghan number.',
     'hub.faqLink': 'frequently asked questions',
-    'hub.studentPortalTitle': 'Student Portal',
+    'hub.studentPortalTitle': 'AESOP Portal',
+    'hub.comingSoonTitle': 'Welcome to the AESOP Portal',
+    'hub.comingSoonMessage': 'Student/Teacher Feature will be visible soon.',
     'hub.signInHeading': 'Connect with your AESOP ID',
     'hub.signInLead':
       'Enter the student ID AESOP gave you. We\'ll email a magic link; open it on this device to finish signing in.',
     'hub.readFaqs': 'Read FAQs',
 
     'applicationStatus.accepted': 'Your application is accepted for Round 1 selection.',
-    'applicationStatus.rejected': 'You are rejected, please apply next year.',
+    'applicationStatus.rejected':
+      'Thank you for applying. We received over 9,000 applications this summer, and unfortunately your application was not selected to advance at this time. We hope you apply again next year.',
     'applicationStatus.pending': 'Pending',
 
     'role.applicant': 'Applicant',
@@ -76,7 +82,7 @@ const TRANSLATIONS = {
     'voiceMemo.submitted': 'Submitted',
     'voiceMemo.notSubmitted': 'Not submitted yet',
     'voiceMemo.pendingNote':
-      'Your voice note takes 1 to 48 hours to be visible if you have already submitted it.',
+      'Your voice note can take up to 48 hours to appear on the AESOP Portal after you send it.',
     'voiceMemo.label': 'Voice memo',
     'voiceMemo.submittedOn': 'Submitted on',
     'voiceMemo.recordingLength': 'Recording length',
@@ -84,8 +90,8 @@ const TRANSLATIONS = {
       'Your submission is recorded, but the audio file is not available to play yet. Please check again later.',
     'voiceMemo.audioPlayError':
       'Could not play your voice memo. Please try again or contact support.',
-    'voiceMemo.submissionDefault':
-      'Submit your Round 2 voice memo using the instructions you received by email. Once it is received, this page will show Submitted and you can listen to your recording here.',
+    'voiceMemo.instructionsParagraph':
+      'Submit your Round 2 voice memo using the instructions you received by email. Once it is received, this page will show Submitted and you can listen to your recording here. Your voice note can take up to 48 hours to appear on the AESOP Portal after you send it. You may submit your voice notes as many times as you\'d like, but only ONE voice notes will be saved.',
     'voiceMemo.loadError': 'Could not load voice memo status.',
     'voiceMemo.networkError': 'Network error. Please try again.',
     'voiceMemo.sectionAria': 'Round 2 voice memo',
@@ -105,12 +111,23 @@ const TRANSLATIONS = {
     'calendar.loadError': 'Could not load calendar.',
     'calendar.sectionAria': 'Application calendar',
     'calendar.accordionAria': 'Calendar',
+    'calendar.deadlineNote': 'All dates are due by 11:59 PM Afghanistan Time.',
+    'calendar.event.signalVoice': 'Signal voice messages (students send in)',
+    'calendar.event.manualReview': 'Manual review (of signal + essay)',
+    'calendar.event.interviews': 'Interviews',
+    'calendar.event.decisions': 'Decisions',
+    'calendar.event.studentsAdmitted': 'Students admitted',
+    'calendar.event.openingCeremony': 'Opening Ceremony',
+    'calendar.event.classesStart': 'Classes start',
+    'calendar.event.classesEnd': 'Classes end',
 
     'magicLink.aesopId': 'AESOP ID',
     'magicLink.enterId': 'Enter your ID',
     'magicLink.rememberId': 'Remember my ID',
     'magicLink.submit': 'Email me a magic link',
     'magicLink.invalidId': 'Please enter a valid ID.',
+    'magicLink.invalidIdNotFound':
+      'Your ID is invalid. Please enter a correct ID. Please enter the AESOP ID you received in your email.',
     'magicLink.sending': 'Checking ID and sending magic link...',
     'magicLink.networkError': 'Internal error. Please try again.',
 
@@ -144,7 +161,7 @@ const TRANSLATIONS = {
     'nav.campaigns': 'کمپین‌ها',
     'nav.portalNav': 'مسیریابی پورتال',
 
-    'header.studentPortal': 'پورتال محصلین',
+    'header.studentPortal': 'پورتال AESOP',
     'header.taglineEducation': 'آموزش',
     'header.taglineService': 'خدمت',
     'header.taglineCommunity': 'جامعه',
@@ -157,7 +174,7 @@ const TRANSLATIONS = {
     'header.category': 'کتگوری',
     'header.logOff': 'خروج',
     'header.yourProfile': 'پروفایل شما',
-    'header.homeAria': 'پورتال محصلین AESOP افغانستان — صفحه اصلی',
+    'header.homeAria': 'پورتال AESOP افغانستان AESOP — صفحه اصلی',
 
     'hub.welcomeNamed': 'خوش آمدید، {{name}}!',
     'hub.welcomeApplicant': 'متقاضی',
@@ -167,6 +184,9 @@ const TRANSLATIONS = {
     'hub.notSetYet': 'هنوز ثبت نشده',
     'hub.phoneOnFile': 'شماره تماس ثبت‌شده',
     'hub.applicationStatus': 'وضعیت درخواست',
+    'hub.nextSteps': 'گام‌های بعدی',
+    'hub.nextStepsMessage':
+      'متقاضی گرامی، از درخواست شما سپاسگزاریم. اگر می‌خواهید در این دور از درخواست‌های AESOP نامزد موفق باشید، لطفاً به‌طور منظم ایمیل‌های خود را بررسی کنید و دستورالعمل‌هایی را که در آنجا با شما به اشتراک گذاشته شده است دنبال کنید.',
     'hub.aboutPortal': 'درباره این پورتال',
     'hub.aboutApplicantPrefix':
       'این پورتال امن متقاضیان است که با لینک جادویی وارد می‌شوید — در این سایت رمز عبور وجود ندارد. وضعیت درخواست، یادداشت صوتی دور دوم و تقویم درخواست را اینجا ببینید و',
@@ -185,14 +205,17 @@ const TRANSLATIONS = {
     'hub.profileIntro':
       'با لینک جادویی وارد شوید تا شماره Ding افغانستان خود را به‌روز کنید، سابقه را ببینید یا در مورد شماره غیرافغانی درخواست کمک کنید.',
     'hub.faqLink': 'سوالات متداول',
-    'hub.studentPortalTitle': 'پورتال محصلین',
+    'hub.studentPortalTitle': 'پورتال AESOP',
+    'hub.comingSoonTitle': 'به پورتال AESOP خوش آمدید',
+    'hub.comingSoonMessage': 'ویژگی‌های محصل/معلم به‌زودی در دسترس خواهد بود.',
     'hub.signInHeading': 'با AESOP ID خود وصل شوید',
     'hub.signInLead':
       'AESOP ID که AESOP به شما داده را وارد کنید. ما یک لینک جادویی ایمیل می‌کنیم؛ آن را روی همین دستگاه باز کنید تا وارد شوید.',
     'hub.readFaqs': 'خواندن سوالات متداول',
 
     'applicationStatus.accepted': 'درخواست شما برای انتخاب دور اول پذیرفته شده است.',
-    'applicationStatus.rejected': 'درخواست شما رد شده است، لطفاً سال آینده دوباره درخواست دهید.',
+    'applicationStatus.rejected':
+      'از درخواست شما سپاسگزاریم. ما بیش از ۹٬۰۰۰ درخواست در این تابستان دریافت کردیم و متأسفانه درخواست شما در این مرحله انتخاب نشد. امیدواریم سال آینده دوباره درخواست دهید.',
     'applicationStatus.pending': 'در انتظار',
 
     'role.applicant': 'متقاضی',
@@ -204,7 +227,7 @@ const TRANSLATIONS = {
     'voiceMemo.submitted': 'ثبت شده',
     'voiceMemo.notSubmitted': 'هنوز ثبت نشده',
     'voiceMemo.pendingNote':
-      'اگر قبلاً یادداشت صوتی خود را فرستاده‌اید، نمایان شدن آن ۱ تا ۴۸ ساعت زمان می‌برد.',
+      'یادداشت صوتی شما ممکن است تا ۴۸ ساعت پس از ارسال در پورتال دانش‌آموز نمایان شود.',
     'voiceMemo.label': 'یادداشت صوتی',
     'voiceMemo.submittedOn': 'ثبت شده در',
     'voiceMemo.recordingLength': 'مدت ضبط',
@@ -212,8 +235,8 @@ const TRANSLATIONS = {
       'ارسال شما ثبت شده، اما فایل صوتی هنوز برای پخش در دسترس نیست. لطفاً بعداً دوباره بررسی کنید.',
     'voiceMemo.audioPlayError':
       'پخش یادداشت صوتی ممکن نشد. لطفاً دوباره تلاش کنید یا با پشتیبانی تماس بگیرید.',
-    'voiceMemo.submissionDefault':
-      'یادداشت صوتی دور دوم را طبق دستورالعمل ایمیل‌شده ارسال کنید. پس از دریافت، این صفحه «ثبت شده» را نشان می‌دهد و می‌توانید ضبط خود را بشنوید.',
+    'voiceMemo.instructionsParagraph':
+      'یادداشت صوتی دور دوم را طبق دستورالعمل ایمیل‌شده ارسال کنید. پس از دریافت، این صفحه «ثبت شده» را نشان می‌دهد و می‌توانید ضبط خود را بشنوید. یادداشت صوتی شما ممکن است تا ۴۸ ساعت پس از ارسال در پورتال AESOP نمایان شود. می‌توانید هر چند بار که بخواهید یادداشت صوتی بفرستید، اما فقط یک یادداشت صوتی ذخیره می‌شود.',
     'voiceMemo.loadError': 'بارگذاری وضعیت یادداشت صوتی ممکن نشد.',
     'voiceMemo.networkError': 'خطای شبکه. لطفاً دوباره تلاش کنید.',
     'voiceMemo.sectionAria': 'یادداشت صوتی دور دوم',
@@ -233,12 +256,23 @@ const TRANSLATIONS = {
     'calendar.loadError': 'بارگذاری تقویم ممکن نشد.',
     'calendar.sectionAria': 'تقویم درخواست',
     'calendar.accordionAria': 'تقویم',
+    'calendar.deadlineNote': 'همه تاریخ‌ها تا ساعت ۱۱:۵۹ شب به وقت افغانستان است.',
+    'calendar.event.signalVoice': 'پیام‌های صوتی Signal (ارسال توسط محصلین)',
+    'calendar.event.manualReview': 'بررسی دستی (Signal + انشا)',
+    'calendar.event.interviews': 'مصاحبه‌ها',
+    'calendar.event.decisions': 'تصمیم‌ها',
+    'calendar.event.studentsAdmitted': 'پذیرش محصلین',
+    'calendar.event.openingCeremony': 'مراسم افتتاح',
+    'calendar.event.classesStart': 'شروع صنف‌ها',
+    'calendar.event.classesEnd': 'پایان صنف‌ها',
 
     'magicLink.aesopId': 'AESOP ID',
     'magicLink.enterId': 'AESOP ID خود را وارد کنید',
     'magicLink.rememberId': 'AESOP ID مرا به خاطر بسپار',
     'magicLink.submit': 'لینک جادویی برایم بفرستید',
     'magicLink.invalidId': 'لطفاً یک AESOP ID معتبر وارد کنید.',
+    'magicLink.invalidIdNotFound':
+      'AESOP ID شما معتبر نیست. لطفاً AESOP ID درست را وارد کنید — همان شناسه‌ای که در ایمیل خود دریافت کرده‌اید.',
     'magicLink.sending': 'در حال بررسی AESOP ID و ارسال لینک جادویی…',
     'magicLink.networkError': 'خطای داخلی. لطفاً دوباره تلاش کنید.',
 

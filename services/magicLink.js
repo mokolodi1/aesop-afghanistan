@@ -1,6 +1,7 @@
 const crypto = require('crypto');
 const { eq, lt } = require('drizzle-orm');
 const { sendEmail } = require('./email');
+const { findProfileById } = require('./googleSheets');
 const { getDb, isDatabaseEnabled } = require('../db/index');
 const { magicLinks } = require('../db/schema');
 const { formatErrorForLog } = require('../utils/errorLogging');
@@ -209,10 +210,14 @@ async function verifyMagicLink(token) {
   };
 }
 
-async function sendMagicLinkEmail(email, token) {
+async function sendMagicLinkEmail(email, token, { name = '', userId = '' } = {}) {
+  const safeName = String(name || '').trim();
+  const safeUserId = String(userId || '').trim();
+  const greetingName = safeName ? escapeHtml(safeName) : 'there';
+
   if (!isFlyProduction()) {
     const magicLink = `${localDevMagicLinkOrigin()}/verify.html?token=${token}`;
-    console.log(`[magic-link] sign-in link for ${email}:`);
+    console.log(`[magic-link] sign-in link for ${email}${safeName ? ` (${safeName})` : ''}${safeUserId ? ` [${safeUserId}]` : ''}:`);
     console.log(magicLink);
     return;
   }
@@ -220,13 +225,21 @@ async function sendMagicLinkEmail(email, token) {
   const origin = magicLinkSiteOrigin();
   const magicLink = `${origin}/verify.html?token=${token}`;
 
-  const emailSubject = 'Sign in to your AESOP student portal';
+  const emailSubject = 'Sign in to your AESOP portal';
   const { ink, muted, accent, accentDark, skyTint, line } = AESOP_EMAIL;
   const safeLinkText = escapeHtml(magicLink);
   const innerHtml = `
       <p style="margin:0 0 16px;font-family:${FONT_HEADING};font-size:18px;font-weight:700;color:${ink};">
-        Sign in to the student portal
+        Sign in to the AESOP portal
       </p>
+      <p style="margin:0 0 12px;line-height:1.5;">
+        Hello ${greetingName},
+      </p>
+      ${
+        safeUserId
+          ? `<p style="margin:0 0 18px;line-height:1.5;">Your AESOP ID: <strong>${escapeHtml(safeUserId)}</strong></p>`
+          : ''
+      }
       <p style="margin:0 0 18px;line-height:1.5;">
         Use the link below on the same device where you requested access. It expires in <strong>15 minutes</strong>.
       </p>
@@ -250,7 +263,10 @@ async function sendMagicLinkEmail(email, token) {
   const emailHtml = wrapAesopEmail(innerHtml, { title: emailSubject });
 
   const emailText = [
-    'AESOP Afghanistan — Student portal',
+    'AESOP Afghanistan — AESOP portal',
+    '',
+    safeName ? `Hello ${safeName},` : 'Hello,',
+    safeUserId ? `Your AESOP ID: ${safeUserId}` : '',
     '',
     'Use this link to sign in (same device you used to request it). Expires in 15 minutes:',
     magicLink,
@@ -289,7 +305,14 @@ async function resendMagicLinkByToken(token) {
   const { email, userId } = linkData;
   await deleteMagicLinkRecord(token);
   const { token: newToken } = await generateAndStoreMagicLink(email, userId);
-  await sendMagicLinkEmail(email, newToken);
+  let profileName = '';
+  try {
+    const profile = await findProfileById(userId);
+    profileName = profile?.name || '';
+  } catch {
+    profileName = '';
+  }
+  await sendMagicLinkEmail(email, newToken, { name: profileName, userId });
 
   return {
     success: true,
