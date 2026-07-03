@@ -1164,6 +1164,7 @@ app.post('/api/portal-admin/impersonate', portalAdminRateLimiter, async (req, re
       peopleStatus: targetProfile.peopleStatus,
     });
     const applicationStatus = await resolveApplicationStatus(targetUserId, isApplicant);
+    const isReviewer = isPortalReviewer(targetProfile);
     res.json({
       success: true,
       email: emailFromSheet,
@@ -1177,6 +1178,7 @@ app.post('/api/portal-admin/impersonate', portalAdminRateLimiter, async (req, re
       isTeacher: isApplied ? false : isTeacher,
       teacherClasses: isApplied ? '' : teacherClasses,
       isAdmin: false,
+      isReviewer,
       isApplied,
       isApplicant,
       applicationStatus,

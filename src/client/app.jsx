@@ -2812,6 +2812,19 @@ function PortalHubPage() {
             ) : null}
             {showStudentFields && signedIn ? <PortalStudentGrades isStudent /> : null}
             </>
+          ) : isReviewer ? (
+            <>
+              <PortalSectionLinks
+                current="hub"
+                isAdmin={showAdminFeatures}
+                isReviewer={isReviewer}
+                showEditDingLink={false}
+              />
+              <h2 className="portal-welcome">
+                {t('hub.welcomeNamed', { name: welcomeName })}
+              </h2>
+              <p className="portal-field-hint">{t('hub.reviewerLead')}</p>
+            </>
           ) : (
             <>
               {showAdminFeatures ? (
@@ -6399,7 +6412,7 @@ function PortalProfilePage() {
     setNewDingNumber,
     canUpdateDing,
   } = usePortalStudentRecord();
-  const { isAdmin } = usePortalClassGrade();
+  const { isAdmin, isReviewer } = usePortalClassGrade();
   const showAdminFeatures = isAdmin && !isPortalImpersonating();
   const sessionComplete = studentUserId.length > 0 && studentEmail.length > 0;
   const hasApplicantPortalAccess = readPortalIsApplicant();
@@ -6622,7 +6635,7 @@ function PortalProfilePage() {
     }
   };
 
-  if (sessionComplete && !hasApplicantPortalAccess) {
+  if (sessionComplete && !hasApplicantPortalAccess && !isReviewer) {
     return (
       <PortalLayout>
         <div className="portal-card portal-content">

@@ -64,6 +64,8 @@ const TRANSLATIONS = {
     'hub.studentPortalTitle': 'AESOP Portal',
     'hub.comingSoonTitle': 'Welcome to the AESOP Portal',
     'hub.comingSoonMessage': 'Student/Teacher Feature will be visible soon.',
+    'hub.reviewerLead':
+      'Open Review Applications to score essays for applicants assigned to you.',
     'hub.signInHeading': 'Connect with your AESOP ID',
     'hub.signInLead':
       'Enter the student ID AESOP gave you. We\'ll email a magic link; open it on this device to finish signing in.',
@@ -155,7 +157,8 @@ const TRANSLATIONS = {
     'reviews.loading': 'Loading applications…',
     'reviews.loadError': 'Could not load review assignments.',
     'reviews.empty': 'No applications are assigned to you for review.',
-    'reviews.accessDenied': 'Reviewer access is required to view this page.',
+    'reviews.accessDenied':
+      'Reviewer access is required to view this page. Your AESOP ID must be marked as a reviewer on the People sheet (Reviewer column), then sign out and use a new magic link.',
     'reviews.applicantId': 'AESOP ID',
     'reviews.appliedLevel': 'Applied level',
     'reviews.notAvailable': 'Not listed',
@@ -272,6 +275,8 @@ const TRANSLATIONS = {
     'hub.studentPortalTitle': 'پورتال AESOP',
     'hub.comingSoonTitle': 'به پورتال AESOP خوش آمدید',
     'hub.comingSoonMessage': 'ویژگی‌های محصل/معلم به‌زودی در دسترس خواهد بود.',
+    'hub.reviewerLead':
+      'برای نمره‌دهی به مقاله‌های متقاضیانِ اختصاص‌داده‌شده به شما، «بررسی درخواست‌ها» را باز کنید.',
     'hub.signInHeading': 'با AESOP ID خود وصل شوید',
     'hub.signInLead':
       'AESOP ID که AESOP به شما داده را وارد کنید. ما یک لینک جادویی ایمیل می‌کنیم؛ آن را روی همین دستگاه باز کنید تا وارد شوید.',
@@ -363,7 +368,8 @@ const TRANSLATIONS = {
     'reviews.loading': 'در حال بارگذاری درخواست‌ها…',
     'reviews.loadError': 'بارگذاری وظایف بررسی ممکن نشد.',
     'reviews.empty': 'هیچ درخواستی برای بررسی به شما اختصاص داده نشده است.',
-    'reviews.accessDenied': 'برای دیدن این صفحه دسترسی بررسی‌کننده لازم است.',
+    'reviews.accessDenied':
+      'برای دیدن این صفحه دسترسی بررسی‌کننده لازم است. AESOP ID شما باید در برگه People در ستون Reviewer علامت‌گذاری شود، سپس خارج شوید و با لینک جادویی جدید وارد شوید.',
     'reviews.applicantId': 'AESOP ID',
     'reviews.appliedLevel': 'سطح درخواستی',
     'reviews.notAvailable': 'ثبت نشده',
