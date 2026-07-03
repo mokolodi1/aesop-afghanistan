@@ -23,6 +23,7 @@ const { isDatabaseEnabled, checkDatabaseHealth } = require('./db/index');
 const { getRoleByEmailFromDb, getGradesByEmailFromDb, getPersonByAesopId } = require('./services/classroomDb');
 const {
   isPortalAdmin,
+  isPortalReviewer,
   getAdminDashboard,
   getHighGradeStudents,
   buildDingConnectTopUpCsv,
@@ -34,6 +35,10 @@ const {
   getAdminViewAsStudent,
   getAdminViewAsTeacher,
 } = require('./services/adminPortal');
+const {
+  loadReviewAssignmentsForReviewer,
+  saveReviewAssessment,
+} = require('./services/applicantReviews');
 const {
   getEmailGroups,
   getAdmissionsMetadata,
@@ -259,6 +264,19 @@ async function isPortalApplicantProfile(userId, profile) {
   return isAppliedPeopleStatus(resolvePeopleStatus(userId, profile?.peopleStatus || ''));
 }
 
+async function requirePortalReviewer(res, body) {
+  const profile = await verifyPortalSessionBody(body.userId, body.email);
+  if (!profile) {
+    res.status(403).json({ error: 'Unable to continue. Please sign in again from the magic link.' });
+    return null;
+  }
+  if (!isPortalReviewer(profile)) {
+    res.status(403).json({ error: 'Reviewer access required.' });
+    return null;
+  }
+  return profile;
+}
+
 /**
  * @param {import('express').Response} res
  * @param {{ userId: string, email: string }} body
@@ -320,7 +338,7 @@ app.use((req, res, next) => {
   if (req.method !== 'GET') {
     return next();
   }
-  if (req.path === '/profile' || req.path === '/faq' || req.path === '/admin' || req.path === '/admin/emails' || req.path === '/admin/campaigns') {
+  if (req.path === '/profile' || req.path === '/faq' || req.path === '/admin' || req.path === '/admin/emails' || req.path === '/admin/campaigns' || req.path === '/reviews') {
     return res.sendFile(path.join(__dirname, 'public', 'portal.html'));
   }
   if (isPortalRequestHost(req) && req.path === '/') {
@@ -511,6 +529,7 @@ app.post('/api/verify-magic-link', verifyRateLimiter, async (req, res) => {
         peopleStatus: profile?.peopleStatus,
       });
       const isAdmin = isPortalAdmin({ email: emailFromSheet, portalRole: profile?.portalRole });
+      const isReviewer = isPortalReviewer(profile);
       const applicationStatus = await resolveApplicationStatus(studentUserId, isApplicant);
 
       if (studentUserId) {
@@ -532,6 +551,7 @@ app.post('/api/verify-magic-link', verifyRateLimiter, async (req, res) => {
         isTeacher,
         teacherClasses,
         isAdmin,
+        isReviewer,
         isApplied,
         isApplicant,
         applicationStatus,
@@ -576,6 +596,7 @@ const portalVoiceMemoStreamRateLimiter = createRateLimiter({
   max: 120,
 });
 const portalCalendarRateLimiter = createRateLimiter({ name: 'portal-calendar', windowMs: 15 * 60 * 1000, max: 40 });
+const portalReviewsRateLimiter = createRateLimiter({ name: 'portal-reviews', windowMs: 15 * 60 * 1000, max: 40 });
 
 app.post('/api/update-ding-number', dingUpdateRateLimiter, async (req, res) => {
   try {
@@ -834,6 +855,7 @@ app.post('/api/portal-class-grade', portalClassGradeRateLimiter, async (req, res
       peopleStatus: profile?.peopleStatus,
     });
     const isAdmin = isPortalAdmin({ email: profileEmail, portalRole: profile?.portalRole });
+    const isReviewer = isPortalReviewer(profile);
     const applicationStatus = await resolveApplicationStatus(userId, isApplicant);
 
     res.json({
@@ -844,6 +866,7 @@ app.post('/api/portal-class-grade', portalClassGradeRateLimiter, async (req, res
       isTeacher,
       teacherClasses,
       isAdmin,
+      isReviewer,
       isApplied,
       isApplicant,
       applicationStatus,
@@ -1348,6 +1371,60 @@ app.post('/api/portal-calendar', portalCalendarRateLimiter, async (req, res) => 
     console.error('Error loading portal application calendar:', formatErrorForLog(error));
     const status = error.statusCode || 500;
     res.status(status).json({ error: error.message || 'Could not load application calendar.' });
+  }
+});
+
+app.post('/api/portal-reviews/list', portalReviewsRateLimiter, async (req, res) => {
+  try {
+    const profile = await requirePortalReviewer(res, req.body);
+    if (!profile) {
+      return;
+    }
+
+    const assignments = await loadReviewAssignmentsForReviewer(profile.id);
+    res.json({ success: true, assignments });
+  } catch (error) {
+    console.error('Error loading review assignments:', formatErrorForLog(error));
+    const status = error.statusCode || 500;
+    res.status(status).json({ error: error.message || 'Could not load review assignments.' });
+  }
+});
+
+app.post('/api/portal-reviews/save', portalReviewsRateLimiter, async (req, res) => {
+  try {
+    const profile = await requirePortalReviewer(res, req.body);
+    if (!profile) {
+      return;
+    }
+
+    const applicantId =
+      typeof req.body.applicantId === 'string' ? req.body.applicantId.trim() : '';
+    const level = typeof req.body.englishLevel === 'string' ? req.body.englishLevel.trim() : '';
+    const suspectedAi = req.body.suspectedAi === true;
+    const instructionFollowing =
+      typeof req.body.instructionFollowing === 'string' ? req.body.instructionFollowing.trim() : '';
+    const originalThinking =
+      typeof req.body.originalThinking === 'string' ? req.body.originalThinking.trim() : '';
+    const character = typeof req.body.character === 'string' ? req.body.character.trim() : '';
+
+    if (!applicantId) {
+      return res.status(400).json({ error: 'Applicant ID is required.' });
+    }
+
+    const saved = await saveReviewAssessment({
+      reviewerAesopId: profile.id,
+      applicantAesopId: applicantId,
+      englishLevel: level,
+      suspectedAi,
+      instructionFollowing,
+      originalThinking,
+      character,
+    });
+    res.json({ success: true, ...saved });
+  } catch (error) {
+    console.error('Error saving review assessment:', formatErrorForLog(error));
+    const status = error.statusCode || 500;
+    res.status(status).json({ error: error.message || 'Could not save review assessment.' });
   }
 });
 

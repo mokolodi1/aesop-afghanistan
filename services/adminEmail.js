@@ -12,6 +12,8 @@ const {
   filterAdmissionsRows,
   getAdmissionsFilterOptions,
   analyzeDuplicateApplicantEmails,
+  isSpecialEmailRecipientFilter,
+  withApplicantRecipientEmails,
 } = require("./googleSheets");
 const { sendPostmarkEmail, sendPostmarkBatch, getPostmarkMessageStream, getPostmarkBroadcastMessageStream } = require("./postmark");
 const { formatEmailBodyHtml, wrapAesopEmail } = require("./emailBranding");
@@ -344,15 +346,17 @@ async function resolveAdmissionsRecipients(filter) {
   const sheetData = await loadAdmissionsSheet();
   const normalizedFilter = normalizeFilter(filter);
   const filtered = filterAdmissionsRows(sheetData.rows, normalizedFilter);
+  const rowsForSend = withApplicantRecipientEmails(filtered, normalizedFilter);
   const recipients = [];
   const skippedFromSend = [];
-  for (const row of filtered) {
+  const usingSpecialEmail = isSpecialEmailRecipientFilter(normalizedFilter);
+  for (const row of rowsForSend) {
     const emailKey = String(row.email || "")
       .trim()
       .toLowerCase();
     if (!emailKey) {
       skippedFromSend.push({
-        reason: "no-email",
+        reason: usingSpecialEmail ? "no-special-email" : "no-email",
         id: row.id || "",
         name: row.name || "",
         email: "",
@@ -362,8 +366,8 @@ async function resolveAdmissionsRecipients(filter) {
     }
     recipients.push(row);
   }
-  const { duplicateEmailGroups, duplicateEmailSkips } = analyzeDuplicateApplicantEmails(filtered);
-  const excludedFromSend = buildExcludedFromSend(filtered, recipients, duplicateEmailSkips);
+  const { duplicateEmailGroups, duplicateEmailSkips } = analyzeDuplicateApplicantEmails(rowsForSend);
+  const excludedFromSend = buildExcludedFromSend(rowsForSend, recipients, duplicateEmailSkips);
   const matchedCount = filtered.length;
   const recipientStats = {
     rowsWithEmail: sheetData.rows.length,
@@ -396,7 +400,9 @@ async function resolveAdmissionsRecipients(filter) {
   }
   if (skippedFromSend.length > 0) {
     console.info(
-      `[admissions-email] ${skippedFromSend.length} matched row(s) skipped — no email in column`,
+      usingSpecialEmail
+        ? `[admissions-email] ${skippedFromSend.length} matched row(s) skipped — no special email in column`
+        : `[admissions-email] ${skippedFromSend.length} matched row(s) skipped — no email in column`,
     );
   }
   if (duplicateEmailSkips.length > 0) {

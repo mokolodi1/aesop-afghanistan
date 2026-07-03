@@ -129,6 +129,18 @@ function resolvePeopleRoleColumnIndex() {
   }
 }
 
+function resolvePeopleReviewerColumnIndex() {
+  const columnRef = config.googleSheets.peopleReviewerColumn;
+  if (columnRef == null || String(columnRef).trim() === "" || String(columnRef).trim().toUpperCase() === "OFF") {
+    return null;
+  }
+  try {
+    return resolveColumnIndex(String(columnRef).trim());
+  } catch {
+    return null;
+  }
+}
+
 function readPeoplePortalRole(rowData, roleColumnIndex) {
   if (roleColumnIndex === null) {
     return "";
@@ -270,6 +282,41 @@ function peopleRoleHeaderCandidates() {
   return [...fromConfig, "Admins", "Admin", "Role", "Portal Role", "PortalRole"];
 }
 
+function peopleReviewerHeaderCandidates() {
+  const configured = config.googleSheets.peopleReviewerHeader;
+  const fromConfig = configured != null && String(configured).trim() !== "" ? [String(configured).trim()] : [];
+  return [...fromConfig, "Reviewer", "Reviewers"];
+}
+
+function readPeopleReviewerRole(rowData, reviewerColumnIndex) {
+  if (reviewerColumnIndex === null) {
+    return "";
+  }
+  return String(rowData[reviewerColumnIndex] ?? "").trim();
+}
+
+/**
+ * Read application reviewer flag from a People row.
+ * @param {import("google-spreadsheet").GoogleSpreadsheetRow | null | undefined} row
+ * @param {string[]} rowData
+ * @param {number | null} reviewerColumnIndex
+ */
+function readPeopleReviewerRoleFromRow(row, rowData, reviewerColumnIndex) {
+  if (row && typeof row.get === "function") {
+    for (const header of peopleReviewerHeaderCandidates()) {
+      try {
+        const value = row.get(header);
+        if (value != null && String(value).trim() !== "") {
+          return String(value).trim();
+        }
+      } catch {
+        // Header not registered on this worksheet.
+      }
+    }
+  }
+  return readPeopleReviewerRole(rowData, reviewerColumnIndex);
+}
+
 /**
  * Read portal admin flag from a People row. Prefer header-based lookup (Admins column may
  * extend past the trailing edge of row._rawData when earlier columns end at E).
@@ -331,6 +378,7 @@ async function findProfileByIdFromDb(userId) {
       id: person.aesopId || userId,
       phone: person.phone || "",
       portalRole: person.portalRole || "",
+      reviewerRole: "",
       peopleStatus:
         String(person.portalRole || "").trim().toLowerCase() === "applied"
           ? "applied"
@@ -340,6 +388,22 @@ async function findProfileByIdFromDb(userId) {
     console.warn("Profile DB lookup failed:", error.message);
     return null;
   }
+}
+
+/** @param {string} role */
+function isPeopleSheetReviewerRole(role) {
+  const normalized = String(role || "").trim().toLowerCase();
+  if (!normalized) {
+    return false;
+  }
+  return (
+    normalized === "reviewer" ||
+    normalized === "reviewers" ||
+    normalized === "yes" ||
+    normalized === "y" ||
+    normalized === "true" ||
+    normalized === "1"
+  );
 }
 
 /** @param {string} role */
@@ -412,6 +476,7 @@ async function findProfileById(userId) {
       }
     }
     const roleColumnIndex = resolvePeopleRoleColumnIndex();
+    const reviewerColumnIndex = resolvePeopleReviewerColumnIndex();
     const statusColumnIndex = resolvePeopleStatusColumnIndex();
     const normalizedId = userId.trim().toLowerCase();
 
@@ -433,6 +498,7 @@ async function findProfileById(userId) {
           id: aesopId,
           phone: phoneRaw,
           portalRole: readPeoplePortalRoleFromRow(row, rowData, roleColumnIndex),
+          reviewerRole: readPeopleReviewerRoleFromRow(row, rowData, reviewerColumnIndex),
           peopleStatus: resolvePeopleStatus(
             aesopId,
             readPeopleStatusFromRow(row, rowData, statusColumnIndex),
@@ -499,6 +565,7 @@ async function findProfileByEmail(email) {
       }
     }
     const roleColumnIndex = resolvePeopleRoleColumnIndex();
+    const reviewerColumnIndex = resolvePeopleReviewerColumnIndex();
     const statusColumnIndex = resolvePeopleStatusColumnIndex();
     const emailLower = email.toLowerCase().trim();
 
@@ -516,6 +583,7 @@ async function findProfileByEmail(email) {
           id: aesopId,
           phone: phoneRaw,
           portalRole: readPeoplePortalRoleFromRow(row, rowData, roleColumnIndex),
+          reviewerRole: readPeopleReviewerRoleFromRow(row, rowData, reviewerColumnIndex),
           peopleStatus: resolvePeopleStatus(
             aesopId,
             readPeopleStatusFromRow(row, rowData, statusColumnIndex),
@@ -1774,6 +1842,7 @@ async function loadEmailToPeopleProfileMap() {
     const nameColumnIndex = resolveColumnIndex(config.googleSheets.nameColumn || "C");
     const emailColumnIndex = resolveColumnIndex(config.googleSheets.emailColumn || "D");
     const roleColumnIndex = resolvePeopleRoleColumnIndex();
+    const reviewerColumnIndex = resolvePeopleReviewerColumnIndex();
     const statusColumnIndex = resolvePeopleStatusColumnIndex();
 
     for (const row of rows) {
@@ -2143,6 +2212,48 @@ function headerLabelMatchesConfigured(label, configuredLabels) {
   return configuredLabels.some((configured) => configured.toLowerCase() === normalized);
 }
 
+function getAdmissionsSpecialEmailHeaderLabel(gs = config.googleSheets || {}) {
+  return String(gs.admissionsSpecialEmailHeader || "Special emails").trim() || "Special emails";
+}
+
+function readApplicantSpecialEmail(row, gs = config.googleSheets || {}) {
+  const header = getAdmissionsSpecialEmailHeaderLabel(gs);
+  if (row?.fields && Object.prototype.hasOwnProperty.call(row.fields, header)) {
+    return String(row.fields[header] ?? "").trim();
+  }
+  if (row?.fields) {
+    const lower = header.toLowerCase();
+    for (const [key, value] of Object.entries(row.fields)) {
+      if (key.toLowerCase() === lower) {
+        return String(value ?? "").trim();
+      }
+    }
+  }
+  return "";
+}
+
+function isSpecialEmailRecipientFilter(filter, gs = config.googleSheets || {}) {
+  if (!filter?.column) {
+    return false;
+  }
+  const special = getAdmissionsSpecialEmailHeaderLabel(gs).toLowerCase();
+  return String(filter.column).trim().toLowerCase() === special;
+}
+
+function resolveApplicantRecipientEmail(row, filter, gs = config.googleSheets || {}) {
+  if (isSpecialEmailRecipientFilter(filter, gs)) {
+    return readApplicantSpecialEmail(row, gs);
+  }
+  return String(row.email || "").trim();
+}
+
+function withApplicantRecipientEmails(rows, filter, gs = config.googleSheets || {}) {
+  return rows.map((row) => {
+    const sendEmail = resolveApplicantRecipientEmail(row, filter, gs);
+    return { ...row, email: sendEmail };
+  });
+}
+
 /**
  * @param {Array<{ id: string, name: string, email: string, fields: Record<string, string> }>} rows
  */
@@ -2206,11 +2317,13 @@ async function loadAdmissionsSheet() {
     const idColumnIndex = resolveColumnIndex(gs.admissionsIdColumn || "A");
     const nameColumnIndex = resolveColumnIndex(gs.admissionsNameColumn || "C");
     const emailColumnIndex = resolveColumnIndex(gs.admissionsEmailColumn || "D");
+    const specialEmailColumnIndex = resolveColumnIndex(gs.admissionsSpecialEmailColumn || "M");
     const identityColumnIndices = new Set([idColumnIndex, nameColumnIndex, emailColumnIndex]);
     const columnMapping = {
       id: columnIndexToLetter(idColumnIndex),
       name: columnIndexToLetter(nameColumnIndex),
       email: columnIndexToLetter(emailColumnIndex),
+      specialEmail: columnIndexToLetter(specialEmailColumnIndex),
     };
 
     const sheet = await initGoogleSheets();
@@ -2244,14 +2357,22 @@ async function loadAdmissionsSheet() {
     const rows = [];
     let dataRowsRead = 0;
     let rowsSkippedNoEmail = 0;
+    let rowsWithPrimaryEmail = 0;
+    let rowsWithSpecialEmailOnly = 0;
     const dataRows = await worksheet.getRows();
     for (const row of dataRows) {
       dataRowsRead += 1;
       const rowData = Array.isArray(row._rawData) ? row._rawData : [];
       const email = String(rowData[emailColumnIndex] ?? "").trim();
-      if (!email) {
+      const specialEmail = String(rowData[specialEmailColumnIndex] ?? "").trim();
+      if (!email && !specialEmail) {
         rowsSkippedNoEmail += 1;
         continue;
+      }
+      if (email) {
+        rowsWithPrimaryEmail += 1;
+      } else {
+        rowsWithSpecialEmailOnly += 1;
       }
       const fields = {};
       for (const header of headers) {
@@ -2275,15 +2396,18 @@ async function loadAdmissionsSheet() {
       headerRowNum,
       dataRowsRead,
       rowsWithEmail: rows.length,
+      rowsWithPrimaryEmail,
+      rowsWithSpecialEmailOnly,
       rowsSkippedNoEmail,
       columnMapping,
+      specialEmailHeader: getAdmissionsSpecialEmailHeaderLabel(gs),
       headerLabels: headers.map((header) => header.label),
       duplicateEmailGroupCount: duplicateAnalysis.duplicateEmailGroups.length,
       duplicateEmailSkips: duplicateAnalysis.duplicateEmailSkips,
       duplicateEmailGroups: duplicateAnalysis.duplicateEmailGroups,
     };
     console.info(
-      `[admissions-email] tab "${sheetName}": ${dataRowsRead} data row(s), ${rows.length} with email in column ${columnMapping.email}, ${rowsSkippedNoEmail} skipped (empty email)`,
+      `[admissions-email] tab "${sheetName}": ${dataRowsRead} data row(s), ${rows.length} with email in column ${columnMapping.email} and/or ${columnMapping.specialEmail}, ${rowsSkippedNoEmail} skipped (no primary or special email)`,
     );
 
     return { headers, rows, identityColumnIndices, stats };
@@ -2398,6 +2522,7 @@ module.exports = {
   getPortalTeacherByUserId,
   getRoleByEmail,
   isPeopleSheetAdminRole,
+  isPeopleSheetReviewerRole,
   isAppliedPeopleStatus,
   isAdmittedPeopleStatus,
   isTeachingPeopleStatus,
@@ -2421,4 +2546,8 @@ module.exports = {
   filterAdmissionsRows,
   getAdmissionsFilterOptions,
   analyzeDuplicateApplicantEmails,
+  getAdmissionsSpecialEmailHeaderLabel,
+  isSpecialEmailRecipientFilter,
+  resolveApplicantRecipientEmail,
+  withApplicantRecipientEmails,
 };

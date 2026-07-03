@@ -80,6 +80,7 @@ function getPortalRouteSegment() {
   if (pathname === '/profile' || pathname.startsWith('/profile/')) return 'profile';
   if (pathname === '/admin/emails') return 'admin-emails';
   if (pathname === '/admin/campaigns') return 'admin-campaigns';
+  if (pathname === '/reviews') return 'reviews';
   if (pathname === '/admin' || pathname.startsWith('/admin/')) return 'admin';
   return 'hub';
 }
@@ -103,6 +104,7 @@ function shouldMountPortalSpa() {
     p === '/admin' ||
     p === '/admin/emails' ||
     p === '/admin/campaigns' ||
+    p === '/reviews' ||
     p.startsWith('/profile/') ||
     p.startsWith('/faq/') ||
     p.startsWith('/admin/');
@@ -141,6 +143,10 @@ function readPortalIsApplicant() {
   return readSessionField('studentPortalIsApplicant') === '1';
 }
 
+function readPortalIsReviewer() {
+  return readSessionField('studentPortalIsReviewer') === '1';
+}
+
 function readPortalIsApplied() {
   return readPortalIsApplicant();
 }
@@ -158,6 +164,7 @@ const PORTAL_SESSION_STORAGE_KEYS = [
   'studentPortalIsTeacher',
   'studentPortalTeacherClasses',
   'studentPortalIsAdmin',
+  'studentPortalIsReviewer',
   'studentPortalIsApplied',
   'studentPortalIsApplicant',
   'studentPortalPeopleStatus',
@@ -448,6 +455,11 @@ function applyPortalSessionFromApi(data, options = {}) {
   } else {
     sessionStorage.removeItem('studentPortalIsAdmin');
   }
+  if (data.isReviewer === true) {
+    sessionStorage.setItem('studentPortalIsReviewer', '1');
+  } else {
+    sessionStorage.removeItem('studentPortalIsReviewer');
+  }
   if (isApplicantFromApi) {
     sessionStorage.setItem('studentPortalIsApplicant', '1');
     sessionStorage.setItem('studentPortalIsApplied', '1');
@@ -518,6 +530,24 @@ function stopPortalImpersonation() {
   window.location.assign('/admin');
 }
 
+async function portalApiPost(path, body = {}) {
+  const userId = readSessionField('studentPortalUserId');
+  const email = readSessionField('studentPortalEmail');
+  const response = await fetch(path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ userId, email, ...body }),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error((data && data.error) || `Request failed (HTTP ${response.status}).`);
+  }
+  if (data.success !== true) {
+    throw new Error((data && data.error) || 'Request failed.');
+  }
+  return data;
+}
+
 async function adminApiPost(path, body = {}) {
   const { userId, email } = readAdminApiCredentials();
   const response = await fetch(path, {
@@ -580,6 +610,7 @@ async function loadPortalClassGradeFromApi() {
       isTeacher: false,
       teacherClasses: '',
       isAdmin: false,
+      isReviewer: false,
       isApplied: false,
       isApplicant: false,
       peopleStatus: '',
@@ -601,6 +632,7 @@ async function loadPortalClassGradeFromApi() {
           isTeacher: false,
           teacherClasses: '',
           isAdmin: false,
+          isReviewer: false,
           isApplied: false,
           isApplicant: false,
           peopleStatus: '',
@@ -621,6 +653,7 @@ async function loadPortalClassGradeFromApi() {
           isTeacher: false,
           teacherClasses: '',
           isAdmin: false,
+          isReviewer: false,
           isApplied: false,
           isApplicant: false,
           peopleStatus: '',
@@ -633,6 +666,7 @@ async function loadPortalClassGradeFromApi() {
       const classGrades = normalizeClassGrades(data.classGrades);
       const isTeacher = data.isTeacher === true;
       const isAdmin = data.isAdmin === true;
+      const isReviewer = data.isReviewer === true;
       const teacherClasses =
         typeof data.teacherClasses === 'string' ? data.teacherClasses.trim() : '';
       const peopleStatus =
@@ -655,6 +689,11 @@ async function loadPortalClassGradeFromApi() {
         sessionStorage.setItem('studentPortalIsAdmin', '1');
       } else {
         sessionStorage.removeItem('studentPortalIsAdmin');
+      }
+      if (isReviewer) {
+        sessionStorage.setItem('studentPortalIsReviewer', '1');
+      } else {
+        sessionStorage.removeItem('studentPortalIsReviewer');
       }
       if (isApplicant) {
         sessionStorage.setItem('studentPortalIsApplicant', '1');
@@ -683,6 +722,7 @@ async function loadPortalClassGradeFromApi() {
         isTeacher: isApplied ? false : isTeacher,
         teacherClasses: isApplied ? '' : teacherClasses,
         isAdmin,
+        isReviewer,
         isApplied,
         isApplicant,
         peopleStatus,
@@ -696,6 +736,7 @@ async function loadPortalClassGradeFromApi() {
         isTeacher: false,
         teacherClasses: '',
         isAdmin: false,
+        isReviewer: false,
         isApplied: false,
         isApplicant: false,
         peopleStatus: '',
@@ -727,6 +768,7 @@ function usePortalClassGrade() {
   );
 
   const [isAdmin, setIsAdmin] = useState(() => readSessionField('studentPortalIsAdmin') === '1');
+  const [isReviewer, setIsReviewer] = useState(() => readPortalIsReviewer());
 
   useEffect(() => {
     let cancelled = false;
@@ -738,6 +780,7 @@ function usePortalClassGrade() {
         isTeacher: tchr,
         teacherClasses: teach,
         isAdmin: adm,
+        isReviewer: reviewer,
         isApplied: applied,
         isApplicant: applicant,
         peopleStatus: status,
@@ -750,6 +793,7 @@ function usePortalClassGrade() {
         setIsTeacher(tchr);
         setTeacherClasses(teach);
         setIsAdmin(adm);
+        setIsReviewer(reviewer);
         setIsApplied(applied);
         setIsApplicant(applicant);
         setPeopleStatus(status);
@@ -768,6 +812,7 @@ function usePortalClassGrade() {
     isTeacher,
     teacherClasses,
     isAdmin,
+    isReviewer,
     isApplied,
     isApplicant,
     peopleStatus,
@@ -2221,7 +2266,7 @@ function PortalLayout({ children }) {
   );
 }
 
-function PortalSectionLinks({ current, isAdmin, showEditDingLink = true }) {
+function PortalSectionLinks({ current, isAdmin, isReviewer = false, showEditDingLink = true }) {
   const { t } = usePortalI18n();
   const hubHref = portalHubHref();
   return (
@@ -2236,6 +2281,16 @@ function PortalSectionLinks({ current, isAdmin, showEditDingLink = true }) {
           </span>
           <a href="/profile" className={current === 'profile' ? 'is-current' : undefined}>
             {t('nav.editDing')}
+          </a>
+        </>
+      ) : null}
+      {isReviewer ? (
+        <>
+          <span className="portal-section-links-sep" aria-hidden="true">
+            ·
+          </span>
+          <a href="/reviews" className={current === 'reviews' ? 'is-current' : undefined}>
+            {t('nav.reviewApplications')}
           </a>
         </>
       ) : null}
@@ -2602,6 +2657,7 @@ function PortalHubPage() {
     isTeacher,
     teacherClasses,
     isAdmin,
+    isReviewer,
     showStudentFields,
     showTeacherFields,
     hasStudentCategory,
@@ -2633,6 +2689,7 @@ function PortalHubPage() {
             <PortalSectionLinks
               current="hub"
               isAdmin={showAdminFeatures}
+              isReviewer={isReviewer}
               showEditDingLink={false}
             />
             <h2 className="portal-welcome">
@@ -4172,7 +4229,9 @@ function resolvePanelExcludedRows(recipientStats) {
     return fromPreview;
   }
   const skippedNoEmail = Array.isArray(recipientStats.skippedFromSend)
-    ? recipientStats.skippedFromSend.filter((row) => row.reason === 'no-email')
+    ? recipientStats.skippedFromSend.filter(
+        (row) => row.reason === 'no-email' || row.reason === 'no-special-email',
+      )
     : [];
   return skippedNoEmail;
 }
@@ -4182,6 +4241,9 @@ function formatRecipientSkipRow(row) {
   const name = row.name || '(no name)';
   if (row.reason === 'no-email') {
     return `${id} — ${name} (Email column is empty)`;
+  }
+  if (row.reason === 'no-special-email') {
+    return `${id} — ${name} (Special emails column is empty)`;
   }
   if (row.reason === 'duplicate-email' && row.sharedWith) {
     const keptId = row.sharedWith.id ? `AESOP ID ${row.sharedWith.id}` : 'another row';
@@ -4238,7 +4300,9 @@ function ApplicantsSheetDebugPanel({
   const duplicateSkips = resolvePanelDuplicateSkips(recipientStats, stats, activeFilter);
   const duplicateGroups = resolvePanelDuplicateGroups(recipientStats, stats, activeFilter);
   const excludedRows = resolvePanelExcludedRows(recipientStats);
-  const excludedNoEmail = excludedRows.filter((row) => row.reason === 'no-email');
+  const excludedNoEmail = excludedRows.filter(
+    (row) => row.reason === 'no-email' || row.reason === 'no-special-email',
+  );
   const excludedDuplicates = excludedRows.filter((row) => row.reason === 'duplicate-email');
 
   return (
@@ -4251,6 +4315,11 @@ function ApplicantsSheetDebugPanel({
         <li>
           Column mapping: AESOP ID = {mapping.id || 'A'}, Name = {mapping.name || 'C'}, Email ={' '}
           {mapping.email || 'D'}
+          {mapping.specialEmail ? (
+            <>
+              , Special emails = {mapping.specialEmail}
+            </>
+          ) : null}
         </li>
         {stats.headerLabels?.length ? (
           <li>Headers read: {stats.headerLabels.join(' · ')}</li>
@@ -4259,13 +4328,19 @@ function ApplicantsSheetDebugPanel({
           <strong>{stats.dataRowsRead ?? 0}</strong> data row(s) read from the sheet
         </li>
         <li>
-          <strong>{stats.rowsWithEmail ?? 0}</strong> row(s) with a non-empty email (column{' '}
-          {mapping.email || 'D'})
+          <strong>{stats.rowsWithEmail ?? 0}</strong> row(s) with a non-empty primary email (column{' '}
+          {mapping.email || 'D'}) or special email (column {mapping.specialEmail || 'M'})
         </li>
+        {(stats.rowsWithSpecialEmailOnly ?? 0) > 0 ? (
+          <li>
+            <strong>{stats.rowsWithSpecialEmailOnly}</strong> row(s) have only a special email (column{' '}
+            {mapping.specialEmail || 'M'}) — included when filtering on Special emails
+          </li>
+        ) : null}
         {(stats.rowsSkippedNoEmail ?? 0) > 0 ? (
           <li>
             <strong>{stats.rowsSkippedNoEmail}</strong> row(s) skipped — no email in column{' '}
-            {mapping.email || 'D'}
+            {mapping.email || 'D'} or special email in column {mapping.specialEmail || 'M'}
           </li>
         ) : null}
         {previewLoading ? (
@@ -4315,7 +4390,9 @@ function ApplicantsSheetDebugPanel({
           {excludedNoEmail.length > 0 ? (
             <>
               <p className="portal-admin-emails-debug-gap-reason">
-                Empty email in column {mapping.email || 'D'}:
+                {activeFilter?.column?.toLowerCase() === 'special emails'
+                  ? 'Empty special email in column ' + (mapping.specialEmail || 'M') + ':'
+                  : 'Empty email in column ' + (mapping.email || 'D') + ':'}
               </p>
               <ul className="portal-admin-emails-debug-skip-list">
                 {excludedNoEmail.map((row) => (
@@ -5579,6 +5656,673 @@ function PortalAdminEmailsPage() {
   );
 }
 
+const SCALE_1_TO_10 = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10'];
+const SCALE_1_TO_10_DESC = [...SCALE_1_TO_10].reverse();
+const FITNESS_CRITERIA = [
+  {
+    id: 'instructionFollowing',
+    labelKey: 'reviews.fitness.instruction',
+    rubricKey: 'instructionFollowing',
+  },
+  { id: 'originalThinking', labelKey: 'reviews.fitness.original', rubricKey: 'originalThinking' },
+  { id: 'character', labelKey: 'reviews.fitness.character', rubricKey: 'character' },
+];
+
+const REVIEW_RUBRIC_TIERS = [
+  { tierKey: 'highest', score: '10', labelKey: 'reviews.rubric.highestLabel' },
+  { tierKey: 'adequate', score: '5', labelKey: 'reviews.rubric.adequateLabel' },
+  { tierKey: 'low', score: '1', labelKey: 'reviews.rubric.lowLabel' },
+];
+
+const EMPTY_REVIEW_DRAFT = {
+  englishLevel: '',
+  suspectedAi: false,
+  instructionFollowing: '',
+  originalThinking: '',
+  character: '',
+};
+
+function reviewDraftIsSaveable(draft) {
+  if (!draft) {
+    return false;
+  }
+  const hasEnglish = SCALE_1_TO_10.includes(String(draft.englishLevel ?? '').trim());
+  const hasAi = draft.suspectedAi === true;
+  if (!hasEnglish && !hasAi) {
+    return false;
+  }
+  return FITNESS_CRITERIA.every((criterion) =>
+    SCALE_1_TO_10.includes(String(draft[criterion.id] ?? '').trim()),
+  );
+}
+
+function reviewScaleOptionLabel(score, t) {
+  if (score === '1') {
+    return `1 — ${t('reviews.scale.lowest')}`;
+  }
+  if (score === '5') {
+    return `5 — ${t('reviews.scale.midpoint')}`;
+  }
+  if (score === '10') {
+    return `10 — ${t('reviews.scale.highest')}`;
+  }
+  return score;
+}
+
+function PortalReviewScaleSelect({ value, onChange, ariaLabel, fieldLabel, t, wide = false }) {
+  const placeholder = fieldLabel
+    ? t('reviews.scalePlaceholderFor', { field: fieldLabel })
+    : t('reviews.scalePlaceholder');
+
+  return (
+    <select
+      className={`portal-review-scale-select${wide ? ' portal-review-scale-select--wide' : ''}`}
+      value={value}
+      aria-label={ariaLabel}
+      onChange={onChange}
+    >
+      <option value="">{placeholder}</option>
+      {SCALE_1_TO_10_DESC.map((score) => (
+        <option key={score} value={score}>
+          {reviewScaleOptionLabel(score, t)}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+function PortalReviewRubricHelp({ rubricKey, t }) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) {
+      return undefined;
+    }
+    const onDocumentPointerDown = (event) => {
+      if (!wrapRef.current?.contains(event.target)) {
+        setOpen(false);
+      }
+    };
+    const onEscape = (event) => {
+      if (event.key === 'Escape') {
+        setOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', onDocumentPointerDown);
+    document.addEventListener('keydown', onEscape);
+    return () => {
+      document.removeEventListener('mousedown', onDocumentPointerDown);
+      document.removeEventListener('keydown', onEscape);
+    };
+  }, [open]);
+
+  return (
+    <span
+      ref={wrapRef}
+      className="portal-review-rubric-help"
+      onMouseEnter={() => setOpen(true)}
+      onMouseLeave={() => setOpen(false)}
+    >
+      <button
+        type="button"
+        className="portal-review-rubric-help-btn"
+        aria-expanded={open}
+        aria-label={`${t('reviews.rubric.moreInfo')}: ${t(`reviews.rubric.${rubricKey}.title`)}`}
+        onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          setOpen((current) => !current);
+        }}
+      >
+        <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false">
+          <circle cx="8" cy="8" r="7" fill="none" stroke="currentColor" strokeWidth="1.5" />
+          <path fill="currentColor" d="M7.1 6.8h1.4V5.4H7.1v1.4zm0 3.8h1.4V7.8H7.1v2.8z" />
+        </svg>
+      </button>
+      {open ? (
+        <div className="portal-review-rubric-popover" role="tooltip">
+          <p className="portal-review-rubric-popover-title">{t(`reviews.rubric.${rubricKey}.title`)}</p>
+          <ul className="portal-review-rubric-list">
+            {REVIEW_RUBRIC_TIERS.map((tier) => (
+              <li key={tier.tierKey} className="portal-review-rubric-item">
+                <div className="portal-review-rubric-item-head">
+                  <span className="portal-review-rubric-tier-label">{t(tier.labelKey)}</span>
+                  <span className="portal-review-rubric-tier-score">{tier.score}</span>
+                </div>
+                <p className="portal-review-rubric-item-text">
+                  {t(`reviews.rubric.${rubricKey}.${tier.tierKey}`)}
+                </p>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+    </span>
+  );
+}
+
+function PortalReviewSuspectedAiToggle({ active, onToggle, t }) {
+  return (
+    <button
+      type="button"
+      className={`portal-review-ai-toggle${active ? ' is-flagged' : ''}`}
+      aria-pressed={active === true}
+      onClick={onToggle}
+    >
+      <span className="portal-review-ai-toggle-box" aria-hidden="true">
+        {active ? (
+          <svg viewBox="0 0 16 16" width="12" height="12" focusable="false">
+            <path
+              fill="currentColor"
+              d="M13.2 4.2 6.8 10.6 3.3 7.1l-1.4 1.4 5 5 8.3-8.3-1.4-1.4z"
+            />
+          </svg>
+        ) : null}
+      </span>
+      <span className="portal-review-ai-toggle-text">
+        <span className="portal-review-ai-toggle-label">
+          {active ? t('reviews.suspectedAiFlagged') : t('reviews.suspectedAi')}
+        </span>
+        {!active ? (
+          <span className="portal-review-ai-toggle-hint">{t('reviews.suspectedAiOffHint')}</span>
+        ) : null}
+      </span>
+    </button>
+  );
+}
+
+function formatReviewSaveStatusLabel({ saveStatus, lastSavedAt, nowMs, t }) {
+  if (saveStatus === 'pending') {
+    return t('reviews.savePending');
+  }
+  if (saveStatus === 'saving') {
+    return t('reviews.saveSaving');
+  }
+  if (saveStatus === 'error') {
+    return t('reviews.saveStatusError');
+  }
+  if (saveStatus === 'saved' && lastSavedAt) {
+    const elapsedSeconds = Math.max(0, Math.floor((nowMs - lastSavedAt) / 1000));
+    if (elapsedSeconds < 5) {
+      return t('reviews.saveSavedJustNow');
+    }
+    if (elapsedSeconds < 60) {
+      return t('reviews.saveSavedSecondsAgo', { seconds: elapsedSeconds });
+    }
+    const elapsedMinutes = Math.floor(elapsedSeconds / 60);
+    if (elapsedMinutes === 1) {
+      return t('reviews.saveSavedMinutesAgo', { minutes: elapsedMinutes });
+    }
+    return t('reviews.saveSavedMinutesAgoPlural', { minutes: elapsedMinutes });
+  }
+  return '';
+}
+
+function PortalReviewSaveStatus({ saveStatus, lastSavedAt, t }) {
+  const [nowMs, setNowMs] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (saveStatus !== 'saved' || !lastSavedAt) {
+      return undefined;
+    }
+    const intervalId = window.setInterval(() => {
+      setNowMs(Date.now());
+    }, 1000);
+    return () => window.clearInterval(intervalId);
+  }, [saveStatus, lastSavedAt]);
+
+  const label = formatReviewSaveStatusLabel({ saveStatus, lastSavedAt, nowMs, t });
+  if (!label) {
+    return null;
+  }
+
+  return (
+    <span
+      className={`portal-review-save-indicator portal-review-save-indicator--${saveStatus}`}
+      role="status"
+      aria-live="polite"
+    >
+      <span className="portal-review-save-indicator-icon" aria-hidden="true">
+        {saveStatus === 'saving' || saveStatus === 'pending' ? (
+          <svg viewBox="0 0 16 16" width="14" height="14" focusable="false">
+            <circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" strokeWidth="1.5" opacity="0.25" />
+            <path
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+              d="M8 2a6 6 0 0 1 6 6"
+            />
+          </svg>
+        ) : saveStatus === 'error' ? (
+          <svg viewBox="0 0 16 16" width="14" height="14" focusable="false">
+            <path
+              fill="currentColor"
+              d="M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13zm.75 3.5a.75.75 0 0 0-1.5 0v4a.75.75 0 0 0 1.5 0v-4zm-.75 6.25a.875.875 0 1 0 0-1.75.875.875 0 0 0 0 1.75z"
+            />
+          </svg>
+        ) : (
+          <svg viewBox="0 0 16 16" width="14" height="14" focusable="false">
+            <path
+              fill="currentColor"
+              d="M11.5 1.5 14 4v8.25A1.75 1.75 0 0 1 12.25 14H3.75A1.75 1.75 0 0 1 2 12.25V3.75A1.75 1.75 0 0 1 3.75 2h5.8l1.95-1.95zm-.2 1.05-1.3 1.3H12v7.9H4V4h7.3z"
+            />
+          </svg>
+        )}
+      </span>
+      <span className="portal-review-save-indicator-label">{label}</span>
+    </span>
+  );
+}
+
+function useReviewAutoSave({ drafts, onSaveOne }) {
+  const dirtyRef = useRef(new Set());
+  const draftsRef = useRef(drafts);
+  const debounceTimersRef = useRef(new Map());
+  const onSaveOneRef = useRef(onSaveOne);
+  const [saveStatus, setSaveStatus] = useState('idle');
+  const [lastSavedAt, setLastSavedAt] = useState(null);
+
+  draftsRef.current = drafts;
+  onSaveOneRef.current = onSaveOne;
+
+  const flushApplicant = useCallback(async (applicantId) => {
+    const draft = draftsRef.current[applicantId];
+    if (!reviewDraftIsSaveable(draft)) {
+      dirtyRef.current.delete(applicantId);
+      return;
+    }
+    setSaveStatus('saving');
+    try {
+      await onSaveOneRef.current(applicantId, draft);
+      dirtyRef.current.delete(applicantId);
+      setLastSavedAt(Date.now());
+      setSaveStatus('saved');
+    } catch {
+      setSaveStatus('error');
+    }
+  }, []);
+
+  const markDirty = useCallback(
+    (applicantId, draftOverride) => {
+      const draft = draftOverride || draftsRef.current[applicantId];
+      if (!reviewDraftIsSaveable(draft)) {
+        return;
+      }
+      dirtyRef.current.add(applicantId);
+      setSaveStatus('pending');
+      const existing = debounceTimersRef.current.get(applicantId);
+      if (existing) {
+        window.clearTimeout(existing);
+      }
+      const timerId = window.setTimeout(() => {
+        debounceTimersRef.current.delete(applicantId);
+        flushApplicant(applicantId);
+      }, 1500);
+      debounceTimersRef.current.set(applicantId, timerId);
+    },
+    [flushApplicant],
+  );
+
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      for (const applicantId of Array.from(dirtyRef.current)) {
+        const timer = debounceTimersRef.current.get(applicantId);
+        if (timer) {
+          window.clearTimeout(timer);
+          debounceTimersRef.current.delete(applicantId);
+        }
+        flushApplicant(applicantId);
+      }
+    }, 30000);
+
+    return () => {
+      window.clearInterval(intervalId);
+      for (const timer of debounceTimersRef.current.values()) {
+        window.clearTimeout(timer);
+      }
+      debounceTimersRef.current.clear();
+      for (const applicantId of Array.from(dirtyRef.current)) {
+        flushApplicant(applicantId);
+      }
+    };
+  }, [flushApplicant]);
+
+  return { markDirty, saveStatus, lastSavedAt };
+}
+
+function PortalReviewCard({ assignment, draft, onDraftChange, onMarkDirty, onNextStudent, showNextStudent, t }) {
+  return (
+    <article className="portal-review-card" aria-labelledby={`review-${assignment.applicantId}-name`}>
+      <header className="portal-review-card-header">
+        <h3 className="portal-review-card-title" id={`review-${assignment.applicantId}-name`}>
+          {assignment.name}
+        </h3>
+      </header>
+
+      <section className="portal-review-essay-section" aria-label={t('reviews.essayLabel')}>
+        <h4 className="portal-review-field-label">{t('reviews.essayLabel')}</h4>
+        {assignment.essay.trim() ? (
+          <div className="portal-review-essay">{assignment.essay}</div>
+        ) : (
+          <p className="portal-field-hint">{t('reviews.essayMissing')}</p>
+        )}
+      </section>
+
+      <div className="portal-review-voice-row">
+        <button type="button" className="portal-review-voice-btn" disabled aria-disabled="true">
+          <span className="portal-review-voice-btn-label">▶ {t('reviews.playVoice')}</span>
+          <span className="portal-review-voice-btn-soon">{t('reviews.voiceComingSoon')}</span>
+        </button>
+      </div>
+
+      <div className="portal-review-scoring-panel" aria-label={t('reviews.scoringAria')}>
+        <section className="portal-review-scoring-section portal-review-scoring-section--english">
+          <h4 className="portal-review-scoring-section-title">{t('reviews.levelLabel')}</h4>
+          <div className="portal-review-scoring-section-row">
+            <label className="portal-review-scale-field portal-review-scale-field--solo">
+              <span className="portal-review-visually-hidden">{t('reviews.levelLabel')}</span>
+              <PortalReviewScaleSelect
+                wide
+                t={t}
+                fieldLabel={t('reviews.levelLabel')}
+                value={draft.englishLevel}
+                ariaLabel={t('reviews.levelLabel')}
+                onChange={(event) => {
+                  const nextDraft = { ...draft, englishLevel: event.target.value };
+                  onDraftChange(assignment.applicantId, { englishLevel: event.target.value });
+                  onMarkDirty(assignment.applicantId, nextDraft);
+                }}
+              />
+            </label>
+            <PortalReviewSuspectedAiToggle
+              t={t}
+              active={draft.suspectedAi === true}
+              onToggle={() => {
+                const nextDraft = { ...draft, suspectedAi: !draft.suspectedAi };
+                onDraftChange(assignment.applicantId, { suspectedAi: nextDraft.suspectedAi });
+                onMarkDirty(assignment.applicantId, nextDraft);
+              }}
+            />
+          </div>
+        </section>
+
+        <div className="portal-review-scoring-divider" aria-hidden="true" />
+
+        <section className="portal-review-scoring-section portal-review-scoring-section--fitness">
+          <h4 className="portal-review-scoring-section-title">{t('reviews.fitnessLabel')}</h4>
+          <div className="portal-review-scoring-section-row">
+            {FITNESS_CRITERIA.map((criterion) => (
+              <label key={criterion.id} className="portal-review-scale-field">
+                <span className="portal-review-scale-field-label-row">
+                  <span className="portal-review-scale-field-label">{t(criterion.labelKey)}</span>
+                  <PortalReviewRubricHelp rubricKey={criterion.rubricKey} t={t} />
+                </span>
+                <PortalReviewScaleSelect
+                  t={t}
+                  fieldLabel={t(criterion.labelKey)}
+                  value={draft[criterion.id]}
+                  ariaLabel={t(criterion.labelKey)}
+                  onChange={(event) => {
+                    const nextDraft = { ...draft, [criterion.id]: event.target.value };
+                    onDraftChange(assignment.applicantId, { [criterion.id]: event.target.value });
+                    onMarkDirty(assignment.applicantId, nextDraft);
+                  }}
+                />
+              </label>
+            ))}
+          </div>
+        </section>
+      </div>
+
+      {showNextStudent ? (
+        <div className="portal-review-next-row">
+          <button type="button" className="portal-review-next-btn" onClick={onNextStudent}>
+            {t('reviews.nextStudent')} →
+          </button>
+        </div>
+      ) : null}
+    </article>
+  );
+}
+
+function PortalReviewStudentList({ assignments, drafts, selectedApplicantId, onSelect, saveStatus, lastSavedAt, t }) {
+  return (
+    <aside className="portal-review-sidebar" aria-label={t('reviews.studentList')}>
+      <div className="portal-review-sidebar-head">
+        <h3 className="portal-review-sidebar-title">{t('reviews.studentList')}</h3>
+        <PortalReviewSaveStatus saveStatus={saveStatus} lastSavedAt={lastSavedAt} t={t} />
+      </div>
+      <ul className="portal-review-student-list">
+        {assignments.map((assignment) => {
+          const isSelected = assignment.applicantId === selectedApplicantId;
+          const draft = drafts[assignment.applicantId] || EMPTY_REVIEW_DRAFT;
+          const isComplete = reviewDraftIsSaveable(draft);
+          const appliedLevelDisplay = assignment.appliedLevel.trim() || t('reviews.notAvailable');
+
+          return (
+            <li key={assignment.applicantId}>
+              <button
+                type="button"
+                className={`portal-review-student-item${isSelected ? ' is-selected' : ''}${
+                  isComplete ? ' is-complete' : ''
+                }`}
+                aria-current={isSelected ? 'true' : undefined}
+                onClick={(event) => {
+                  onSelect(assignment.applicantId);
+                  event.currentTarget.focus({ preventScroll: true });
+                }}
+              >
+                <span className="portal-review-student-name">{assignment.name}</span>
+                <span className="portal-review-student-idline portal-ltr">
+                  <span className="portal-review-student-id portal-admin-mono">{assignment.applicantId}</span>
+                  <span className="portal-review-student-level-tag">{appliedLevelDisplay}</span>
+                </span>
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+    </aside>
+  );
+}
+
+function PortalReviewApplicationsPage() {
+  const { t } = usePortalI18n();
+  const { isAdmin, isReviewer } = usePortalClassGrade();
+  const showAdminFeatures = isAdmin && !isPortalImpersonating();
+  const signedIn = isPortalSessionCompleteSync();
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [assignments, setAssignments] = useState([]);
+  const [drafts, setDrafts] = useState({});
+  const [selectedApplicantId, setSelectedApplicantId] = useState('');
+  const reviewDetailRef = useRef(null);
+
+  const saveOne = useCallback(async (applicantId, draft) => {
+    await portalApiPost('/api/portal-reviews/save', {
+      applicantId,
+      englishLevel: draft.englishLevel,
+      suspectedAi: draft.suspectedAi === true,
+      instructionFollowing: draft.instructionFollowing,
+      originalThinking: draft.originalThinking,
+      character: draft.character,
+    });
+  }, []);
+
+  const { markDirty, saveStatus, lastSavedAt } = useReviewAutoSave({ drafts, onSaveOne: saveOne });
+
+  useEffect(() => {
+    if (!signedIn || !isReviewer) {
+      setLoading(false);
+      return undefined;
+    }
+
+    let cancelled = false;
+    setLoading(true);
+    setError('');
+
+    portalApiPost('/api/portal-reviews/list')
+      .then((data) => {
+        if (cancelled) {
+          return;
+        }
+        const rows = Array.isArray(data.assignments) ? data.assignments : [];
+        setAssignments(rows);
+        const nextDrafts = {};
+        for (const row of rows) {
+          const normalizeScale = (value) => {
+            const trimmed = String(value ?? '').trim();
+            return SCALE_1_TO_10.includes(trimmed) ? trimmed : '';
+          };
+          const englishFromApi = String(row.englishLevel ?? row.recommendedLevel ?? '').trim();
+          nextDrafts[row.applicantId] = {
+            englishLevel: normalizeScale(englishFromApi),
+            suspectedAi: row.suspectedAi === true,
+            instructionFollowing: normalizeScale(row.instructionFollowing),
+            originalThinking: normalizeScale(row.originalThinking),
+            character: normalizeScale(row.character),
+          };
+        }
+        setDrafts(nextDrafts);
+        const firstId = rows[0]?.applicantId ? String(rows[0].applicantId) : '';
+        setSelectedApplicantId((current) =>
+          current && rows.some((row) => row.applicantId === current) ? current : firstId,
+        );
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setError(err.message || t('reviews.loadError'));
+          setAssignments([]);
+          setDrafts({});
+          setSelectedApplicantId('');
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [signedIn, isReviewer, t]);
+
+  const updateDraft = useCallback((applicantId, patch) => {
+    setDrafts((prev) => ({
+      ...prev,
+      [applicantId]: { ...prev[applicantId], ...patch },
+    }));
+  }, []);
+
+  const selectedAssignment = useMemo(
+    () => assignments.find((row) => row.applicantId === selectedApplicantId) || null,
+    [assignments, selectedApplicantId],
+  );
+
+  const selectedDraft = selectedAssignment
+    ? drafts[selectedAssignment.applicantId] || EMPTY_REVIEW_DRAFT
+    : EMPTY_REVIEW_DRAFT;
+
+  const selectedIndex = useMemo(
+    () => assignments.findIndex((row) => row.applicantId === selectedApplicantId),
+    [assignments, selectedApplicantId],
+  );
+
+  const goToNextStudent = useCallback(() => {
+    if (selectedIndex < 0 || selectedIndex >= assignments.length - 1) {
+      return;
+    }
+    setSelectedApplicantId(assignments[selectedIndex + 1].applicantId);
+  }, [assignments, selectedIndex]);
+
+  useEffect(() => {
+    reviewDetailRef.current?.scrollTo(0, 0);
+  }, [selectedApplicantId]);
+
+  const showNextStudent =
+    selectedAssignment &&
+    reviewDraftIsSaveable(selectedDraft) &&
+    selectedIndex >= 0 &&
+    selectedIndex < assignments.length - 1;
+
+  return (
+    <PortalLayout>
+      <div className="portal-card portal-content portal-review-page">
+        <PortalSectionLinks
+          current="reviews"
+          isAdmin={showAdminFeatures}
+          isReviewer={isReviewer}
+          showEditDingLink={!readPortalIsApplied()}
+        />
+
+        <h2 className="portal-page-title">{t('reviews.pageTitle')}</h2>
+        <p className="portal-page-lead">{t('reviews.pageLead')}</p>
+
+        {!signedIn ? (
+          <div className="portal-session-banner" role="status">
+            <p className="portal-session-banner-text">
+              {t('profile.sessionIncompletePrefix')}{' '}
+              <a href={portalHubHref()}>{t('profile.backToProfile')}</a>{' '}
+              {t('profile.sessionIncompleteSuffix')}
+            </p>
+          </div>
+        ) : null}
+
+        {signedIn && !isReviewer ? (
+          <div className="portal-session-banner" role="status">
+            <p className="portal-session-banner-text">{t('reviews.accessDenied')}</p>
+          </div>
+        ) : null}
+
+        {signedIn && isReviewer ? (
+          <>
+            {loading ? <p className="portal-field-hint">{t('reviews.loading')}</p> : null}
+            {error ? (
+              <p className="portal-form-error" role="alert">
+                {error}
+              </p>
+            ) : null}
+
+            {!loading && !error && assignments.length === 0 ? (
+              <p className="portal-field-hint">{t('reviews.empty')}</p>
+            ) : null}
+
+            {!loading && !error && assignments.length > 0 ? (
+              <div className="portal-review-split">
+                <PortalReviewStudentList
+                  assignments={assignments}
+                  drafts={drafts}
+                  selectedApplicantId={selectedApplicantId}
+                  onSelect={setSelectedApplicantId}
+                  saveStatus={saveStatus}
+                  lastSavedAt={lastSavedAt}
+                  t={t}
+                />
+                <div className="portal-review-detail" ref={reviewDetailRef}>
+                  {selectedAssignment ? (
+                    <PortalReviewCard
+                      assignment={selectedAssignment}
+                      draft={selectedDraft}
+                      onDraftChange={updateDraft}
+                      onMarkDirty={markDirty}
+                      onNextStudent={goToNextStudent}
+                      showNextStudent={showNextStudent}
+                      t={t}
+                    />
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
+          </>
+        ) : null}
+      </div>
+    </PortalLayout>
+  );
+}
+
 function PortalShellApp() {
   useEffect(() => {
     document.body.classList.add('portal-body');
@@ -5633,6 +6377,8 @@ function PortalShellApp() {
     page = <PortalAdminCampaignsPage />;
   } else if (segment === 'admin') {
     page = <PortalAdminPage />;
+  } else if (segment === 'reviews') {
+    page = <PortalReviewApplicationsPage />;
   } else if (segment === 'profile') {
     page = signedIn ? <PortalProfilePage /> : <PortalHubPage />;
   } else {
@@ -5899,6 +6645,7 @@ function PortalProfilePage() {
         <PortalSectionLinks
           current="profile"
           isAdmin={showAdminFeatures}
+          isReviewer={readPortalIsReviewer()}
           showEditDingLink={!isApplicantProfile}
         />
         {!sessionComplete ? (

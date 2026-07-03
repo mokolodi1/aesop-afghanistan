@@ -56,6 +56,85 @@ function buildGoogleSheetsConfig(fileSection) {
       "peoplePastDingColumn",
       "V"
     ),
+    /** People sheet column for application reviewer flag. Blank or OFF disables. */
+    peopleReviewerColumn: envOr("GOOGLE_PEOPLE_REVIEWER_COLUMN", "peopleReviewerColumn", "W"),
+    /** Header label on People sheet for reviewer flag (used with loadHeaderRow). */
+    peopleReviewerHeader: envOr(
+      "GOOGLE_PEOPLE_REVIEWER_COLUMN_HEADER",
+      "peopleReviewerHeader",
+      "Reviewer",
+    ),
+    /** Applicant review assignments tab (AESOP ID, reviewers, levels, scores). */
+    applicantReviewsSheetName: envOr(
+      "GOOGLE_APPLICANT_REVIEWS_SHEET_NAME",
+      "applicantReviewsSheetName",
+      "ApplicantReviews",
+    ),
+    applicantReviewsApplicantIdColumn: envOr(
+      "GOOGLE_APPLICANT_REVIEWS_APPLICANT_ID_COLUMN",
+      "applicantReviewsApplicantIdColumn",
+      "A",
+    ),
+    applicantReviewsReviewerAColumn: envOr(
+      "GOOGLE_APPLICANT_REVIEWS_REVIEWER_A_COLUMN",
+      "applicantReviewsReviewerAColumn",
+      "B",
+    ),
+    applicantReviewsReviewerBColumn: envOr(
+      "GOOGLE_APPLICANT_REVIEWS_REVIEWER_B_COLUMN",
+      "applicantReviewsReviewerBColumn",
+      "C",
+    ),
+    applicantReviewsALevelColumn: envOr(
+      "GOOGLE_APPLICANT_REVIEWS_A_LEVEL_COLUMN",
+      "applicantReviewsALevelColumn",
+      "D",
+    ),
+    applicantReviewsASuspectedAiColumn: envOr(
+      "GOOGLE_APPLICANT_REVIEWS_A_SUSPECTED_AI_COLUMN",
+      "applicantReviewsASuspectedAiColumn",
+      "E",
+    ),
+    applicantReviewsAInstructionColumn: envOr(
+      "GOOGLE_APPLICANT_REVIEWS_A_INSTRUCTION_COLUMN",
+      "applicantReviewsAInstructionColumn",
+      "F",
+    ),
+    applicantReviewsAOriginalThinkingColumn: envOr(
+      "GOOGLE_APPLICANT_REVIEWS_A_ORIGINAL_THINKING_COLUMN",
+      "applicantReviewsAOriginalThinkingColumn",
+      "G",
+    ),
+    applicantReviewsACharacterColumn: envOr(
+      "GOOGLE_APPLICANT_REVIEWS_A_CHARACTER_COLUMN",
+      "applicantReviewsACharacterColumn",
+      "H",
+    ),
+    applicantReviewsBLevelColumn: envOr(
+      "GOOGLE_APPLICANT_REVIEWS_B_LEVEL_COLUMN",
+      "applicantReviewsBLevelColumn",
+      "I",
+    ),
+    applicantReviewsBSuspectedAiColumn: envOr(
+      "GOOGLE_APPLICANT_REVIEWS_B_SUSPECTED_AI_COLUMN",
+      "applicantReviewsBSuspectedAiColumn",
+      "J",
+    ),
+    applicantReviewsBInstructionColumn: envOr(
+      "GOOGLE_APPLICANT_REVIEWS_B_INSTRUCTION_COLUMN",
+      "applicantReviewsBInstructionColumn",
+      "K",
+    ),
+    applicantReviewsBOriginalThinkingColumn: envOr(
+      "GOOGLE_APPLICANT_REVIEWS_B_ORIGINAL_THINKING_COLUMN",
+      "applicantReviewsBOriginalThinkingColumn",
+      "L",
+    ),
+    applicantReviewsBCharacterColumn: envOr(
+      "GOOGLE_APPLICANT_REVIEWS_B_CHARACTER_COLUMN",
+      "applicantReviewsBCharacterColumn",
+      "M",
+    ),
     googleGradesSheetName: envOr(
       "GOOGLE_GRADES_SHEET_NAME",
       "googleGradesSheetName",
@@ -80,12 +159,25 @@ function buildGoogleSheetsConfig(fileSection) {
     admissionsIdColumn: envOr("GOOGLE_ADMISSIONS_ID_COLUMN", "admissionsIdColumn", "A"),
     admissionsNameColumn: envOr("GOOGLE_ADMISSIONS_NAME_COLUMN", "admissionsNameColumn", "C"),
     admissionsEmailColumn: envOr("GOOGLE_ADMISSIONS_EMAIL_COLUMN", "admissionsEmailColumn", "D"),
+    admissionsLevelColumn: envOr("GOOGLE_ADMISSIONS_LEVEL_COLUMN", "admissionsLevelColumn", "E"),
+    admissionsEssayColumn: envOr("GOOGLE_ADMISSIONS_ESSAY_COLUMN", "admissionsEssayColumn", "K"),
+    /** Alternate recipient email column on Applicants (e.g. parent/guardian addresses). */
+    admissionsSpecialEmailColumn: envOr(
+      "GOOGLE_ADMISSIONS_SPECIAL_EMAIL_COLUMN",
+      "admissionsSpecialEmailColumn",
+      "M",
+    ),
+    admissionsSpecialEmailHeader: envOr(
+      "GOOGLE_ADMISSIONS_SPECIAL_EMAIL_HEADER",
+      "admissionsSpecialEmailHeader",
+      "Special emails",
+    ),
     admissionsHeaderRow: envOr("GOOGLE_ADMISSIONS_HEADER_ROW", "admissionsHeaderRow", "1"),
-    /** Comma-separated header labels used as recipient filters (Level, Round 1, Round 2). */
+    /** Comma-separated header labels used as recipient filters (Level, Round 1, Round 2, Special emails). */
     admissionsFilterColumns: envOr(
       "GOOGLE_ADMISSIONS_FILTER_COLUMNS",
       "admissionsFilterColumns",
-      "Level,Round 1,Round 2",
+      "Level,Round 1,Round 2,Special emails",
     ),
     calendarSheetName: envOr("GOOGLE_CALENDAR_SHEET_NAME", "calendarSheetName", "Calendar"),
     calendarHeaderRow: envOr("GOOGLE_CALENDAR_HEADER_ROW", "calendarHeaderRow", "1"),
