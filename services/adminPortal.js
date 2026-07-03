@@ -26,6 +26,7 @@ const {
   expandClassGradeRow,
   getPortalDingChangeHistory,
   isPeopleSheetAdminRole,
+  isPeopleSheetReviewerRole,
   isAppliedPeopleStatus,
   resolvePeopleStatus,
 } = require("./googleSheets");
@@ -194,6 +195,16 @@ function isPortalAdmin(emailOrProfile) {
     return true;
   }
   return isPeopleSheetAdminRole(portalRole);
+}
+
+/**
+ * @param {{ reviewerRole?: string }|null|undefined} profile
+ * @returns {boolean}
+ */
+function isPortalReviewer(profile) {
+  const reviewerRole =
+    typeof profile === "object" && profile ? profile.reviewerRole : "";
+  return isPeopleSheetReviewerRole(reviewerRole);
 }
 
 /**
@@ -699,6 +710,7 @@ async function getAdminViewAsTeacher(targetUserId, options = {}) {
 module.exports = {
   isAdminEmail,
   isPortalAdmin,
+  isPortalReviewer,
   getAdminDashboard,
   getHighGradeStudents,
   buildDingConnectTopUpCsv,
