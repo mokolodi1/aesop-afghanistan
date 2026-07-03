@@ -13,6 +13,7 @@ const {
   lookupPersonGradesAndRoleFromDb,
   getPersonByAesopId,
 } = require("./classroomDb");
+const { getPortalLoginStats, getPersonLoginSummary } = require("./portalLoginLog");
 const { normalizeAfghanistanPhoneDigits } = require("../utils/validation");
 const {
   loadEmailToPeopleProfileMap,
@@ -236,7 +237,7 @@ async function getAdminDashboard() {
   const classroomEnabled = !!config.classroom?.enabled;
   if (isDatabaseEnabled()) {
     try {
-      const dbStats = await getSyncStats();
+      const [dbStats, loginStats] = await Promise.all([getSyncStats(), getPortalLoginStats()]);
       return {
         classroomEnabled,
         databaseEnabled: true,
@@ -249,6 +250,7 @@ async function getAdminDashboard() {
         dingConnectTopUpSku: config.admin?.dingConnectTopUpSku ?? "",
         lastSyncedAt: dbStats.lastSyncedAt,
         backupExportKey: dbStats.lastSyncRun?.backupExportKey || "",
+        loginStats,
         syncHint: classroomEnabled
           ? "Classroom data is cached in Postgres. Run npm run sync:classroom daily (Fly scheduled job) to refresh."
           : "Set CLASSROOM_SYNC_ENABLED=true and run the Classroom sync to populate the database.",
@@ -415,6 +417,15 @@ async function lookupStudentForAdmin(query) {
     dingNumber = dingRaw ? normalizeAfghanistanPhoneDigits(dingRaw) || dingRaw : "";
   }
 
+  let loginSummary = null;
+  if (primary.id && isDatabaseEnabled()) {
+    try {
+      loginSummary = await getPersonLoginSummary(primary.id);
+    } catch {
+      loginSummary = null;
+    }
+  }
+
   if (email && config.classroom?.enabled) {
     try {
       const gradesView = await getStudentGradesFromDb(email);
@@ -450,6 +461,8 @@ async function lookupStudentForAdmin(query) {
       classGrades,
       dingHistory,
       liveClasses,
+      lastLoginAt: loginSummary?.lastLoginAt ?? null,
+      loginCount: loginSummary != null ? loginSummary.loginCount ?? 0 : null,
     },
   };
 }

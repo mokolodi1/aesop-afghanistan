@@ -115,3 +115,19 @@ Returns `{ ok, database: { enabled, ok }, classroomEnabled }`.
 - `people` — AESOP IDs, emails, portal roles (Classroom + People mirror)
 - `courses`, `course_enrollments`, `course_grades`, `assignments`, `assignment_grades` — Classroom cache
 - `ding_numbers`, `ding_change_history`, `ding_topups` — Ding mirror and future DingConnect automation audit
+- `portal_events` — portal activity log (`event_type` e.g. `login`); per-user `last_login_at` / `login_count` on `people`
+
+## Portal scale (DB-Cache)
+
+When `DATABASE_URL` is set, the portal reads People, Ding history, and Classroom grades/rosters from Postgres first. Google Sheets remains the write path for Ding updates and last-login stamps.
+
+| Env | Default | Purpose |
+|-----|---------|---------|
+| `PORTAL_AUTH_SOURCE` | `postgres` | `postgres` = DB-first People lookup; `sheets` = legacy sheet reads |
+| `DATABASE_POOL_MAX` | `20` | Postgres pool size per Fly machine |
+| `PORTAL_CLASSROOM_SOURCE` | `database` | Portal never hits live Classroom when DB is enabled (existing behavior) |
+| `PORTAL_LOGIN_SHEET_SYNC` | unset | Set to `true` to also write last login to the People sheet (legacy) |
+
+Portal logins are recorded in `portal_events` with `event_type = login` when `DATABASE_URL` is set. Admin Overview shows aggregate login stats; Student lookup shows last login and count per person.
+
+Before a large login event, run `npm run sync:classroom` and confirm `people` row counts in Postgres.

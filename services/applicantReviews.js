@@ -5,7 +5,8 @@ const {
   getWorksheetByTitle,
   resolveColumnIndex,
 } = require("./googleSheets");
-const { getVoiceMemoDriveScanOptions } = require("./voiceMemoSync");
+const { getVoiceMemoDriveScanOptions, findVoiceMemoInScan } = require("./voiceMemoSync");
+const { scanVoiceMemoFolder } = require("./googleDrive");
 
 const ENGLISH_LEVELS = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"];
 const FITNESS_SCORES = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"];
@@ -254,6 +255,16 @@ async function loadReviewAssignmentsForReviewer(reviewerAesopId) {
   const folderId = String(voiceMemo.driveFolderId || "").trim();
   const scanOptions = getVoiceMemoDriveScanOptions(voiceMemo);
 
+  let memoById = null;
+  if (folderId) {
+    try {
+      const scan = await scanVoiceMemoFolder(folderId, scanOptions);
+      memoById = scan.memosById;
+    } catch {
+      memoById = null;
+    }
+  }
+
   /** @type {Array<{ applicantId: string, name: string, appliedLevel: string, essay: string, slot: 'A'|'B', englishLevel: string, suspectedAi: boolean, instructionFollowing: string, originalThinking: string, character: string, hasVoiceMemo: boolean }>} */
   const assignments = [];
 
@@ -281,7 +292,9 @@ async function loadReviewAssignmentsForReviewer(reviewerAesopId) {
     const reviewFields = readReviewFieldsFromRow(rowData, slotCols);
 
     let hasVoiceMemo = false;
-    if (folderId) {
+    if (memoById) {
+      hasVoiceMemo = Boolean(findVoiceMemoInScan(memoById, applicantId));
+    } else if (folderId) {
       try {
         const driveFile = await getVoiceMemoFileForAesopId(folderId, applicantId, scanOptions);
         hasVoiceMemo = Boolean(driveFile);
