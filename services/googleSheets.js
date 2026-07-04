@@ -4,127 +4,7 @@ const { buildServiceAccountJwt } = require("./googleAuth");
 const { formatGoogleSheetsOperationError } = require("../utils/errorLogging");
 const { dateToGoogleSheetsSerial, formatEasternSheetTimestamp, sheetDatetimeCellTextToUtcMillis } = require("../utils/dingSheetTime");
 const { isDatabaseEnabled } = require("../db/index");
-const { getPersonByAesopId, getDingHistoryFromDb, getLatestDingNumberByAesopId } = require("./classroomDb");
-
-const PROFILE_BY_ID_CACHE_TTL_MS = 5 * 60 * 1000;
-/** @type {Map<string, { at: number, profile: object }>} */
-const profileByIdCache = new Map();
-/** @type {{ at: number, map: Map<string, object> | null, loadPromise: Promise<Map<string, object>> | null }} */
-const peopleByIdSheetMapCache = { at: 0, map: null, loadPromise: null };
-
-/**
- * postgres (default when DATABASE_URL is set) | sheets (legacy full-sheet reads)
- * @returns {"postgres"|"sheets"}
- */
-function resolvePortalAuthSource() {
-  const raw = String(process.env.PORTAL_AUTH_SOURCE || "postgres").trim().toLowerCase();
-  return raw === "sheets" ? "sheets" : "postgres";
-}
-
-function cacheProfileById(normalizedId, profile) {
-  if (normalizedId && profile) {
-    profileByIdCache.set(normalizedId, { at: Date.now(), profile });
-  }
-}
-
-/**
- * @param {object} dbProfile
- * @param {object|undefined} sheetProfile
- * @returns {object}
- */
-function mergeSheetProfileFields(dbProfile, sheetProfile) {
-  if (!sheetProfile) {
-    return dbProfile;
-  }
-  return {
-    ...dbProfile,
-    portalRole: dbProfile.portalRole || sheetProfile.portalRole || "",
-    reviewerRole: dbProfile.reviewerRole || sheetProfile.reviewerRole || "",
-    peopleStatus: dbProfile.peopleStatus || sheetProfile.peopleStatus || "",
-  };
-}
-
-/**
- * One cached pass over the People tab keyed by AESOP ID (reviewer/admin fields, sheet fallback).
- * @returns {Promise<Map<string, { name: string, email: string, id: string, phone: string, portalRole: string, reviewerRole: string, peopleStatus: string }>>}
- */
-async function loadPeopleProfilesByIdMapFromSheets() {
-  if (
-    peopleByIdSheetMapCache.map &&
-    Date.now() - peopleByIdSheetMapCache.at < PROFILE_BY_ID_CACHE_TTL_MS
-  ) {
-    return peopleByIdSheetMapCache.map;
-  }
-  if (peopleByIdSheetMapCache.loadPromise) {
-    return peopleByIdSheetMapCache.loadPromise;
-  }
-
-  peopleByIdSheetMapCache.loadPromise = (async () => {
-    /** @type {Map<string, object>} */
-    const map = new Map();
-    try {
-      const sheet = await initGoogleSheets();
-      const sheetName = config.googleSheets.sheetName || "People";
-      const worksheet = sheet.sheetsByTitle[sheetName];
-      if (!worksheet) {
-        return map;
-      }
-
-      await preparePeopleWorksheet(worksheet);
-      const rows = await worksheet.getRows();
-      const idColumnIndex = resolveColumnIndex(config.googleSheets.idColumn || "B");
-      const nameColumnIndex = resolveColumnIndex(config.googleSheets.nameColumn || "C");
-      const emailColumnIndex = resolveColumnIndex(config.googleSheets.emailColumn || "D");
-      let phoneColumnIndex = null;
-      const pc = config.googleSheets.phoneColumn;
-      if (pc !== "") {
-        try {
-          phoneColumnIndex = resolveColumnIndex(pc != null ? String(pc).trim() : "E");
-        } catch {
-          phoneColumnIndex = null;
-        }
-      }
-      const roleColumnIndex = resolvePeopleRoleColumnIndex();
-      const reviewerColumnIndex = resolvePeopleReviewerColumnIndex();
-      const statusColumnIndex = resolvePeopleStatusColumnIndex();
-
-      for (const row of rows) {
-        try {
-          const rowData = Array.isArray(row._rawData) ? row._rawData : [];
-          const aesopId = String(rowData[idColumnIndex] || "").trim();
-          const normalizedId = aesopId.toLowerCase();
-          if (!normalizedId) {
-            continue;
-          }
-          const phoneRaw =
-            phoneColumnIndex !== null ? String(rowData[phoneColumnIndex] ?? "").trim() : "";
-          map.set(normalizedId, {
-            name: String(rowData[nameColumnIndex] || "").trim(),
-            email: String(rowData[emailColumnIndex] || "").trim(),
-            id: aesopId,
-            phone: phoneRaw,
-            portalRole: readPeoplePortalRoleFromRow(row, rowData, roleColumnIndex),
-            reviewerRole: readPeopleReviewerRoleFromRow(row, rowData, reviewerColumnIndex),
-            peopleStatus: resolvePeopleStatus(
-              aesopId,
-              readPeopleStatusFromRow(row, rowData, statusColumnIndex),
-            ),
-          });
-        } catch {
-          continue;
-        }
-      }
-    } catch (error) {
-      console.warn("loadPeopleProfilesByIdMapFromSheets:", formatGoogleSheetsOperationError(error));
-    }
-    peopleByIdSheetMapCache.at = Date.now();
-    peopleByIdSheetMapCache.map = map;
-    peopleByIdSheetMapCache.loadPromise = null;
-    return map;
-  })();
-
-  return peopleByIdSheetMapCache.loadPromise;
-}
+const { getPersonByAesopId } = require("./classroomDb");
 
 let doc = null;
 let initPromise = null;
@@ -571,54 +451,74 @@ function googleSheetPlainText(value) {
  * @returns {Promise<{ name: string, email: string, id: string, phone: string, portalRole: string }|null>}
  */
 async function findProfileById(userId) {
-  const normalizedId = String(userId || "").trim().toLowerCase();
-  if (!normalizedId) {
-    return null;
-  }
-
-  const cached = profileByIdCache.get(normalizedId);
-  if (cached && Date.now() - cached.at < PROFILE_BY_ID_CACHE_TTL_MS) {
-    return cached.profile;
-  }
-
-  const authSource = resolvePortalAuthSource();
-  let profile = null;
-
-  if (authSource === "postgres" && isDatabaseEnabled()) {
-    try {
-      profile = await findProfileByIdFromDb(userId);
-    } catch (error) {
-      console.warn("Profile DB lookup failed:", error.message);
-    }
-    if (profile) {
-      const sheetMap = await loadPeopleProfilesByIdMapFromSheets();
-      profile = mergeSheetProfileFields(profile, sheetMap.get(normalizedId));
-      cacheProfileById(normalizedId, profile);
-      return profile;
-    }
-  }
-
   try {
-    const sheetMap = await loadPeopleProfilesByIdMapFromSheets();
-    profile = sheetMap.get(normalizedId) || null;
-    if (profile) {
-      cacheProfileById(normalizedId, profile);
-      return profile;
+    const sheet = await initGoogleSheets();
+    const sheetName = config.googleSheets.sheetName || "People";
+    const worksheet = sheet.sheetsByTitle[sheetName];
+    if (!worksheet) {
+      throw new Error(`Sheet "${sheetName}" not found.`);
     }
+
+    await preparePeopleWorksheet(worksheet);
+    const rows = await worksheet.getRows();
+    const idColumnIndex = resolveColumnIndex(config.googleSheets.idColumn || "B");
+    const nameColumnIndex = resolveColumnIndex(config.googleSheets.nameColumn || "C");
+    const emailColumnIndex = resolveColumnIndex(config.googleSheets.emailColumn || "D");
+    let phoneColumnIndex = null;
+    const pc = config.googleSheets.phoneColumn;
+    if (pc === "") {
+      phoneColumnIndex = null;
+    } else {
+      try {
+        phoneColumnIndex = resolveColumnIndex(pc != null ? String(pc).trim() : "E");
+      } catch {
+        phoneColumnIndex = null;
+      }
+    }
+    const roleColumnIndex = resolvePeopleRoleColumnIndex();
+    const reviewerColumnIndex = resolvePeopleReviewerColumnIndex();
+    const statusColumnIndex = resolvePeopleStatusColumnIndex();
+    const normalizedId = userId.trim().toLowerCase();
+
+    for (const row of rows) {
+      try {
+        const rowData = Array.isArray(row._rawData) ? row._rawData : [];
+        const rowId = String(rowData[idColumnIndex] || "").trim().toLowerCase();
+        if (rowId !== normalizedId) {
+          continue;
+        }
+
+        const phoneRaw =
+          phoneColumnIndex !== null ? String(rowData[phoneColumnIndex] ?? "").trim() : "";
+
+        const aesopId = String(rowData[idColumnIndex] || "").trim();
+        return {
+          name: String(rowData[nameColumnIndex] || "").trim(),
+          email: String(rowData[emailColumnIndex] || "").trim(),
+          id: aesopId,
+          phone: phoneRaw,
+          portalRole: readPeoplePortalRoleFromRow(row, rowData, roleColumnIndex),
+          reviewerRole: readPeopleReviewerRoleFromRow(row, rowData, reviewerColumnIndex),
+          peopleStatus: resolvePeopleStatus(
+            aesopId,
+            readPeopleStatusFromRow(row, rowData, statusColumnIndex),
+          ),
+        };
+      } catch (rowError) {
+        continue;
+      }
+    }
+
+    return null;
   } catch (error) {
     const formattedError = formatGoogleSheetsOperationError(error);
     console.error("Error finding profile by ID in Google Sheet:", formattedError);
-    if (authSource === "postgres" && isDatabaseEnabled()) {
-      const fromDb = await findProfileByIdFromDb(userId);
-      if (fromDb) {
-        cacheProfileById(normalizedId, fromDb);
-        return fromDb;
-      }
+    const fromDb = await findProfileByIdFromDb(userId);
+    if (fromDb) {
+      return fromDb;
     }
     throw new Error(formattedError, { cause: error });
   }
-
-  return null;
 }
 
 /**
@@ -762,22 +662,6 @@ function parseSheetTimestamp(raw) {
  * @returns {Promise<string|null>}
  */
 async function findLatestDingNumberById(userId) {
-  const normalizedId = String(userId || "").trim().toLowerCase();
-  if (!normalizedId) {
-    return null;
-  }
-
-  if (isDatabaseEnabled() && resolvePortalAuthSource() === "postgres") {
-    try {
-      const fromDb = await getLatestDingNumberByAesopId(userId);
-      if (fromDb) {
-        return fromDb;
-      }
-    } catch (error) {
-      console.warn("Latest ding DB lookup failed:", error.message);
-    }
-  }
-
   try {
     const sheet = await initGoogleSheets();
     const dingSheetName = config.googleSheets.dingChangesSheetName || "Ding changes";
@@ -838,31 +722,6 @@ async function findLatestDingNumberById(userId) {
  */
 async function getPortalDingChangeHistory(userId, options = {}) {
   const maxRows = Math.min(Math.max(Number(options.maxRows) || 500, 1), 1000);
-  const normalizedId = String(userId || "").trim().toLowerCase();
-  if (!normalizedId) {
-    return [];
-  }
-
-  if (isDatabaseEnabled() && resolvePortalAuthSource() === "postgres") {
-    try {
-      const person = await getPersonByAesopId(userId);
-      if (person?.id) {
-        const rows = await getDingHistoryFromDb(person.id, maxRows);
-        if (rows.length > 0) {
-          return rows.map((row) => ({
-            atMs:
-              row.changedAt instanceof Date && !Number.isNaN(row.changedAt.getTime())
-                ? row.changedAt.getTime()
-                : null,
-            dingNumber: String(row.dingNumber || "").trim(),
-          }));
-        }
-      }
-    } catch (error) {
-      console.warn("Ding history DB lookup failed:", error.message);
-    }
-  }
-
   const sheet = await initGoogleSheets();
   const dingSheetName = config.googleSheets.dingChangesSheetName || "Ding changes";
   const worksheet = sheet.sheetsByTitle[dingSheetName];
@@ -875,6 +734,7 @@ async function getPortalDingChangeHistory(userId, options = {}) {
   const idColumnIndex = resolveColumnIndex(config.googleSheets.dingIdColumn || "A");
   const tsColumnIndex = resolveColumnIndex(config.googleSheets.dingTimestampColumn || "B");
   const dingColumnIndex = resolveColumnIndex(config.googleSheets.dingNumberColumn || "C");
+  const normalizedId = userId.trim().toLowerCase();
 
   /** @type {{ tsMs: number | null, order: number, dingNumber: string }[]} */
   const collected = [];

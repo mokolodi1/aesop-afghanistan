@@ -29,10 +29,6 @@ const VOICE_NOTE_DATE_HEADERS = [
   "Date of submission",
 ];
 
-const APPLICANT_ROW_CACHE_TTL_MS = 15 * 60 * 1000;
-/** @type {Map<string, { at: number, row: object|null }>} */
-const applicantRowByIdCache = new Map();
-
 /**
  * @param {string[]} headerValues
  * @param {string|string[]} labels
@@ -463,7 +459,11 @@ async function loadApplicantsWorksheet() {
   return { worksheet, headerValues, columns, cfg };
 }
 
-async function loadApplicantRowByAesopIdFromSheet(aesopId) {
+/**
+ * @param {string} aesopId
+ * @returns {Promise<{ aesopId: string, round1: string, round2: string, links: string, submittedAt: string, email: string }|null>}
+ */
+async function getApplicantRowByAesopId(aesopId) {
   const idKey = String(aesopId || "").trim();
   if (!idKey) {
     return null;
@@ -490,26 +490,6 @@ async function loadApplicantRowByAesopIdFromSheet(aesopId) {
   }
 
   return null;
-}
-
-/**
- * @param {string} aesopId
- * @returns {Promise<{ aesopId: string, round1: string, round2: string, links: string, submittedAt: string, email: string }|null>}
- */
-async function getApplicantRowByAesopId(aesopId) {
-  const idKeyLower = String(aesopId || "").trim().toLowerCase();
-  if (!idKeyLower) {
-    return null;
-  }
-
-  const cached = applicantRowByIdCache.get(idKeyLower);
-  if (cached && Date.now() - cached.at < APPLICANT_ROW_CACHE_TTL_MS) {
-    return cached.row;
-  }
-
-  const row = await loadApplicantRowByAesopIdFromSheet(aesopId);
-  applicantRowByIdCache.set(idKeyLower, { at: Date.now(), row });
-  return row;
 }
 
 /**
@@ -714,5 +694,4 @@ module.exports = {
   classifyRound1ApplicationStatus,
   getRound1ApplicationStats,
   buildVoiceMemoDriveWarnings,
-  findVoiceMemoInScan,
 };

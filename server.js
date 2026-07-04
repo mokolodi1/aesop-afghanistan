@@ -21,7 +21,6 @@ const {
 const { getTeacherRoster, getStudentGrades } = require('./services/classroomSync');
 const { isDatabaseEnabled, checkDatabaseHealth } = require('./db/index');
 const { getRoleByEmailFromDb, getGradesByEmailFromDb, getPersonByAesopId } = require('./services/classroomDb');
-const { recordPortalLogin, shouldSyncLoginToSheets } = require('./services/portalLoginLog');
 const {
   isPortalAdmin,
   isPortalReviewer,
@@ -364,7 +363,7 @@ app.get('/health', (req, res) => {
 });
 
 // Rate limiter for magic link requests (5 requests per 15 minutes per IP)
-const magicLinkRateLimiter = createRateLimiter({ name: 'magic-link', windowMs: 15 * 60 * 1000, max: 20 });
+const magicLinkRateLimiter = createRateLimiter({ name: 'magic-link', windowMs: 15 * 60 * 1000, max: 5 });
 
 // Request magic link
 app.post('/api/request-magic-link', magicLinkRateLimiter, async (req, res) => {
@@ -440,7 +439,7 @@ app.post('/api/resend-magic-link', magicLinkRateLimiter, async (req, res) => {
 });
 
 // Rate limiter for token verification (10 attempts per 15 minutes per IP)
-const verifyRateLimiter = createRateLimiter({ name: 'verify-magic-link', windowMs: 15 * 60 * 1000, max: 30 });
+const verifyRateLimiter = createRateLimiter({ name: 'verify-magic-link', windowMs: 15 * 60 * 1000, max: 10 });
 
 // Verify magic link (changed to POST to prevent token exposure in URLs/logs)
 app.post('/api/verify-magic-link', verifyRateLimiter, async (req, res) => {
@@ -534,19 +533,9 @@ app.post('/api/verify-magic-link', verifyRateLimiter, async (req, res) => {
       const applicationStatus = await resolveApplicationStatus(studentUserId, isApplicant);
 
       if (studentUserId) {
-        recordPortalLogin({
-          userId: studentUserId,
-          email: emailFromSheet,
-          ip: req.ip,
-        }).catch((loginErr) => {
-          console.warn('Portal login DB log failed:', formatErrorForLog(loginErr));
+        recordPeopleLastLogin(studentUserId).catch((loginErr) => {
+          console.warn('Last login sheet update failed:', formatErrorForLog(loginErr));
         });
-
-        if (shouldSyncLoginToSheets()) {
-          recordPeopleLastLogin(studentUserId).catch((loginErr) => {
-            console.warn('Last login sheet update failed:', formatErrorForLog(loginErr));
-          });
-        }
       }
 
       res.json({

@@ -50,7 +50,7 @@ function getPool() {
     const connectionString = getDatabaseUrl();
     pool = new Pool({
       connectionString,
-      max: Number.parseInt(process.env.DATABASE_POOL_MAX || "20", 10),
+      max: Number.parseInt(process.env.DATABASE_POOL_MAX || "5", 10),
       idleTimeoutMillis: 30_000,
       connectionTimeoutMillis: 10_000,
       ssl: resolvePoolSsl(connectionString),

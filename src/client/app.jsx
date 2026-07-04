@@ -202,8 +202,6 @@ function persistRememberUserId(userId, enabled) {
 
 const PORTAL_SESSION_MS = 60 * 60 * 1000;
 const PORTAL_ADMIN_SESSION_MS = 7 * 24 * 60 * 60 * 1000;
-const PORTAL_CLASS_GRADE_FRESH_MS = 5 * 60 * 1000;
-const PORTAL_CLASS_GRADE_FRESH_AT_KEY = 'studentPortalClassGradeFreshAt';
 const PORTAL_SESSION_EXPIRES_AT_KEY = 'studentPortalSessionExpiresAt';
 const PORTAL_ADMIN_SESSION_LOCAL_KEY = 'studentPortalAdminPersistedSession';
 const PORTAL_ADMIN_EMAIL_RECIPIENT_LIST_KEY = 'portalAdminEmailRecipientList';
@@ -488,30 +486,6 @@ function applyPortalSessionFromApi(data, options = {}) {
     sessionStorage.removeItem('studentPortalTeacherClasses');
   }
   touchPortalSessionExpiry();
-  sessionStorage.setItem(PORTAL_CLASS_GRADE_FRESH_AT_KEY, String(Date.now()));
-}
-
-function readPortalClassGradeSnapshotFromSession() {
-  const userId = readSessionField('studentPortalUserId');
-  const isApplicant = readPortalIsApplicant();
-  const isApplied = readPortalIsApplied();
-  const peopleStatus = resolveClientPeopleStatus(
-    userId,
-    readSessionField('studentPortalPeopleStatus'),
-  );
-  return {
-    classSection: isApplicant || isApplied ? '' : readSessionField('studentPortalClass'),
-    calculatedGrade: isApplicant || isApplied ? '' : readSessionField('studentPortalGrade'),
-    classGrades: isApplicant || isApplied ? [] : readClassGradesFromSession(),
-    isTeacher: !isApplicant && readSessionField('studentPortalIsTeacher') === '1',
-    teacherClasses: isApplicant ? '' : readSessionField('studentPortalTeacherClasses'),
-    isAdmin: readSessionField('studentPortalIsAdmin') === '1',
-    isReviewer: readPortalIsReviewer(),
-    isApplied,
-    isApplicant,
-    peopleStatus,
-    applicationStatus: readSessionField('studentPortalApplicationStatus'),
-  };
 }
 
 function startPortalImpersonation(data) {
@@ -665,13 +639,6 @@ async function loadPortalClassGradeFromApi() {
           applicationStatus: '',
         };
       }
-
-      const freshAtRaw = readSessionField(PORTAL_CLASS_GRADE_FRESH_AT_KEY);
-      const freshAt = Number.parseInt(freshAtRaw, 10);
-      if (Number.isFinite(freshAt) && Date.now() - freshAt < PORTAL_CLASS_GRADE_FRESH_MS) {
-        return readPortalClassGradeSnapshotFromSession();
-      }
-
       const response = await fetch('/api/portal-class-grade', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -3346,30 +3313,6 @@ function PortalAdminPage() {
                   <dt>DingConnect+ amount</dt>
                   <dd>{dashboard.dingConnectTopUpAmount || '—'}</dd>
                 </div>
-                {dashboard.loginStats?.enabled ? (
-                  <>
-                    <div className="portal-admin-stat-row">
-                      <dt>Portal logins (all time)</dt>
-                      <dd>{dashboard.loginStats.totalLoginEvents ?? 0}</dd>
-                    </div>
-                    <div className="portal-admin-stat-row">
-                      <dt>People who logged in</dt>
-                      <dd>{dashboard.loginStats.uniqueUsersEver ?? 0}</dd>
-                    </div>
-                    <div className="portal-admin-stat-row">
-                      <dt>Logins (last 24 hours)</dt>
-                      <dd>{dashboard.loginStats.loginsLast24Hours ?? 0}</dd>
-                    </div>
-                    <div className="portal-admin-stat-row">
-                      <dt>Unique users (last 24 hours)</dt>
-                      <dd>{dashboard.loginStats.uniqueUsersLast24Hours ?? 0}</dd>
-                    </div>
-                    <div className="portal-admin-stat-row">
-                      <dt>Logins (last 7 days)</dt>
-                      <dd>{dashboard.loginStats.loginsLast7Days ?? 0}</dd>
-                    </div>
-                  </>
-                ) : null}
               </dl>
             ) : null}
             {dashboard?.syncHint ? <p className="portal-admin-hint">{dashboard.syncHint}</p> : null}
@@ -3659,22 +3602,6 @@ function PortalAdminPage() {
                     <dt>Role</dt>
                     <dd>{lookupResult.detail.role || '—'}</dd>
                   </div>
-                  {lookupResult.detail.loginCount != null ? (
-                    <>
-                      <div className="portal-admin-stat-row">
-                        <dt>Last portal login</dt>
-                        <dd>
-                          {lookupResult.detail.lastLoginAt
-                            ? new Date(lookupResult.detail.lastLoginAt).toLocaleString()
-                            : '—'}
-                        </dd>
-                      </div>
-                      <div className="portal-admin-stat-row">
-                        <dt>Portal login count</dt>
-                        <dd>{lookupResult.detail.loginCount}</dd>
-                      </div>
-                    </>
-                  ) : null}
                 </dl>
                 {lookupResult.detail.classGrades?.length > 0 ? (
                   <div className="portal-admin-lookup-section">

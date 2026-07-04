@@ -568,20 +568,6 @@ async function getDingHistoryFromDb(personId, maxRows = 10) {
 }
 
 /**
- * @param {string} aesopId
- * @returns {Promise<string|null>}
- */
-async function getLatestDingNumberByAesopId(aesopId) {
-  const person = await getPersonByAesopId(aesopId);
-  if (!person?.id) {
-    return null;
-  }
-  const row = await getCurrentDingNumberFromDb(person.id);
-  const number = row?.number != null ? String(row.number).trim() : "";
-  return number || null;
-}
-
-/**
  * Persist a full Classroom sync snapshot inside a transaction.
  * @param {{
  *   courses: Array<object>,
@@ -865,7 +851,6 @@ module.exports = {
   getHighGradeStudentsFromDb,
   lookupPersonGradesAndRoleFromDb,
   getDingHistoryFromDb,
-  getLatestDingNumberByAesopId,
   persistClassroomSync,
   updateSyncRunBackupKey,
   exportSnapshotFromDb,

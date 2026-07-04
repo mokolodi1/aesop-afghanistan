@@ -35,8 +35,6 @@ const people = pgTable(
     phone: varchar("phone", { length: 64 }),
     portalRole: varchar("portal_role", { length: 20 }),
     teacherClasses: text("teacher_classes"),
-    lastLoginAt: timestamp("last_login_at", { withTimezone: true }),
-    loginCount: integer("login_count").notNull().default(0),
     syncedAt: timestamp("synced_at", { withTimezone: true }),
   },
   (table) => ({
@@ -206,24 +204,6 @@ const dingTopups = pgTable(
   }),
 );
 
-const portalEvents = pgTable(
-  "portal_events",
-  {
-    id: serial("id").primaryKey(),
-    eventType: varchar("event_type", { length: 32 }).notNull(),
-    aesopId: varchar("aesop_id", { length: 64 }),
-    email: varchar("email", { length: 320 }),
-    personId: integer("person_id").references(() => people.id, { onDelete: "set null" }),
-    ipAddress: varchar("ip_address", { length: 64 }),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
-  },
-  (table) => ({
-    typeCreatedIdx: index("portal_events_type_created_idx").on(table.eventType, table.createdAt),
-    aesopIdIdx: index("portal_events_aesop_id_idx").on(table.aesopId),
-    personIdIdx: index("portal_events_person_id_idx").on(table.personId),
-  }),
-);
-
 const emailAdminTests = pgTable(
   "email_admin_tests",
   {
@@ -314,7 +294,6 @@ module.exports = {
   dingChangeHistory,
   magicLinks,
   dingTopups,
-  portalEvents,
   emailAdminTests,
   emailCampaigns,
   emailCampaignRecipients,

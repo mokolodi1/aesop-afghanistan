@@ -4,35 +4,6 @@ const { parseVoiceMemoFileExtensions, DEFAULT_VOICE_MEMO_FILE_EXTENSIONS } = req
 
 const DRIVE_READONLY_SCOPE = "https://www.googleapis.com/auth/drive.readonly";
 
-const FOLDER_SCAN_CACHE_TTL_MS = 30 * 60 * 1000;
-/** @type {Map<string, { at: number, scan: object }>} */
-const folderScanCache = new Map();
-/** @type {Map<string, { at: number, seconds: number|null }>} */
-const durationByFileIdCache = new Map();
-const DURATION_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
-
-/**
- * @param {string} link
- * @returns {string|null}
- */
-function parseDriveFileIdFromLink(link) {
-  const raw = String(link || "").trim();
-  if (!raw) {
-    return null;
-  }
-  const fileMatch = raw.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
-  if (fileMatch) {
-    return fileMatch[1];
-  }
-  const openMatch = raw.match(/[?&]id=([a-zA-Z0-9_-]+)/);
-  return openMatch ? openMatch[1] : null;
-}
-
-function folderScanCacheKey(folderId, options) {
-  const normalized = normalizeVoiceMemoScanOptions(options);
-  return `${folderId}:${normalized.extensions.join(",")}:${normalized.submissionTimeSource}`;
-}
-
 /**
  * @param {string|string[]} extensionOrList
  * @returns {RegExp}
@@ -129,23 +100,6 @@ function parseVoiceMemoFile(file, submissionTimeSource, filenamePattern) {
  * }>}
  */
 async function scanVoiceMemoFolder(folderId, options = {}) {
-  const normalizedFolderId = String(folderId || "").trim();
-  if (!normalizedFolderId) {
-    throw new Error("voiceMemo.driveFolderId is required.");
-  }
-
-  const cacheKey = folderScanCacheKey(normalizedFolderId, options);
-  const cached = folderScanCache.get(cacheKey);
-  if (cached && Date.now() - cached.at < FOLDER_SCAN_CACHE_TTL_MS) {
-    return cached.scan;
-  }
-
-  const scan = await scanVoiceMemoFolderLive(normalizedFolderId, options);
-  folderScanCache.set(cacheKey, { at: Date.now(), scan });
-  return scan;
-}
-
-async function scanVoiceMemoFolderLive(folderId, options = {}) {
   const normalizedFolderId = String(folderId || "").trim();
   if (!normalizedFolderId) {
     throw new Error("voiceMemo.driveFolderId is required.");
@@ -364,27 +318,18 @@ async function getVoiceMemoDurationSeconds(fileId, options = {}) {
     return null;
   }
 
-  const cached = durationByFileIdCache.get(normalizedFileId);
-  if (cached && Date.now() - cached.at < DURATION_CACHE_TTL_MS) {
-    return cached.seconds;
-  }
-
   const timeoutMs = Number.isFinite(options.timeoutMs) ? options.timeoutMs : 15000;
 
-  let duration = null;
   try {
-    duration = await Promise.race([
+    return await Promise.race([
       readVoiceMemoDurationSeconds(normalizedFileId),
       new Promise((resolve) => {
         setTimeout(() => resolve(null), timeoutMs);
       }),
     ]);
   } catch {
-    duration = null;
+    return null;
   }
-
-  durationByFileIdCache.set(normalizedFileId, { at: Date.now(), seconds: duration });
-  return duration;
 }
 
 /**
@@ -471,7 +416,6 @@ module.exports = {
   DRIVE_READONLY_SCOPE,
   normalizeVoiceMemoScanOptions,
   buildVoiceMemoFilenamePattern,
-  parseDriveFileIdFromLink,
   scanVoiceMemoFolder,
   listVoiceMemoFiles,
   getVoiceMemoFileForAesopId,

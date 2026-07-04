@@ -7,7 +7,6 @@ const {
 } = require("../utils/voiceMemoDuration");
 const { findProfileById } = require("./googleSheets");
 const {
-  parseDriveFileIdFromLink,
   getVoiceMemoFileForAesopId,
   streamVoiceMemoFile,
   getVoiceMemoDurationSeconds,
@@ -50,33 +49,6 @@ async function verifyPortalVoiceMemoSession({ userId, email }) {
   }
 
   return profile;
-}
-
-/**
- * Resolve a voice memo Drive file without scanning the folder when Applicants sheet has a link.
- * @param {string} folderId
- * @param {string} aesopId
- * @param {{ links?: string }} applicant
- * @param {object} scanOptions
- * @returns {Promise<{ aesopId: string, fileId: string, webViewLink: string, submittedAt: Date, fileName: string }|null>}
- */
-async function resolveVoiceMemoDriveFile(folderId, aesopId, applicant, scanOptions) {
-  const fileIdFromLink = parseDriveFileIdFromLink(applicant?.links);
-  if (fileIdFromLink) {
-    return {
-      aesopId: String(applicant?.aesopId || aesopId || "").trim(),
-      fileId: fileIdFromLink,
-      webViewLink: String(applicant?.links || "").trim(),
-      submittedAt: new Date(0),
-      fileName: `${String(applicant?.aesopId || aesopId || "voice-memo").trim()}.m4a`,
-    };
-  }
-
-  if (!folderId) {
-    return null;
-  }
-
-  return getVoiceMemoFileForAesopId(folderId, applicant?.aesopId || aesopId, scanOptions);
 }
 
 /**
@@ -128,13 +100,8 @@ async function getPortalVoiceMemoStatus({ userId, email }) {
   let durationWarning = null;
 
   const folderId = String(cfg.voiceMemo.driveFolderId || "").trim();
-  if (folderId || applicant.links) {
-    const driveFile = await resolveVoiceMemoDriveFile(
-      folderId,
-      applicant.aesopId,
-      applicant,
-      scanOptions,
-    );
+  if (folderId) {
+    const driveFile = await getVoiceMemoFileForAesopId(folderId, applicant.aesopId, scanOptions);
     if (driveFile) {
       fileName = driveFile.fileName;
       hasRecording = true;
@@ -199,12 +166,7 @@ async function getPortalVoiceMemoStream({ userId, email, rangeHeader = "" }) {
     throw error;
   }
 
-  const driveFile = await resolveVoiceMemoDriveFile(
-    folderId,
-    applicant.aesopId,
-    applicant,
-    scanOptions,
-  );
+  const driveFile = await getVoiceMemoFileForAesopId(folderId, applicant.aesopId, scanOptions);
 
   if (!driveFile) {
     const error = new Error("No voice memo file was found for your account.");
