@@ -12,7 +12,6 @@ const {
   filterAdmissionsRows,
   getAdmissionsFilterOptions,
   analyzeDuplicateApplicantEmails,
-  isSpecialEmailRecipientFilter,
   withApplicantRecipientEmails,
 } = require("./googleSheets");
 const { sendPostmarkEmail, sendPostmarkBatch, getPostmarkMessageStream, getPostmarkBroadcastMessageStream } = require("./postmark");
@@ -346,17 +345,16 @@ async function resolveAdmissionsRecipients(filter) {
   const sheetData = await loadAdmissionsSheet();
   const normalizedFilter = normalizeFilter(filter);
   const filtered = filterAdmissionsRows(sheetData.rows, normalizedFilter);
-  const rowsForSend = withApplicantRecipientEmails(filtered, normalizedFilter);
+  const rowsForSend = withApplicantRecipientEmails(filtered);
   const recipients = [];
   const skippedFromSend = [];
-  const usingSpecialEmail = isSpecialEmailRecipientFilter(normalizedFilter);
   for (const row of rowsForSend) {
     const emailKey = String(row.email || "")
       .trim()
       .toLowerCase();
     if (!emailKey) {
       skippedFromSend.push({
-        reason: usingSpecialEmail ? "no-special-email" : "no-email",
+        reason: "no-email",
         id: row.id || "",
         name: row.name || "",
         email: "",
@@ -400,9 +398,7 @@ async function resolveAdmissionsRecipients(filter) {
   }
   if (skippedFromSend.length > 0) {
     console.info(
-      usingSpecialEmail
-        ? `[admissions-email] ${skippedFromSend.length} matched row(s) skipped — no special email in column`
-        : `[admissions-email] ${skippedFromSend.length} matched row(s) skipped — no email in column`,
+      `[admissions-email] ${skippedFromSend.length} matched row(s) skipped — no email in column`,
     );
   }
   if (duplicateEmailSkips.length > 0) {
