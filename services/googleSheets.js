@@ -141,6 +141,20 @@ function resolvePeopleTypeColumnIndex() {
   }
 }
 
+function resolvePeoplePhoneColumnIndex() {
+  const columnRef = config.googleSheets.phoneColumn;
+  if (columnRef === "") {
+    return null;
+  }
+  try {
+    const ref =
+      columnRef != null && String(columnRef).trim() !== "" ? String(columnRef).trim() : "F";
+    return resolveColumnIndex(ref);
+  } catch {
+    return null;
+  }
+}
+
 function peopleTypeHeaderCandidates() {
   const configured = config.googleSheets.peopleTypeHeader;
   const fromConfig = configured != null && String(configured).trim() !== "" ? [String(configured).trim()] : [];
@@ -586,17 +600,7 @@ async function findProfileById(userId) {
     const idColumnIndex = resolveColumnIndex(config.googleSheets.idColumn || "B");
     const nameColumnIndex = resolveColumnIndex(config.googleSheets.nameColumn || "C");
     const emailColumnIndex = resolveColumnIndex(config.googleSheets.emailColumn || "D");
-    let phoneColumnIndex = null;
-    const pc = config.googleSheets.phoneColumn;
-    if (pc === "") {
-      phoneColumnIndex = null;
-    } else {
-      try {
-        phoneColumnIndex = resolveColumnIndex(pc != null ? String(pc).trim() : "E");
-      } catch {
-        phoneColumnIndex = null;
-      }
-    }
+    const phoneColumnIndex = resolvePeoplePhoneColumnIndex();
     const roleColumnIndex = resolvePeopleRoleColumnIndex();
     const typeColumnIndex = resolvePeopleTypeColumnIndex();
     const reviewerColumnIndex = resolvePeopleReviewerColumnIndex();
@@ -682,17 +686,7 @@ async function findProfileByEmail(email) {
     const idColumnIndex = resolveColumnIndex(config.googleSheets.idColumn || "B");
     const emailColumnIndex = resolveColumnIndex(config.googleSheets.emailColumn || "D");
     const nameColumnIndex = resolveColumnIndex(config.googleSheets.nameColumn || "C");
-    let phoneColumnIndex = null;
-    const pc = config.googleSheets.phoneColumn;
-    if (pc === "") {
-      phoneColumnIndex = null;
-    } else {
-      try {
-        phoneColumnIndex = resolveColumnIndex(pc != null ? String(pc).trim() : "E");
-      } catch {
-        phoneColumnIndex = null;
-      }
-    }
+    const phoneColumnIndex = resolvePeoplePhoneColumnIndex();
     const roleColumnIndex = resolvePeopleRoleColumnIndex();
     const typeColumnIndex = resolvePeopleTypeColumnIndex();
     const reviewerColumnIndex = resolvePeopleReviewerColumnIndex();
@@ -2050,15 +2044,7 @@ async function searchPeopleProfiles(query, limit = 25) {
     const idColumnIndex = resolveColumnIndex(config.googleSheets.idColumn || "B");
     const nameColumnIndex = resolveColumnIndex(config.googleSheets.nameColumn || "C");
     const emailColumnIndex = resolveColumnIndex(config.googleSheets.emailColumn || "D");
-    let phoneColumnIndex = null;
-    const pc = config.googleSheets.phoneColumn;
-    if (pc !== "") {
-      try {
-        phoneColumnIndex = resolveColumnIndex(pc != null ? String(pc).trim() : "E");
-      } catch {
-        phoneColumnIndex = null;
-      }
-    }
+    const phoneColumnIndex = resolvePeoplePhoneColumnIndex();
 
     const matches = [];
     const statusColumnIndex = resolvePeopleStatusColumnIndex();
