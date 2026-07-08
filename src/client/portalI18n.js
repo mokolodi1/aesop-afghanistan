@@ -45,21 +45,21 @@ const TRANSLATIONS = {
       'Dear Applicant, thank you for applying. If you want to be a successful candidate for this round of AESOP Applications, please check your emails regularly and follow the instructions shared with you there.',
     'hub.aboutPortal': 'About this portal',
     'hub.aboutApplicantPrefix':
-      'This secure applicant portal is where you sign in with a magic link—there is no password to remember on this site. Check your application status, Round 2 voice memo, and the application calendar here, and read',
+      'This secure applicant portal is where you sign in with a login link—there is no password to remember on this site. Check your application status, Round 2 voice memo, and the application calendar here, and read',
     'hub.aboutStudentPrefix':
-      'This secure student portal is where you sign in with a magic link—there is no password to remember on this site. Use it to update your Afghanistan Ding phone number when it changes (with confirmation), review past Ding updates, request help if you need a non-Afghan number for Ding, and read',
+      'This secure student portal is where you sign in with a login link—there is no password to remember on this site. Use it to update your Afghanistan Ding phone number when it changes (with confirmation), review past Ding updates, request help if you need a non-Afghan number for Ding, and read',
     'hub.aboutStudentSuffix':
       'Your AESOP ID, email, and Ding number above summarize what we have on file—open',
     'hub.aboutStudentEnd': 'to change your Ding number.',
     'hub.aboutGuestLine1':
-      'The AESOP Student Portal helps you update your Afghanistan Ding number, see Ding number history after you sign in, and read FAQs—using a magic link, not a password on this site.',
+      'The AESOP Student Portal helps you update your Afghanistan Ding number, see Ding number history after you sign in, and read FAQs—using a login link, not a password on this site.',
     'hub.aboutGuestSectionsLead': 'Portal sections:',
     'hub.aboutGuestAnd': 'and',
     'hub.aboutGuestNotConnected': 'Not connected?',
     'hub.aboutGuestRequestAbove': 'above with your AESOP ID.',
     'hub.preferMainSite': 'Prefer the main site?',
     'hub.profileIntro':
-      'Sign in with your magic link to update your Afghanistan Ding number, view history, or request help with a non-Afghan number.',
+      'Sign in with your login link to update your Afghanistan Ding number, view history, or request help with a non-Afghan number.',
     'hub.faqLink': 'frequently asked questions',
     'hub.studentPortalTitle': 'AESOP Portal',
     'hub.comingSoonTitle': 'Welcome to the AESOP Portal',
@@ -68,7 +68,7 @@ const TRANSLATIONS = {
       'Open Review Applications to score essays for applicants assigned to you.',
     'hub.signInHeading': 'Connect with your AESOP ID',
     'hub.signInLead':
-      'Enter the student ID AESOP gave you. We\'ll email a magic link; open it on this device to finish signing in.',
+      'Enter the student ID AESOP gave you. We\'ll email a login link; open it on this device to finish signing in.',
     'hub.readFaqs': 'Read FAQs',
 
     'applicationStatus.accepted': 'Your application is accepted for Round 1 selection.',
@@ -127,13 +127,13 @@ const TRANSLATIONS = {
     'magicLink.aesopId': 'AESOP ID',
     'magicLink.enterId': 'Enter your ID',
     'magicLink.rememberId': 'Remember my ID',
-    'magicLink.submit': 'Email me a magic link',
+    'magicLink.submit': 'Email me a login link',
     'magicLink.invalidId': 'Please enter a valid ID.',
     'magicLink.invalidIdNotFound':
       'Your ID is invalid. Please enter a correct ID. Please enter the AESOP ID you received in your email.',
     'magicLink.linkSent':
-      'If that AESOP ID is registered, a sign-in link has been sent to the email on file. Please check your email.',
-    'magicLink.sending': 'Checking your ID and sending a magic link...',
+      'If that AESOP ID is registered, a login link has been sent to the email on file. Please check your email.',
+    'magicLink.sending': 'Checking your ID and sending a login link...',
     'magicLink.networkError': 'Internal error. Please try again.',
 
     'profile.applicantBlockedTitle': 'Not available for applicants',
@@ -148,7 +148,7 @@ const TRANSLATIONS = {
     'intent.signInProfileTitle': 'Sign in to manage your Ding number',
     'intent.signInGenericTitle': 'Sign in for account-specific help',
     'intent.openedLink': 'You opened a link related to {{title}}.',
-    'intent.requestMagicLink': 'Request a magic link',
+    'intent.requestMagicLink': 'Request a login link',
     'intent.magicLinkHelpBeforeFaq': 'with your AESOP ID—we\'ll email you a one-time link. The',
     'intent.magicLinkHelpAfterFaq': 'page does not require signing in.',
     'intent.editDing': 'Edit Ding',
@@ -158,9 +158,10 @@ const TRANSLATIONS = {
     'reviews.pageLead': 'Review essays, set English level, and score fitness for the program.',
     'reviews.loading': 'Loading applications…',
     'reviews.loadError': 'Could not load review assignments.',
+    'reviews.loadTimeout': 'Loading review assignments timed out. Please try again.',
     'reviews.empty': 'No applications are assigned to you for review.',
     'reviews.accessDenied':
-      'Reviewer access is required to view this page. Your AESOP ID must be marked as a reviewer on the People sheet (Reviewer column), then sign out and use a new magic link.',
+      'Reviewer access is required to view this page. Your AESOP ID must be marked as a reviewer on the People sheet (Reviewer column), then sign out and use a new login link.',
     'reviews.applicantId': 'AESOP ID',
     'reviews.age': 'Age',
     'reviews.appliedLevel': 'Applied level',
@@ -169,6 +170,8 @@ const TRANSLATIONS = {
     'reviews.essayMissing': 'No essay on file.',
     'reviews.playVoice': 'Play voice note',
     'reviews.voiceComingSoon': 'Coming soon',
+    'reviews.voiceNotAvailable': 'No voice note on file',
+    'reviews.voiceAudioUnsupported': 'Your browser does not support audio playback.',
     'reviews.levelLabel': 'English Level',
     'reviews.suspectedAi': 'Suspected AI',
     'reviews.suspectedAiFlagged': 'Suspected AI — Flagged',
@@ -259,21 +262,21 @@ const TRANSLATIONS = {
       'متقاضی گرامی، از درخواست شما سپاسگزاریم. اگر می‌خواهید در این دور از درخواست‌های AESOP نامزد موفق باشید، لطفاً به‌طور منظم ایمیل‌های خود را بررسی کنید و دستورالعمل‌هایی را که در آنجا با شما به اشتراک گذاشته شده است دنبال کنید.',
     'hub.aboutPortal': 'درباره این پورتال',
     'hub.aboutApplicantPrefix':
-      'این پورتال امن متقاضیان است که با لینک جادویی وارد می‌شوید — در این سایت رمز عبور وجود ندارد. وضعیت درخواست، یادداشت صوتی دور دوم و تقویم درخواست را اینجا ببینید و',
+      'این پورتال امن متقاضیان است که با لینک ورود وارد می‌شوید — در این سایت رمز عبور وجود ندارد. وضعیت درخواست، یادداشت صوتی دور دوم و تقویم درخواست را اینجا ببینید و',
     'hub.aboutStudentPrefix':
-      'این پورتال امن محصلین است که با لینک جادویی وارد می‌شوید — در این سایت رمز عبور وجود ندارد. شماره Ding افغانستان خود را به‌روز کنید، سابقه تغییرات را ببینید، در صورت نیاز به شماره غیرافغانی درخواست کمک کنید و',
+      'این پورتال امن محصلین است که با لینک ورود وارد می‌شوید — در این سایت رمز عبور وجود ندارد. شماره Ding افغانستان خود را به‌روز کنید، سابقه تغییرات را ببینید، در صورت نیاز به شماره غیرافغانی درخواست کمک کنید و',
     'hub.aboutStudentSuffix':
       'AESOP ID، ایمیل و شماره Ding بالا خلاصه اطلاعات ثبت‌شده است — برای تغییر شماره Ding به',
     'hub.aboutStudentEnd': 'بروید.',
     'hub.aboutGuestLine1':
-      'پورتال محصلین AESOP به شما کمک می‌کند شماره Ding افغانستان خود را به‌روز کنید، پس از ورود سابقه تغییرات را ببینید و سوالات متداول را بخوانید — با لینک جادویی، نه رمز عبور در این سایت.',
+      'پورتال محصلین AESOP به شما کمک می‌کند شماره Ding افغانستان خود را به‌روز کنید، پس از ورود سابقه تغییرات را ببینید و سوالات متداول را بخوانید — با لینک ورود، نه رمز عبور در این سایت.',
     'hub.aboutGuestSectionsLead': 'بخش‌های پورتال:',
     'hub.aboutGuestAnd': 'و',
     'hub.aboutGuestNotConnected': 'وصل نیستید؟',
     'hub.aboutGuestRequestAbove': 'بالا با AESOP ID خود درخواست دهید.',
     'hub.preferMainSite': 'ترجیح می‌دهید سایت اصلی را ببینید؟',
     'hub.profileIntro':
-      'با لینک جادویی وارد شوید تا شماره Ding افغانستان خود را به‌روز کنید، سابقه را ببینید یا در مورد شماره غیرافغانی درخواست کمک کنید.',
+      'با لینک ورود وارد شوید تا شماره Ding افغانستان خود را به‌روز کنید، سابقه را ببینید یا در مورد شماره غیرافغانی درخواست کمک کنید.',
     'hub.faqLink': 'سوالات متداول',
     'hub.studentPortalTitle': 'پورتال AESOP',
     'hub.comingSoonTitle': 'به پورتال AESOP خوش آمدید',
@@ -282,7 +285,7 @@ const TRANSLATIONS = {
       'برای نمره‌دهی به مقاله‌های متقاضیانِ اختصاص‌داده‌شده به شما، «بررسی درخواست‌ها» را باز کنید.',
     'hub.signInHeading': 'با AESOP ID خود وصل شوید',
     'hub.signInLead':
-      'AESOP ID که AESOP به شما داده را وارد کنید. ما یک لینک جادویی ایمیل می‌کنیم؛ آن را روی همین دستگاه باز کنید تا وارد شوید.',
+      'AESOP ID که AESOP به شما داده را وارد کنید. ما یک لینک ورود ایمیل می‌کنیم؛ آن را روی همین دستگاه باز کنید تا وارد شوید.',
     'hub.readFaqs': 'خواندن سوالات متداول',
 
     'applicationStatus.accepted': 'درخواست شما برای انتخاب دور اول پذیرفته شده است.',
@@ -341,13 +344,13 @@ const TRANSLATIONS = {
     'magicLink.aesopId': 'AESOP ID',
     'magicLink.enterId': 'AESOP ID خود را وارد کنید',
     'magicLink.rememberId': 'AESOP ID مرا به خاطر بسپار',
-    'magicLink.submit': 'لینک جادویی برایم بفرستید',
+    'magicLink.submit': 'لینک ورود برایم ایمیل کنید',
     'magicLink.invalidId': 'لطفاً یک AESOP ID معتبر وارد کنید.',
     'magicLink.invalidIdNotFound':
       'AESOP ID شما معتبر نیست. لطفاً AESOP ID درست را وارد کنید — همان شناسه‌ای که در ایمیل خود دریافت کرده‌اید.',
     'magicLink.linkSent':
       'اگر این AESOP ID ثبت شده باشد، لینک ورود به ایمیل ثبت‌شده ارسال شده است. لطفاً ایمیل خود را بررسی کنید.',
-    'magicLink.sending': 'در حال بررسی AESOP ID و ارسال لینک جادویی…',
+    'magicLink.sending': 'در حال بررسی AESOP ID و ارسال لینک ورود…',
     'magicLink.networkError': 'خطای داخلی. لطفاً دوباره تلاش کنید.',
 
     'profile.applicantBlockedTitle': 'برای متقاضیان در دسترس نیست',
@@ -362,7 +365,7 @@ const TRANSLATIONS = {
     'intent.signInProfileTitle': 'برای مدیریت شماره Ding وارد شوید',
     'intent.signInGenericTitle': 'برای کمک مخصوص حساب خود وارد شوید',
     'intent.openedLink': 'شما لینکی مربوط به {{title}} باز کرده‌اید.',
-    'intent.requestMagicLink': 'درخواست لینک جادویی',
+    'intent.requestMagicLink': 'درخواست لینک ورود',
     'intent.magicLinkHelpBeforeFaq': 'با AESOP ID خود — یک لینک یک‌بار مصرف ایمیل می‌کنیم. صفحه',
     'intent.magicLinkHelpAfterFaq': 'نیاز به ورود ندارد.',
     'intent.editDing': 'تغییر Ding',
@@ -372,9 +375,10 @@ const TRANSLATIONS = {
     'reviews.pageLead': 'انشا را بخوانید، سطح انگلیسی را تعیین کنید، و تناسب با برنامه را نمره دهید.',
     'reviews.loading': 'در حال بارگذاری درخواست‌ها…',
     'reviews.loadError': 'بارگذاری وظایف بررسی ممکن نشد.',
+    'reviews.loadTimeout': 'بارگذاری وظایف بررسی بیش از حد طول کشید. لطفاً دوباره تلاش کنید.',
     'reviews.empty': 'هیچ درخواستی برای بررسی به شما اختصاص داده نشده است.',
     'reviews.accessDenied':
-      'برای دیدن این صفحه دسترسی بررسی‌کننده لازم است. AESOP ID شما باید در برگه People در ستون Reviewer علامت‌گذاری شود، سپس خارج شوید و با لینک جادویی جدید وارد شوید.',
+      'برای دیدن این صفحه دسترسی بررسی‌کننده لازم است. AESOP ID شما باید در برگه People در ستون Reviewer علامت‌گذاری شود، سپس خارج شوید و با لینک ورود جدید وارد شوید.',
     'reviews.applicantId': 'AESOP ID',
     'reviews.age': 'سن',
     'reviews.appliedLevel': 'سطح درخواستی',
@@ -383,6 +387,8 @@ const TRANSLATIONS = {
     'reviews.essayMissing': 'انشا موجود نیست.',
     'reviews.playVoice': 'پخش یادداشت صوتی',
     'reviews.voiceComingSoon': 'به‌زودی',
+    'reviews.voiceNotAvailable': 'یادداشت صوتی موجود نیست',
+    'reviews.voiceAudioUnsupported': 'مرورگر شما از پخش صدا پشتیبانی نمی‌کند.',
     'reviews.levelLabel': 'سطح انگلیسی',
     'reviews.suspectedAi': 'مشکوک به هوش مصنوعی',
     'reviews.suspectedAiFlagged': 'مشکوک به هوش مصنوعی — علامت‌گذاری شد',

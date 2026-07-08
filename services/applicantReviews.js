@@ -1,18 +1,20 @@
 const config = require("../config/secrets");
-const { getVoiceMemoFileForAesopId } = require("./googleDrive");
 const {
   initGoogleSheets,
   getWorksheetByTitle,
   resolveColumnIndex,
 } = require("./googleSheets");
-const { getVoiceMemoDriveScanOptions } = require("./voiceMemoSync");
 const {
   isDatabaseEnabled,
-  isApplicantReviewsMirrorFresh,
+  getApplicantsReviewFieldsMapFromDb,
+  isReviewerAssignedToApplicantFromDb,
   getReviewAssignmentsForReviewerFromDb,
   getApplicantReviewRowFromDb,
   upsertApplicantReviewFromMirror,
 } = require("./classroomDb");
+const {
+  mintReviewVoiceStreamToken,
+} = require("./portalVoiceMemo");
 
 const ENGLISH_LEVELS = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"];
 const FITNESS_SCORES = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"];
@@ -182,9 +184,16 @@ function getApplicantsReviewConfig() {
 }
 
 /**
- * @returns {Promise<Map<string, { age: string, essay: string }>>}
+ * @returns {Promise<Map<string, { age: string, essay: string, driveFileId: string }>>}
  */
 async function loadApplicantsByIdMap() {
+  if (isDatabaseEnabled()) {
+    const fromDb = await getApplicantsReviewFieldsMapFromDb();
+    if (fromDb) {
+      return fromDb;
+    }
+  }
+
   const cfg = getApplicantsReviewConfig();
   const doc = await initGoogleSheets();
   const worksheet = await getWorksheetByTitle(doc, cfg.sheetName);
@@ -194,7 +203,7 @@ async function loadApplicantsByIdMap() {
 
   await worksheet.loadHeaderRow(cfg.headerRowNum);
   const rows = await worksheet.getRows();
-  /** @type {Map<string, { age: string, essay: string }>} */
+  /** @type {Map<string, { age: string, essay: string, driveFileId: string }>} */
   const byId = new Map();
 
   for (const row of rows) {
@@ -206,6 +215,7 @@ async function loadApplicantsByIdMap() {
     byId.set(normalizeAesopIdKey(aesopId), {
       age: String(rowData[cfg.ageColumnIndex] ?? "").trim(),
       essay: String(rowData[cfg.essayColumnIndex] ?? "").trim(),
+      driveFileId: "",
     });
   }
 
@@ -314,10 +324,6 @@ async function loadReviewAssignmentsForReviewerFromSheets(reviewerKey) {
   const rows = await worksheet.getRows();
   const applicantsById = await loadApplicantsByIdMap();
 
-  const voiceMemo = config.voiceMemo || {};
-  const folderId = String(voiceMemo.driveFolderId || "").trim();
-  const scanOptions = getVoiceMemoDriveScanOptions(voiceMemo);
-
   /** @type {Array<{ applicantId: string, age: string, essay: string, slot: 'A'|'B', englishLevel: string, suspectedAi: boolean, instructionFollowing: string, originalThinking: string, character: string, hasVoiceMemo: boolean }>} */
   const assignments = [];
 
@@ -342,16 +348,7 @@ async function loadReviewAssignmentsForReviewerFromSheets(reviewerKey) {
     const applicant = applicantsById.get(normalizeAesopIdKey(applicantId));
     const slotCols = getSlotColumns(reviewsCfg, slot);
     const reviewFields = readReviewFieldsFromRow(rowData, slotCols);
-
-    let hasVoiceMemo = false;
-    if (folderId) {
-      try {
-        const driveFile = await getVoiceMemoFileForAesopId(folderId, applicantId, scanOptions);
-        hasVoiceMemo = Boolean(driveFile);
-      } catch {
-        hasVoiceMemo = false;
-      }
-    }
+    const hasVoiceMemo = Boolean(String(applicant?.driveFileId ?? "").trim());
 
     assignments.push({
       applicantId,
@@ -373,20 +370,84 @@ async function loadReviewAssignmentsForReviewerFromSheets(reviewerKey) {
 /**
  * @param {string} reviewerAesopId
  */
+/**
+ * @param {string} reviewerAesopId
+ * @param {string} applicantAesopId
+ * @returns {Promise<boolean>}
+ */
+async function isReviewerAssignedToApplicant(reviewerAesopId, applicantAesopId) {
+  const reviewerKey = normalizeAesopIdKey(reviewerAesopId);
+  const applicantKey = normalizeAesopIdKey(applicantAesopId);
+  if (!reviewerKey || !applicantKey) {
+    return false;
+  }
+
+  if (isDatabaseEnabled()) {
+    const fromDb = await isReviewerAssignedToApplicantFromDb(reviewerAesopId, applicantAesopId);
+    if (fromDb !== null) {
+      return fromDb;
+    }
+  }
+
+  const reviewsCfg = getApplicantReviewsConfig();
+  const doc = await initGoogleSheets();
+  const worksheet = await getWorksheetByTitle(doc, reviewsCfg.sheetName);
+  if (!worksheet) {
+    return false;
+  }
+
+  await worksheet.loadHeaderRow(reviewsCfg.headerRowNum);
+  const rows = await worksheet.getRows();
+  for (const row of rows) {
+    const rowData = Array.isArray(row._rawData) ? row._rawData : [];
+    const applicantId = normalizeAesopIdKey(rowData[reviewsCfg.applicantIdCol]);
+    if (applicantId !== applicantKey) {
+      continue;
+    }
+    const reviewerA = normalizeAesopIdKey(rowData[reviewsCfg.reviewerACol]);
+    const reviewerB = normalizeAesopIdKey(rowData[reviewsCfg.reviewerBCol]);
+    if (reviewerA === reviewerKey || reviewerB === reviewerKey) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/**
+ * @param {string} reviewerAesopId
+ * @param {Array<{ applicantId: string, hasVoiceMemo: boolean }>} assignments
+ */
+function attachReviewVoiceStreamTokens(reviewerAesopId, assignments) {
+  return assignments.map((assignment) => ({
+    ...assignment,
+    streamToken:
+      assignment.hasVoiceMemo && reviewerAesopId
+        ? mintReviewVoiceStreamToken(reviewerAesopId, assignment.applicantId)
+        : null,
+  }));
+}
+
 async function loadReviewAssignmentsForReviewer(reviewerAesopId) {
   const reviewerKey = normalizeAesopIdKey(reviewerAesopId);
   if (!reviewerKey) {
     return [];
   }
 
-  if (isDatabaseEnabled() && (await isApplicantReviewsMirrorFresh())) {
+  let assignments = [];
+
+  if (isDatabaseEnabled()) {
     const rows = await getReviewAssignmentsForReviewerFromDb(reviewerAesopId);
-    if (rows) {
-      return mapReviewAssignmentsFromDbRows(rows, reviewerKey);
+    if (rows && rows.length > 0) {
+      assignments = mapReviewAssignmentsFromDbRows(rows, reviewerKey);
     }
   }
 
-  return loadReviewAssignmentsForReviewerFromSheets(reviewerKey);
+  if (assignments.length === 0) {
+    assignments = await loadReviewAssignmentsForReviewerFromSheets(reviewerKey);
+  }
+
+  return attachReviewVoiceStreamTokens(reviewerAesopId, assignments);
 }
 
 /**
@@ -695,4 +756,5 @@ module.exports = {
   loadReviewAssignmentsForReviewer,
   saveReviewAssessment,
   isListedAsApplicantReviewer,
+  isReviewerAssignedToApplicant,
 };

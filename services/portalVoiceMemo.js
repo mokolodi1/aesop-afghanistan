@@ -17,6 +17,7 @@ const {
 
 const STREAM_TOKEN_TTL_MS = 15 * 60 * 1000;
 const STREAM_TOKEN_DOMAIN = "voice-stream-v1";
+const REVIEW_STREAM_TOKEN_DOMAIN = "review-voice-stream-v1";
 
 /** @type {Buffer|null} */
 let cachedStreamSigningKey = null;
@@ -73,6 +74,15 @@ function signStreamPayload(payloadB64) {
   );
 }
 
+function signReviewStreamPayload(payloadB64) {
+  return base64UrlEncode(
+    crypto
+      .createHmac("sha256", getStreamSigningKey())
+      .update(`${REVIEW_STREAM_TOKEN_DOMAIN}:${payloadB64}`)
+      .digest(),
+  );
+}
+
 /**
  * Mint a short-lived signed token authorizing playback of one user's voice
  * memo. Carries only an opaque, expiring payload — no email or raw ID in the URL.
@@ -123,6 +133,63 @@ function verifyVoiceStreamToken(token) {
     return null;
   }
   return { userId: payload.u };
+}
+
+/**
+ * Mint a short-lived token for a reviewer to stream an assigned applicant's voice memo.
+ * @param {string} reviewerAesopId
+ * @param {string} applicantAesopId
+ * @returns {string}
+ */
+function mintReviewVoiceStreamToken(reviewerAesopId, applicantAesopId) {
+  const reviewerId = String(reviewerAesopId || "").trim();
+  const applicantId = String(applicantAesopId || "").trim();
+  if (!reviewerId || !applicantId) {
+    return "";
+  }
+  const payloadB64 = base64UrlEncode(
+    JSON.stringify({ r: reviewerId, a: applicantId, exp: Date.now() + STREAM_TOKEN_TTL_MS }),
+  );
+  return `${payloadB64}.${signReviewStreamPayload(payloadB64)}`;
+}
+
+/**
+ * @param {string} token
+ * @returns {{ reviewerId: string, applicantId: string }|null}
+ */
+function verifyReviewVoiceStreamToken(token) {
+  if (!token || typeof token !== "string") {
+    return null;
+  }
+  const parts = token.split(".");
+  if (parts.length !== 2 || !parts[0] || !parts[1]) {
+    return null;
+  }
+  const [payloadB64, sig] = parts;
+  const expectedSig = signReviewStreamPayload(payloadB64);
+  const sigBuf = Buffer.from(sig);
+  const expBuf = Buffer.from(expectedSig);
+  if (sigBuf.length !== expBuf.length || !crypto.timingSafeEqual(sigBuf, expBuf)) {
+    return null;
+  }
+  let payload;
+  try {
+    payload = JSON.parse(base64UrlToString(payloadB64));
+  } catch {
+    return null;
+  }
+  if (
+    !payload ||
+    typeof payload.r !== "string" ||
+    typeof payload.a !== "string" ||
+    typeof payload.exp !== "number"
+  ) {
+    return null;
+  }
+  if (Date.now() > payload.exp) {
+    return null;
+  }
+  return { reviewerId: payload.r, applicantId: payload.a };
 }
 
 /**
@@ -248,7 +315,7 @@ async function resolveVoiceMemoRecordingFromApplicant(applicant, durationLimits,
 async function getPortalVoiceMemoStatus({ userId, email }) {
   const profile = await verifyPortalVoiceMemoSession({ userId, email });
   if (!profile) {
-    const error = new Error("Unable to load voice memo status. Please sign in again from the magic link.");
+    const error = new Error("Unable to load voice memo status. Please sign in again using your login link.");
     error.statusCode = 403;
     throw error;
   }
@@ -347,11 +414,49 @@ async function streamVoiceMemoForUserId(userId, rangeHeader = "") {
 async function getPortalVoiceMemoStream({ userId, email, rangeHeader = "" }) {
   const profile = await verifyPortalVoiceMemoSession({ userId, email });
   if (!profile) {
-    const error = new Error("Unable to play voice memo. Please sign in again from the magic link.");
+    const error = new Error("Unable to play voice memo. Please sign in again using your login link.");
     error.statusCode = 403;
     throw error;
   }
   return streamVoiceMemoForUserId(profile.id || userId, rangeHeader);
+}
+
+/**
+ * Stream an applicant voice memo for an assigned reviewer using a signed token.
+ * @param {{ token: string, rangeHeader?: string }} params
+ */
+async function getReviewVoiceMemoStreamByToken({ token, rangeHeader = "" }) {
+  const verified = verifyReviewVoiceStreamToken(token);
+  if (!verified) {
+    const error = new Error("This voice memo link has expired. Reload the page and try again.");
+    error.statusCode = 403;
+    throw error;
+  }
+
+  const { isReviewerAssignedToApplicant } = require("./applicantReviews");
+  const allowed = await isReviewerAssignedToApplicant(verified.reviewerId, verified.applicantId);
+  if (!allowed) {
+    const error = new Error("You are not assigned to review this applicant.");
+    error.statusCode = 403;
+    throw error;
+  }
+
+  const cfg = getVoiceMemoSheetConfig();
+  const applicant = await getApplicantRowByAesopId(verified.applicantId);
+  if (!applicant) {
+    const error = new Error("No voice memo file was found for this applicant.");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const driveFile = await resolveDriveFileForApplicant(applicant, cfg);
+  if (!driveFile) {
+    const error = new Error("No voice memo file was found for this applicant.");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  return streamVoiceMemoFile(driveFile.fileId, rangeHeader);
 }
 
 /**
@@ -373,6 +478,9 @@ module.exports = {
   getPortalVoiceMemoStatus,
   getPortalVoiceMemoStream,
   getPortalVoiceMemoStreamByToken,
+  getReviewVoiceMemoStreamByToken,
   mintVoiceStreamToken,
+  mintReviewVoiceStreamToken,
   verifyVoiceStreamToken,
+  verifyReviewVoiceStreamToken,
 };

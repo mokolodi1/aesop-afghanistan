@@ -243,13 +243,13 @@ async function sendMagicLinkEmail(email, token, { name = '', userId = '' } = {})
           : ''
       }
       <p style="margin:0 0 18px;line-height:1.5;">
-        Use the link below on the same device where you requested access. It expires in <strong>15 minutes</strong>.
+        Use the login link below on the same device where you requested access. It expires in <strong>15 minutes</strong>.
       </p>
       <table role="presentation" cellpadding="0" cellspacing="0">
         <tr>
           <td style="border-radius:12px;background-color:${accent};">
             <a href="${magicLink.replace(/&/g, '&amp;')}" style="display:inline-block;padding:12px 24px;font-family:${FONT_STACK};font-size:14px;font-weight:700;color:#ffffff;text-decoration:none;border-radius:12px;">
-              Sign in
+              Open login link
             </a>
           </td>
         </tr>
@@ -270,7 +270,7 @@ async function sendMagicLinkEmail(email, token, { name = '', userId = '' } = {})
     safeName ? `Hello ${safeName},` : 'Hello,',
     safeUserId ? `Your AESOP ID: ${safeUserId}` : '',
     '',
-    'Use this link to sign in (same device you used to request it). Expires in 15 minutes:',
+    'Use this login link to sign in (same device you used to request it). Expires in 15 minutes:',
     magicLink,
     '',
     'If you did not request this email, you may disregard it.',
@@ -318,7 +318,7 @@ async function resendMagicLinkByToken(token) {
 
   return {
     success: true,
-    message: 'A new magic link has been sent to your registered email.',
+    message: 'A new login link has been sent to your registered email.',
   };
 }
 

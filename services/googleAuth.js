@@ -2,6 +2,21 @@ const { GoogleAuth, JWT } = require("google-auth-library");
 const config = require("../config/secrets");
 
 /**
+ * @param {string} key
+ * @returns {string}
+ */
+function normalizeServiceAccountPrivateKey(key) {
+  const raw = String(key || "");
+  if (!raw) {
+    return "";
+  }
+  if (raw.includes("\\n") && !raw.includes("\n")) {
+    return raw.replace(/\\n/g, "\n");
+  }
+  return raw;
+}
+
+/**
  * @returns {import('google-auth-library').JWT|null}
  */
 function getServiceAccountCredentials() {
@@ -9,7 +24,10 @@ function getServiceAccountCredentials() {
   if (!credentials?.client_email || !credentials?.private_key) {
     return null;
   }
-  return credentials;
+  return {
+    ...credentials,
+    private_key: normalizeServiceAccountPrivateKey(credentials.private_key),
+  };
 }
 
 /**
@@ -22,11 +40,20 @@ async function buildServiceAccountJwt(scopes) {
   const credentials = getServiceAccountCredentials();
 
   if (credentials) {
-    return new JWT({
+    const client = new JWT({
       email: credentials.client_email,
       key: credentials.private_key,
       scopes: scopeList,
     });
+    await client.authorize();
+    return client;
+  }
+
+  if (process.env.FLY_APP_NAME) {
+    throw new Error(
+      "Google service account credentials are not configured. Set email.gmailServiceAccount.credentials " +
+        "in SECRETS_JSON or GMAIL_SA_CREDENTIALS_JSON on Fly.",
+    );
   }
 
   const auth = new GoogleAuth({
@@ -38,4 +65,5 @@ async function buildServiceAccountJwt(scopes) {
 module.exports = {
   buildServiceAccountJwt,
   getServiceAccountCredentials,
+  normalizeServiceAccountPrivateKey,
 };

@@ -482,6 +482,8 @@ async function getApplicantRowByAesopId(aesopId) {
           links: fromDb.links,
           submittedAt: fromDb.submittedAt,
           email: fromDb.email,
+          age: fromDb.age,
+          essay: fromDb.essay,
           driveFileId: fromDb.driveFileId,
           driveFileName: fromDb.driveFileName,
           driveDurationSeconds: fromDb.driveDurationSeconds,

@@ -1018,6 +1018,8 @@ function applicantRowFromDb(applicant) {
     links: String(applicant.applicantLinks ?? "").trim(),
     submittedAt: String(applicant.submittedAt ?? "").trim(),
     email: String(applicant.email || "").trim(),
+    age: String(applicant.age ?? "").trim(),
+    essay: String(applicant.essay ?? "").trim(),
     driveFileId: applicant.driveFileId ? String(applicant.driveFileId).trim() : null,
     driveFileName: applicant.driveFileName ? String(applicant.driveFileName).trim() : null,
     driveDurationSeconds:
@@ -1046,7 +1048,7 @@ async function getApplicantRowByAesopIdFromDb(aesopId) {
     .where(sql`lower(${applicants.aesopId}) = ${id}`)
     .limit(1);
   const applicant = rows[0];
-  if (!applicant || !isApplicantsMirrorFresh(applicant)) {
+  if (!applicant) {
     return null;
   }
   return applicantRowFromDb(applicant);
@@ -1124,6 +1126,76 @@ async function upsertApplicantFromMirror(fields) {
     ],
   );
   return result.rows[0] || null;
+}
+
+/** @returns {Promise<boolean>} */
+async function isApplicantsTableMirrorFresh() {
+  const pool = getPool();
+  if (!pool) {
+    return false;
+  }
+  const result = await pool.query(
+    `SELECT MAX(synced_at) AS latest FROM applicants WHERE synced_at IS NOT NULL`,
+  );
+  return isMirrorTimestampFresh(result.rows[0]?.latest);
+}
+
+/**
+ * @returns {Promise<Map<string, { age: string, essay: string, driveFileId: string }>|null>}
+ */
+async function getApplicantsReviewFieldsMapFromDb() {
+  const pool = getPool();
+  if (!pool) {
+    return null;
+  }
+
+  const result = await pool.query(
+    `SELECT lower(aesop_id) AS aesop_key, age, essay, drive_file_id
+     FROM applicants
+     WHERE aesop_id IS NOT NULL AND trim(aesop_id) <> ''`,
+  );
+
+  /** @type {Map<string, { age: string, essay: string, driveFileId: string }>} */
+  const byId = new Map();
+  for (const row of result.rows) {
+    const key = String(row.aesop_key || "").trim().toLowerCase();
+    if (!key) {
+      continue;
+    }
+    byId.set(key, {
+      age: String(row.age ?? "").trim(),
+      essay: String(row.essay ?? "").trim(),
+      driveFileId: String(row.drive_file_id ?? "").trim(),
+    });
+  }
+  return byId;
+}
+
+/**
+ * @param {string} reviewerAesopId
+ * @param {string} applicantAesopId
+ * @returns {Promise<boolean|null>} null when mirror is stale/unavailable
+ */
+async function isReviewerAssignedToApplicantFromDb(reviewerAesopId, applicantAesopId) {
+  const pool = getPool();
+  if (!pool) {
+    return null;
+  }
+  const reviewerKey = typeof reviewerAesopId === "string" ? reviewerAesopId.trim().toLowerCase() : "";
+  const applicantKey = typeof applicantAesopId === "string" ? applicantAesopId.trim().toLowerCase() : "";
+  if (!reviewerKey || !applicantKey) {
+    return false;
+  }
+
+  const result = await pool.query(
+    `SELECT 1
+     FROM applicant_reviews
+     WHERE lower(aesop_id) = $1
+       AND (lower(reviewer_a) = $2 OR lower(reviewer_b) = $2)
+     LIMIT 1`,
+    [applicantKey, reviewerKey],
+  );
+  return result.rows.length > 0;
 }
 
 /** @returns {Promise<boolean>} */
@@ -1250,9 +1322,6 @@ async function getReviewAssignmentsForReviewerFromDb(reviewerAesopId) {
   if (!reviewerKey) {
     return [];
   }
-  if (!(await isApplicantReviewsMirrorFresh())) {
-    return null;
-  }
 
   const result = await pool.query(
     `SELECT
@@ -1293,6 +1362,9 @@ module.exports = {
   isPeopleMirrorFresh,
   isPeopleIdentityFresh,
   isApplicantsMirrorFresh,
+  isApplicantsTableMirrorFresh,
+  getApplicantsReviewFieldsMapFromDb,
+  isReviewerAssignedToApplicantFromDb,
   isApplicantReviewsMirrorFresh,
   personRowToProfile,
   applicantRowFromDb,

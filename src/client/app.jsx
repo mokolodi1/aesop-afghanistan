@@ -530,22 +530,43 @@ function stopPortalImpersonation() {
   window.location.assign('/admin');
 }
 
-async function portalApiPost(path, body = {}) {
+async function portalApiPost(path, body = {}, options = {}) {
   const userId = readSessionField('studentPortalUserId');
   const email = readSessionField('studentPortalEmail');
-  const response = await fetch(path, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ userId, email, ...body }),
-  });
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error((data && data.error) || `Request failed (HTTP ${response.status}).`);
+  const timeoutMs = Number(options.timeoutMs) > 0 ? Number(options.timeoutMs) : 0;
+  const controller = timeoutMs > 0 ? new AbortController() : null;
+  const timeoutId =
+    controller != null
+      ? window.setTimeout(() => {
+          controller.abort();
+        }, timeoutMs)
+      : null;
+
+  try {
+    const response = await fetch(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId, email, ...body }),
+      signal: controller?.signal,
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error((data && data.error) || `Request failed (HTTP ${response.status}).`);
+    }
+    if (data.success !== true) {
+      throw new Error((data && data.error) || 'Request failed.');
+    }
+    return data;
+  } catch (error) {
+    if (error && error.name === 'AbortError') {
+      throw new Error('Request timed out. Please try again.');
+    }
+    throw error;
+  } finally {
+    if (timeoutId != null) {
+      window.clearTimeout(timeoutId);
+    }
   }
-  if (data.success !== true) {
-    throw new Error((data && data.error) || 'Request failed.');
-  }
-  return data;
 }
 
 async function adminApiPost(path, body = {}) {
@@ -1749,14 +1770,14 @@ function RequestMagicLinkApp() {
         />
       </div>
       <h1>AESOP Afghanistan</h1>
-      <p className="subtitle">Enter your AESOP ID to receive a magic link</p>
-      <MagicLinkRequestForm inputId="userId" submitLabel="Send Magic Link" />
+      <p className="subtitle">Enter your AESOP ID to receive a login link</p>
+      <MagicLinkRequestForm inputId="userId" submitLabel="Email me a login link" />
     </div>
   );
 }
 
 function VerifyMagicLinkApp() {
-  const [status, setStatus] = useState('Verifying magic link...');
+  const [status, setStatus] = useState('Verifying login link...');
   const [message, setMessage] = useState({ type: '', text: '' });
   const [showSpinner, setShowSpinner] = useState(true);
   const [verificationFailed, setVerificationFailed] = useState(false);
@@ -1824,7 +1845,7 @@ function VerifyMagicLinkApp() {
 
         if (response.ok && data.success) {
           setStatus('Success!');
-          setMessage({ type: 'success', text: 'Magic link verified successfully. Redirecting...' });
+          setMessage({ type: 'success', text: 'Login link verified successfully. Redirecting...' });
           try {
             applyPortalSessionFromApi(data, { allowAdmin: true });
           } catch (sessionError) {
@@ -1852,7 +1873,7 @@ function VerifyMagicLinkApp() {
           type: 'error',
           text:
             data.error ||
-            (response.ok ? 'Invalid or expired magic link.' : `Request failed (HTTP ${response.status}). Try again.`),
+            (response.ok ? 'Invalid or expired login link.' : `Request failed (HTTP ${response.status}). Try again.`),
         });
         setVerificationFailed(true);
         setCanResendByToken(data.canResend === true);
@@ -1872,7 +1893,7 @@ function VerifyMagicLinkApp() {
 
   const requestMagicLinkByUserId = async (userId) => {
     setIsResending(true);
-    setMessage({ type: 'loading', text: 'Sending a new magic link...' });
+    setMessage({ type: 'loading', text: 'Sending a new login link...' });
 
     try {
       const response = await fetch('/api/request-magic-link', {
@@ -1886,7 +1907,7 @@ function VerifyMagicLinkApp() {
         setStatus('Verification Failed');
         setMessage({
           type: 'error',
-          text: data.error || data.message || 'Unable to send a new magic link. Enter your AESOP ID below.',
+          text: data.error || data.message || 'Unable to send a new login link. Enter your AESOP ID below.',
         });
         setShowIdForm(true);
         return;
@@ -1895,7 +1916,7 @@ function VerifyMagicLinkApp() {
       setStatus('Check your email');
       setMessage({
         type: 'success',
-        text: data.message || 'A new magic link has been sent to your registered email.',
+        text: data.message || 'A new login link has been sent to your registered email.',
       });
       setVerificationFailed(false);
       sessionStorage.setItem('studentPortalPendingMagicUserId', userId);
@@ -1915,7 +1936,7 @@ function VerifyMagicLinkApp() {
 
     if (canResendByToken && linkToken) {
       setIsResending(true);
-      setMessage({ type: 'loading', text: 'Sending a new magic link...' });
+      setMessage({ type: 'loading', text: 'Sending a new login link...' });
 
       try {
         const response = await fetch('/api/resend-magic-link', {
@@ -1929,7 +1950,7 @@ function VerifyMagicLinkApp() {
           setStatus('Check your email');
           setMessage({
             type: 'success',
-            text: data.message || 'A new magic link has been sent to your registered email.',
+            text: data.message || 'A new login link has been sent to your registered email.',
           });
           setVerificationFailed(false);
           return;
@@ -6184,6 +6205,47 @@ function useReviewAutoSave({ drafts, onSaveOne }) {
   return { markDirty, saveStatus, lastSavedAt };
 }
 
+function PortalReviewVoicePlayer({ assignment, t }) {
+  const [audioError, setAudioError] = useState('');
+
+  const streamSrc = useMemo(() => {
+    if (!assignment?.hasVoiceMemo || !assignment?.streamToken) {
+      return '';
+    }
+    const params = new URLSearchParams({ st: assignment.streamToken });
+    return `/api/portal-reviews/voice-memo/stream?${params.toString()}`;
+  }, [assignment?.hasVoiceMemo, assignment?.streamToken]);
+
+  useEffect(() => {
+    setAudioError('');
+  }, [streamSrc]);
+
+  if (!assignment?.hasVoiceMemo || !streamSrc) {
+    return (
+      <div className="portal-review-voice-row">
+        <p className="portal-field-hint">{t('reviews.voiceNotAvailable')}</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="portal-review-voice-row">
+      <div className="portal-review-voice-player" aria-label={t('reviews.playVoice')}>
+        <audio
+          controls
+          preload="none"
+          className="portal-review-voice-audio"
+          src={streamSrc}
+          onError={() => setAudioError(t('voiceMemo.audioPlayError'))}
+        >
+          {t('reviews.voiceAudioUnsupported')}
+        </audio>
+        {audioError ? <p className="portal-field-hint portal-review-voice-error">{audioError}</p> : null}
+      </div>
+    </div>
+  );
+}
+
 function PortalReviewCard({ assignment, draft, onDraftChange, onMarkDirty, onNextStudent, showNextStudent, t }) {
   const ageDisplay = assignment.age?.trim() || t('reviews.notAvailable');
 
@@ -6207,12 +6269,7 @@ function PortalReviewCard({ assignment, draft, onDraftChange, onMarkDirty, onNex
         )}
       </section>
 
-      <div className="portal-review-voice-row">
-        <button type="button" className="portal-review-voice-btn" disabled aria-disabled="true">
-          <span className="portal-review-voice-btn-label">▶ {t('reviews.playVoice')}</span>
-          <span className="portal-review-voice-btn-soon">{t('reviews.voiceComingSoon')}</span>
-        </button>
-      </div>
+      <PortalReviewVoicePlayer assignment={assignment} t={t} />
 
       <div className="portal-review-scoring-panel" aria-label={t('reviews.scoringAria')}>
         <section className="portal-review-scoring-section portal-review-scoring-section--english">
@@ -6363,7 +6420,7 @@ function PortalReviewApplicationsPage() {
     setLoading(true);
     setError('');
 
-    portalApiPost('/api/portal-reviews/list')
+    portalApiPost('/api/portal-reviews/list', {}, { timeoutMs: 45000 })
       .then((data) => {
         if (cancelled) {
           return;
@@ -6393,7 +6450,11 @@ function PortalReviewApplicationsPage() {
       })
       .catch((err) => {
         if (!cancelled) {
-          setError(err.message || t('reviews.loadError'));
+          const message =
+            err && err.message === 'Request timed out. Please try again.'
+              ? t('reviews.loadTimeout')
+              : err.message || t('reviews.loadError');
+          setError(message);
           setAssignments([]);
           setDrafts({});
           setSelectedApplicantId('');
