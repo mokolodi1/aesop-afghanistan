@@ -1897,6 +1897,7 @@ async function loadEmailToPeopleProfileMap() {
     const typeColumnIndex = resolvePeopleTypeColumnIndex();
     const reviewerColumnIndex = resolvePeopleReviewerColumnIndex();
     const statusColumnIndex = resolvePeopleStatusColumnIndex();
+    const phoneColumnIndex = resolvePeoplePhoneColumnIndex();
 
     for (const row of rows) {
       const rowData = Array.isArray(row._rawData) ? row._rawData : [];
@@ -1907,11 +1908,15 @@ async function loadEmailToPeopleProfileMap() {
         continue;
       }
       const aesopId = String(rowData[idColumnIndex] ?? "").trim();
+      const phoneRaw =
+        phoneColumnIndex !== null ? String(rowData[phoneColumnIndex] ?? "").trim() : "";
       map.set(email, {
         id: aesopId,
         name: String(rowData[nameColumnIndex] ?? "").trim(),
+        phone: phoneRaw,
         peopleType: readPeopleTypeFromRow(row, rowData, typeColumnIndex),
         portalRole: readPeoplePortalRoleFromRow(row, rowData, roleColumnIndex),
+        reviewerRole: readPeopleReviewerRoleFromRow(row, rowData, reviewerColumnIndex),
         peopleStatus: resolvePeopleStatus(
           aesopId,
           readPeopleStatusFromRow(row, rowData, statusColumnIndex),

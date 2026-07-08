@@ -965,7 +965,7 @@ function personRowToProfile(person) {
     id: aesopId,
     phone: person.phone || "",
     portalRole,
-    reviewerRole: "",
+    reviewerRole: person.reviewerRole || "",
     peopleStatus:
       String(portalRole).trim().toLowerCase() === "applied" ? "applied" : "",
   };

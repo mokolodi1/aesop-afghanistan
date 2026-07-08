@@ -34,6 +34,7 @@ const people = pgTable(
     name: varchar("name", { length: 255 }),
     phone: varchar("phone", { length: 64 }),
     portalRole: varchar("portal_role", { length: 20 }),
+    reviewerRole: varchar("reviewer_role", { length: 64 }),
     teacherClasses: text("teacher_classes"),
     syncedAt: timestamp("synced_at", { withTimezone: true }),
   },

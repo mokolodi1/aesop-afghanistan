@@ -31,8 +31,9 @@ async function upsertPersonFromSheetProfile(profile, syncedAt = new Date(), appl
   const email = profile.email.trim().toLowerCase();
   const portalRole = resolvePortalRoleFromPeopleSheet(profile, applicantIdSet);
   const aesopId = profile.id ? String(profile.id).trim() : null;
+  const reviewerRole = profile.reviewerRole ? String(profile.reviewerRole).trim() : null;
   const result = await pool.query(
-    `INSERT INTO people (aesop_id, email, name, phone, portal_role, synced_at)
+    `INSERT INTO people (aesop_id, email, name, phone, portal_role, reviewer_role, synced_at)
      SELECT
        CASE
          WHEN NULLIF(trim($1::text), '') IS NULL THEN NULL
@@ -42,7 +43,7 @@ async function upsertPersonFromSheetProfile(profile, syncedAt = new Date(), appl
          ) THEN NULL
          ELSE trim($1::text)
        END,
-       $2, $3, $4, $5, $6
+       $2, $3, $4, $5, $6, $7
      ON CONFLICT (email) DO UPDATE SET
        aesop_id = CASE
          WHEN NULLIF(trim(EXCLUDED.aesop_id), '') IS NULL THEN people.aesop_id
@@ -59,9 +60,10 @@ async function upsertPersonFromSheetProfile(profile, syncedAt = new Date(), appl
        name = COALESCE(EXCLUDED.name, people.name),
        phone = COALESCE(EXCLUDED.phone, people.phone),
        portal_role = EXCLUDED.portal_role,
+       reviewer_role = EXCLUDED.reviewer_role,
        synced_at = EXCLUDED.synced_at
      RETURNING *`,
-    [aesopId, email, profile.name || null, profile.phone || null, portalRole, syncedAt],
+    [aesopId, email, profile.name || null, profile.phone || null, portalRole, reviewerRole, syncedAt],
   );
   return result.rows[0] || null;
 }
