@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Schedule hourly Postgres cache refresh (People, Ding, Applicants, Google Drive).
+# Schedule hourly Postgres cache refresh (People, current Ding numbers, Applicants, ApplicantReviews, Drive).
 # Does NOT include Google Classroom unless HOURLY_CACHE_INCLUDE_CLASSROOM=true on the app.
 #
 # Usage:

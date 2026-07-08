@@ -10,7 +10,7 @@ async function main() {
     process.exit(1);
   }
   await runMigrations();
-  const result = await mirrorPeopleAndDingFromSheets();
+  const result = await mirrorPeopleAndDingFromSheets({ includeDingHistory: true });
   console.log("[mirror-people-ding] done:", result);
 }
 

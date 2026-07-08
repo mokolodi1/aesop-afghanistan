@@ -6,6 +6,13 @@ const {
   resolveColumnIndex,
 } = require("./googleSheets");
 const { getVoiceMemoDriveScanOptions } = require("./voiceMemoSync");
+const {
+  isDatabaseEnabled,
+  isApplicantReviewsMirrorFresh,
+  getReviewAssignmentsForReviewerFromDb,
+  getApplicantReviewRowFromDb,
+  upsertApplicantReviewFromMirror,
+} = require("./classroomDb");
 
 const ENGLISH_LEVELS = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"];
 const FITNESS_SCORES = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"];
@@ -233,12 +240,75 @@ function readReviewFieldsFromRow(rowData, cols) {
 /**
  * @param {string} reviewerAesopId
  */
-async function loadReviewAssignmentsForReviewer(reviewerAesopId) {
-  const reviewerKey = normalizeAesopIdKey(reviewerAesopId);
-  if (!reviewerKey) {
-    return [];
+function readReviewFieldsFromDbRow(row, slot) {
+  const prefix = slot === "A" ? "a_" : "b_";
+  const levelRaw = String(row[`${prefix}english_level`] ?? "").trim();
+  let englishLevel = normalizeEnglishLevel(levelRaw);
+  let suspectedAi = normalizeSuspectedAi(row[`${prefix}suspected_ai`]);
+  if (!englishLevel && normalizeSuspectedAi(levelRaw)) {
+    suspectedAi = true;
+  }
+  return {
+    englishLevel,
+    suspectedAi,
+    ...normalizeFitnessScores({
+      instructionFollowing: row[`${prefix}instruction_following`],
+      originalThinking: row[`${prefix}original_thinking`],
+      character: row[`${prefix}character`],
+    }),
+  };
+}
+
+/**
+ * @param {Array<Record<string, unknown>>} rows
+ * @param {string} reviewerKey
+ * @returns {Array<{ applicantId: string, name: string, appliedLevel: string, essay: string, slot: 'A'|'B', englishLevel: string, suspectedAi: boolean, instructionFollowing: string, originalThinking: string, character: string, hasVoiceMemo: boolean }>}
+ */
+function mapReviewAssignmentsFromDbRows(rows, reviewerKey) {
+  /** @type {Array<{ applicantId: string, name: string, appliedLevel: string, essay: string, slot: 'A'|'B', englishLevel: string, suspectedAi: boolean, instructionFollowing: string, originalThinking: string, character: string, hasVoiceMemo: boolean }>} */
+  const assignments = [];
+
+  for (const row of rows) {
+    const applicantId = String(row.aesop_id ?? "").trim();
+    if (!applicantId) {
+      continue;
+    }
+
+    const reviewerA = normalizeAesopIdKey(row.reviewer_a);
+    const reviewerB = normalizeAesopIdKey(row.reviewer_b);
+    let slot = null;
+    if (reviewerA === reviewerKey) {
+      slot = "A";
+    } else if (reviewerB === reviewerKey) {
+      slot = "B";
+    } else {
+      continue;
+    }
+
+    const reviewFields = readReviewFieldsFromDbRow(row, slot);
+    const driveFileId = String(row.drive_file_id ?? "").trim();
+
+    assignments.push({
+      applicantId,
+      name: String(row.name ?? "").trim() || applicantId,
+      appliedLevel: String(row.applied_level ?? "").trim(),
+      essay: String(row.essay ?? "").trim(),
+      slot,
+      ...reviewFields,
+      hasVoiceMemo: Boolean(driveFileId),
+    });
   }
 
+  assignments.sort(
+    (a, b) =>
+      a.name.localeCompare(b.name, undefined, { sensitivity: "base" }) ||
+      a.applicantId.localeCompare(b.applicantId, undefined, { sensitivity: "base" }),
+  );
+
+  return assignments;
+}
+
+async function loadReviewAssignmentsForReviewerFromSheets(reviewerKey) {
   const reviewsCfg = getApplicantReviewsConfig();
   const doc = await initGoogleSheets();
   const worksheet = await getWorksheetByTitle(doc, reviewsCfg.sheetName);
@@ -311,6 +381,105 @@ async function loadReviewAssignmentsForReviewer(reviewerAesopId) {
 }
 
 /**
+ * @param {string} reviewerAesopId
+ */
+async function loadReviewAssignmentsForReviewer(reviewerAesopId) {
+  const reviewerKey = normalizeAesopIdKey(reviewerAesopId);
+  if (!reviewerKey) {
+    return [];
+  }
+
+  if (isDatabaseEnabled() && (await isApplicantReviewsMirrorFresh())) {
+    const rows = await getReviewAssignmentsForReviewerFromDb(reviewerAesopId);
+    if (rows) {
+      return mapReviewAssignmentsFromDbRows(rows, reviewerKey);
+    }
+  }
+
+  return loadReviewAssignmentsForReviewerFromSheets(reviewerKey);
+}
+
+/**
+ * @param {import('google-spreadsheet').GoogleSpreadsheetWorksheet} worksheet
+ * @param {ReturnType<typeof getApplicantReviewsConfig>} reviewsCfg
+ * @param {number} sheetRowNumber
+ * @param {'A'|'B'} slot
+ * @param {{ englishLevel: string, suspectedAi: boolean, instructionFollowing: string, originalThinking: string, character: string }} values
+ */
+async function writeReviewCellsToSheet(worksheet, reviewsCfg, sheetRowNumber, slot, values) {
+  const slotCols = getSlotColumns(reviewsCfg, slot);
+  const columnIndices = [
+    slotCols.level,
+    slotCols.suspectedAi,
+    slotCols.instructionFollowing,
+    slotCols.originalThinking,
+    slotCols.character,
+  ];
+  const gridRowIdx = sheetRowNumber - 1;
+
+  await worksheet.loadCells({
+    startRowIndex: gridRowIdx,
+    endRowIndex: gridRowIdx + 1,
+    startColumnIndex: Math.min(...columnIndices),
+    endColumnIndex: Math.max(...columnIndices) + 1,
+  });
+
+  worksheet.getCell(gridRowIdx, slotCols.level).value = values.englishLevel;
+  worksheet.getCell(gridRowIdx, slotCols.suspectedAi).value = values.suspectedAi
+    ? SUSPECTED_AI_SHEET_VALUE
+    : "";
+  worksheet.getCell(gridRowIdx, slotCols.instructionFollowing).value = values.instructionFollowing;
+  worksheet.getCell(gridRowIdx, slotCols.originalThinking).value = values.originalThinking;
+  worksheet.getCell(gridRowIdx, slotCols.character).value = values.character;
+  await worksheet.saveUpdatedCells();
+}
+
+/**
+ * @param {Record<string, unknown>} dbRow
+ * @param {'A'|'B'} slot
+ * @param {{ englishLevel: string, suspectedAi: boolean, instructionFollowing: string, originalThinking: string, character: string }} values
+ */
+async function writeThroughReviewToDb(dbRow, slot, values) {
+  const syncedAt = new Date();
+  const fields = {
+    aesopId: String(dbRow.aesop_id ?? "").trim(),
+    reviewerA: String(dbRow.reviewer_a ?? "").trim(),
+    reviewerB: String(dbRow.reviewer_b ?? "").trim(),
+    aEnglishLevel: String(dbRow.a_english_level ?? "").trim(),
+    aSuspectedAi: String(dbRow.a_suspected_ai ?? "").trim(),
+    aInstructionFollowing: String(dbRow.a_instruction_following ?? "").trim(),
+    aOriginalThinking: String(dbRow.a_original_thinking ?? "").trim(),
+    aCharacter: String(dbRow.a_character ?? "").trim(),
+    bEnglishLevel: String(dbRow.b_english_level ?? "").trim(),
+    bSuspectedAi: String(dbRow.b_suspected_ai ?? "").trim(),
+    bInstructionFollowing: String(dbRow.b_instruction_following ?? "").trim(),
+    bOriginalThinking: String(dbRow.b_original_thinking ?? "").trim(),
+    bCharacter: String(dbRow.b_character ?? "").trim(),
+    sheetRowNumber:
+      dbRow.sheet_row_number != null && Number.isFinite(Number(dbRow.sheet_row_number))
+        ? Number(dbRow.sheet_row_number)
+        : null,
+    syncedAt,
+  };
+
+  if (slot === "A") {
+    fields.aEnglishLevel = values.englishLevel;
+    fields.aSuspectedAi = values.suspectedAi ? SUSPECTED_AI_SHEET_VALUE : "";
+    fields.aInstructionFollowing = values.instructionFollowing;
+    fields.aOriginalThinking = values.originalThinking;
+    fields.aCharacter = values.character;
+  } else {
+    fields.bEnglishLevel = values.englishLevel;
+    fields.bSuspectedAi = values.suspectedAi ? SUSPECTED_AI_SHEET_VALUE : "";
+    fields.bInstructionFollowing = values.instructionFollowing;
+    fields.bOriginalThinking = values.originalThinking;
+    fields.bCharacter = values.character;
+  }
+
+  await upsertApplicantReviewFromMirror(fields);
+}
+
+/**
  * @param {{
  *   reviewerAesopId: string,
  *   applicantAesopId: string,
@@ -374,13 +543,53 @@ async function saveReviewAssessment({
     throw new Error(`Sheet "${reviewsCfg.sheetName}" was not found.`);
   }
 
-  await worksheet.loadHeaderRow(reviewsCfg.headerRowNum);
-  const rows = await worksheet.getRows();
+  const normalizedValues = {
+    englishLevel: normalizedLevel,
+    suspectedAi: normalizedSuspectedAi,
+    instructionFollowing: normalizedScores.instructionFollowing,
+    originalThinking: normalizedScores.originalThinking,
+    character: normalizedScores.character,
+  };
 
   /** @type {import('google-spreadsheet').GoogleSpreadsheetRow | null} */
   let matchedRow = null;
   /** @type {'A'|'B'|null} */
   let slot = null;
+  /** @type {Record<string, unknown>|null} */
+  let dbRow = null;
+
+  if (isDatabaseEnabled()) {
+    dbRow = await getApplicantReviewRowFromDb(applicantAesopId);
+    if (dbRow) {
+      const reviewerA = normalizeAesopIdKey(dbRow.reviewer_a);
+      const reviewerB = normalizeAesopIdKey(dbRow.reviewer_b);
+      if (reviewerA === reviewerKey) {
+        slot = "A";
+      } else if (reviewerB === reviewerKey) {
+        slot = "B";
+      }
+    }
+  }
+
+  if (slot && dbRow?.sheet_row_number) {
+    await writeReviewCellsToSheet(
+      worksheet,
+      reviewsCfg,
+      Number(dbRow.sheet_row_number),
+      slot,
+      normalizedValues,
+    );
+    await writeThroughReviewToDb(dbRow, slot, normalizedValues);
+    return {
+      applicantId: applicantAesopId.trim(),
+      englishLevel: normalizedLevel,
+      suspectedAi: normalizedSuspectedAi,
+      ...normalizedScores,
+    };
+  }
+
+  await worksheet.loadHeaderRow(reviewsCfg.headerRowNum);
+  const rows = await worksheet.getRows();
 
   for (const row of rows) {
     const rowData = Array.isArray(row._rawData) ? row._rawData : [];
@@ -409,33 +618,41 @@ async function saveReviewAssessment({
     throw error;
   }
 
-  const slotCols = getSlotColumns(reviewsCfg, slot);
-  const columnIndices = [
-    slotCols.level,
-    slotCols.suspectedAi,
-    slotCols.instructionFollowing,
-    slotCols.originalThinking,
-    slotCols.character,
-  ];
-  const gridRowIdx = matchedRow.rowNumber - 1;
+  await writeReviewCellsToSheet(worksheet, reviewsCfg, matchedRow.rowNumber, slot, normalizedValues);
 
-  await worksheet.loadCells({
-    startRowIndex: gridRowIdx,
-    endRowIndex: gridRowIdx + 1,
-    startColumnIndex: Math.min(...columnIndices),
-    endColumnIndex: Math.max(...columnIndices) + 1,
+  const rowData = Array.isArray(matchedRow._rawData) ? matchedRow._rawData : [];
+  const cell = (index) => String(rowData[index] ?? "").trim();
+  await upsertApplicantReviewFromMirror({
+    aesopId: applicantAesopId.trim(),
+    reviewerA: cell(reviewsCfg.reviewerACol),
+    reviewerB: cell(reviewsCfg.reviewerBCol),
+    aEnglishLevel: slot === "A" ? normalizedValues.englishLevel : cell(reviewsCfg.aLevelCol),
+    aSuspectedAi:
+      slot === "A"
+        ? normalizedValues.suspectedAi
+          ? SUSPECTED_AI_SHEET_VALUE
+          : ""
+        : cell(reviewsCfg.aSuspectedAiCol),
+    aInstructionFollowing:
+      slot === "A" ? normalizedValues.instructionFollowing : cell(reviewsCfg.aInstructionCol),
+    aOriginalThinking:
+      slot === "A" ? normalizedValues.originalThinking : cell(reviewsCfg.aOriginalThinkingCol),
+    aCharacter: slot === "A" ? normalizedValues.character : cell(reviewsCfg.aCharacterCol),
+    bEnglishLevel: slot === "B" ? normalizedValues.englishLevel : cell(reviewsCfg.bLevelCol),
+    bSuspectedAi:
+      slot === "B"
+        ? normalizedValues.suspectedAi
+          ? SUSPECTED_AI_SHEET_VALUE
+          : ""
+        : cell(reviewsCfg.bSuspectedAiCol),
+    bInstructionFollowing:
+      slot === "B" ? normalizedValues.instructionFollowing : cell(reviewsCfg.bInstructionCol),
+    bOriginalThinking:
+      slot === "B" ? normalizedValues.originalThinking : cell(reviewsCfg.bOriginalThinkingCol),
+    bCharacter: slot === "B" ? normalizedValues.character : cell(reviewsCfg.bCharacterCol),
+    sheetRowNumber: matchedRow.rowNumber,
+    syncedAt: new Date(),
   });
-
-  worksheet.getCell(gridRowIdx, slotCols.level).value = normalizedLevel;
-  worksheet.getCell(gridRowIdx, slotCols.suspectedAi).value = normalizedSuspectedAi
-    ? SUSPECTED_AI_SHEET_VALUE
-    : "";
-  worksheet.getCell(gridRowIdx, slotCols.instructionFollowing).value =
-    normalizedScores.instructionFollowing;
-  worksheet.getCell(gridRowIdx, slotCols.originalThinking).value =
-    normalizedScores.originalThinking;
-  worksheet.getCell(gridRowIdx, slotCols.character).value = normalizedScores.character;
-  await worksheet.saveUpdatedCells();
 
   return {
     applicantId: applicantAesopId.trim(),
@@ -449,7 +666,9 @@ module.exports = {
   ENGLISH_LEVELS,
   FITNESS_SCORES,
   FITNESS_CRITERIA,
+  getApplicantReviewsConfig,
   normalizeEnglishLevel,
+  normalizeSuspectedAi,
   normalizeFitnessScore,
   loadReviewAssignmentsForReviewer,
   saveReviewAssessment,

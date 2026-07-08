@@ -4,8 +4,9 @@
  *
  * Always mirrors:
  *   - People tab (roles, IDs, emails)
- *   - Ding numbers + ding change history
+ *   - Current Ding numbers (not full change history — see sync:classroom daily)
  *   - Applicants tab
+ *   - ApplicantReviews tab
  *   - Google Drive voice memo metadata (file id, name, duration)
  *
  * Optionally mirrors Google Classroom (heavy) when HOURLY_CACHE_INCLUDE_CLASSROOM=true.
@@ -59,6 +60,28 @@ async function printApplicantsDriveStats() {
   );
 }
 
+async function printApplicantReviewsStats() {
+  const pool = getPool();
+  if (!pool) {
+    return;
+  }
+  const maxAgeMs = getMirrorCacheMaxAgeMs();
+  const stats = await pool.query(
+    `SELECT
+       COUNT(*)::int AS review_rows,
+       COUNT(*) FILTER (
+         WHERE synced_at IS NOT NULL
+           AND synced_at > NOW() - ($1::bigint * INTERVAL '1 millisecond')
+       )::int AS review_rows_fresh
+     FROM applicant_reviews`,
+    [maxAgeMs],
+  );
+  const row = stats.rows[0] || {};
+  console.log(
+    `[sync-hourly-cache] applicant_reviews: rows=${row.review_rows ?? 0}, fresh=${row.review_rows_fresh ?? 0}`,
+  );
+}
+
 async function main() {
   const maxAgeMs = getMirrorCacheMaxAgeMs();
   const withClassroom = includeClassroomSync();
@@ -75,6 +98,7 @@ async function main() {
   const mirrorResult = await mirrorPeopleAndDingFromSheets();
   console.log("[sync-hourly-cache] mirror result:", mirrorResult);
   await printApplicantsDriveStats();
+  await printApplicantReviewsStats();
 
   if (!withClassroom) {
     return { mirror: mirrorResult, classroom: null };

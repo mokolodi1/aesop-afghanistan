@@ -53,7 +53,7 @@ When cache is stale, reads fall back to live Sheets/Classroom (slower but curren
 
 ### Refresh the cache (hourly on Fly)
 
-**Hourly job** — People, Ding, **Applicants**, and **Google Drive** voice memo metadata:
+**Hourly job** — People, current Ding numbers, **Applicants**, **ApplicantReviews**, and **Google Drive** voice memo metadata:
 
 ```bash
 npm run sync:hourly-cache
@@ -65,7 +65,7 @@ Schedule on Fly:
 bash scripts/schedule-hourly-cache.sh
 ```
 
-This runs `mirrorPeopleAndDingFromSheets()` every hour (~10–15 min):
+This runs `mirrorPeopleAndDingFromSheets()` every hour (without full Ding change history):
 
 | Source | Postgres `people` columns |
 |--------|---------------------------|
@@ -75,13 +75,14 @@ Other hourly mirrors:
 
 | Source | Postgres tables |
 |--------|-----------------|
-| Ding changes tab | `ding_numbers`, `ding_change_history` |
+| Ding changes tab (current values only) | `ding_numbers` |
 | Applicants tab | `applicants` |
+| ApplicantReviews tab | `applicant_reviews` |
 | Google Drive folder | `applicants.drive_file_id`, `drive_file_name`, `drive_duration_seconds` |
 
 Google Classroom is **not** included in the hourly job by default (too heavy). Keep Classroom on a daily schedule (below). To also run Classroom hourly, set `HOURLY_CACHE_INCLUDE_CLASSROOM=true` on the scheduled machine.
 
-**Daily job** — Google Classroom rosters, grades, enrollments (+ sheet dual-write + backup export):
+**Daily job** — Google Classroom rosters, grades, enrollments (+ sheet dual-write + backup export), and **Ding change history**:
 
 ```bash
 npm run sync:classroom

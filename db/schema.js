@@ -58,6 +58,9 @@ const applicants = pgTable(
     id: serial("id").primaryKey(),
     aesopId: varchar("aesop_id", { length: 64 }).notNull(),
     email: varchar("email", { length: 320 }),
+    name: varchar("name", { length: 255 }),
+    appliedLevel: varchar("applied_level", { length: 64 }),
+    essay: text("essay"),
     round1: varchar("round1", { length: 64 }),
     round2: varchar("round2", { length: 64 }),
     applicantLinks: text("applicant_links"),
@@ -71,6 +74,35 @@ const applicants = pgTable(
     aesopIdUnique: unique("applicants_aesop_id_unique").on(table.aesopId),
     aesopIdIdx: index("applicants_aesop_id_idx").on(table.aesopId),
     emailIdx: index("applicants_email_idx").on(table.email),
+  }),
+);
+
+const applicantReviews = pgTable(
+  "applicant_reviews",
+  {
+    id: serial("id").primaryKey(),
+    aesopId: varchar("aesop_id", { length: 64 }).notNull(),
+    reviewerA: varchar("reviewer_a", { length: 64 }),
+    reviewerB: varchar("reviewer_b", { length: 64 }),
+    aEnglishLevel: varchar("a_english_level", { length: 32 }),
+    aSuspectedAi: varchar("a_suspected_ai", { length: 32 }),
+    aInstructionFollowing: varchar("a_instruction_following", { length: 32 }),
+    aOriginalThinking: varchar("a_original_thinking", { length: 32 }),
+    aCharacter: varchar("a_character", { length: 32 }),
+    bEnglishLevel: varchar("b_english_level", { length: 32 }),
+    bSuspectedAi: varchar("b_suspected_ai", { length: 32 }),
+    bInstructionFollowing: varchar("b_instruction_following", { length: 32 }),
+    bOriginalThinking: varchar("b_original_thinking", { length: 32 }),
+    bCharacter: varchar("b_character", { length: 32 }),
+    sheetRowNumber: integer("sheet_row_number"),
+    syncedAt: timestamp("synced_at", { withTimezone: true }),
+  },
+  (table) => ({
+    aesopIdUnique: unique("applicant_reviews_aesop_id_unique").on(table.aesopId),
+    aesopIdIdx: index("applicant_reviews_aesop_id_idx").on(table.aesopId),
+    reviewerAIdx: index("applicant_reviews_reviewer_a_idx").on(table.reviewerA),
+    reviewerBIdx: index("applicant_reviews_reviewer_b_idx").on(table.reviewerB),
+    syncedAtIdx: index("applicant_reviews_synced_at_idx").on(table.syncedAt),
   }),
 );
 
@@ -315,6 +347,7 @@ module.exports = {
   syncRuns,
   people,
   applicants,
+  applicantReviews,
   courses,
   courseEnrollments,
   courseGrades,

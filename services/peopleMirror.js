@@ -1,7 +1,8 @@
 const { eq, and, sql } = require("drizzle-orm");
+const config = require("../config/secrets");
 const { getDb, getPool, isDatabaseEnabled } = require("../db/index");
 const { people, dingNumbers, dingChangeHistory } = require("../db/schema");
-const { upsertApplicantFromMirror } = require("./classroomDb");
+const { upsertApplicantFromMirror, upsertApplicantReviewFromMirror } = require("./classroomDb");
 const {
   loadAllPeopleRowsFromSheets,
   loadEmailToPeopleProfileMap,
@@ -10,7 +11,11 @@ const {
   resolvePortalRoleFromPeopleSheet,
   syncPeopleStatusOnPeopleSheet,
   loadClassroomRoleEmailSetsFromSheets,
+  initGoogleSheets,
+  getWorksheetByTitle,
+  resolveColumnIndex,
 } = require("./googleSheets");
+const { getApplicantReviewsConfig } = require("./applicantReviews");
 const {
   loadApplicantsDataForStats,
   loadApplicantAesopIdSetFromSheets,
@@ -488,6 +493,10 @@ async function mirrorApplicantsAndDriveFromSheets() {
   }
 
   let mirrored = 0;
+  const gs = config.googleSheets || {};
+  const levelColumnIndex = resolveColumnIndex(gs.admissionsLevelColumn || "E");
+  const essayColumnIndex = resolveColumnIndex(gs.admissionsEssayColumn || "K");
+
   for (const rowData of dataRows) {
     const aesopId = String(rowData[cfg.idColumnIndex] ?? "").trim();
     if (!aesopId) {
@@ -495,6 +504,9 @@ async function mirrorApplicantsAndDriveFromSheets() {
     }
 
     const email = String(rowData[cfg.emailColumnIndex] ?? "").trim();
+    const name = String(rowData[cfg.nameColumnIndex] ?? "").trim();
+    const appliedLevel = String(rowData[levelColumnIndex] ?? "").trim();
+    const essay = String(rowData[essayColumnIndex] ?? "").trim();
     const round1 = String(rowData[columns.round1] ?? "").trim();
     const round2 = String(rowData[columns.round2] ?? "").trim();
     const applicantLinks = String(rowData[columns.links] ?? "").trim();
@@ -511,6 +523,9 @@ async function mirrorApplicantsAndDriveFromSheets() {
     const row = await upsertApplicantFromMirror({
       aesopId,
       email,
+      name,
+      appliedLevel,
+      essay,
       round1,
       round2,
       applicantLinks,
@@ -528,7 +543,61 @@ async function mirrorApplicantsAndDriveFromSheets() {
   return { mirrored, driveFiles: memoById.size };
 }
 
-async function mirrorPeopleAndDingFromSheets() {
+async function mirrorApplicantReviewsFromSheets() {
+  if (!isDatabaseEnabled()) {
+    return { mirrored: 0 };
+  }
+
+  const reviewsCfg = getApplicantReviewsConfig();
+  const doc = await initGoogleSheets();
+  const worksheet = await getWorksheetByTitle(doc, reviewsCfg.sheetName);
+  if (!worksheet) {
+    throw new Error(`Sheet "${reviewsCfg.sheetName}" was not found.`);
+  }
+
+  await worksheet.loadHeaderRow(reviewsCfg.headerRowNum);
+  const rows = await worksheet.getRows();
+  const syncedAt = new Date();
+  let mirrored = 0;
+
+  for (const row of rows) {
+    const rowData = Array.isArray(row._rawData) ? row._rawData : [];
+    const aesopId = String(rowData[reviewsCfg.applicantIdCol] ?? "").trim();
+    if (!aesopId) {
+      continue;
+    }
+
+    const cell = (index) => String(rowData[index] ?? "").trim();
+    const upserted = await upsertApplicantReviewFromMirror({
+      aesopId,
+      reviewerA: cell(reviewsCfg.reviewerACol),
+      reviewerB: cell(reviewsCfg.reviewerBCol),
+      aEnglishLevel: cell(reviewsCfg.aLevelCol),
+      aSuspectedAi: cell(reviewsCfg.aSuspectedAiCol),
+      aInstructionFollowing: cell(reviewsCfg.aInstructionCol),
+      aOriginalThinking: cell(reviewsCfg.aOriginalThinkingCol),
+      aCharacter: cell(reviewsCfg.aCharacterCol),
+      bEnglishLevel: cell(reviewsCfg.bLevelCol),
+      bSuspectedAi: cell(reviewsCfg.bSuspectedAiCol),
+      bInstructionFollowing: cell(reviewsCfg.bInstructionCol),
+      bOriginalThinking: cell(reviewsCfg.bOriginalThinkingCol),
+      bCharacter: cell(reviewsCfg.bCharacterCol),
+      sheetRowNumber: row.rowNumber,
+      syncedAt,
+    });
+    if (upserted) {
+      mirrored += 1;
+    }
+  }
+
+  return { mirrored };
+}
+
+/**
+ * @param {{ includeDingHistory?: boolean }} [options]
+ *   includeDingHistory — mirror full Ding change history (heavy; use daily sync only).
+ */
+async function mirrorPeopleAndDingFromSheets(options = {}) {
   try {
     const { teacherEmails, studentEmails } = await loadClassroomRoleEmailSetsFromSheets();
     const statusSync = await syncPeopleStatusOnPeopleSheet({ teacherEmails, studentEmails });
@@ -544,7 +613,10 @@ async function mirrorPeopleAndDingFromSheets() {
   const applicantIdSet = await loadApplicantAesopIdSetFromSheets();
   const peopleResult = await mirrorAllPeopleFromSheets();
   const dingResult = await mirrorDingNumbersFromSheets(applicantIdSet);
-  const historyResult = await mirrorDingHistoryFromSheets({}, applicantIdSet);
+  let historyResult = { mirrored: 0 };
+  if (options.includeDingHistory === true) {
+    historyResult = await mirrorDingHistoryFromSheets({}, applicantIdSet);
+  }
   let applicantsResult = { mirrored: 0, driveFiles: 0 };
   try {
     applicantsResult = await mirrorApplicantsAndDriveFromSheets();
@@ -554,6 +626,13 @@ async function mirrorPeopleAndDingFromSheets() {
   } catch (error) {
     console.warn("[people-mirror] Applicants/Drive mirror failed:", error.message);
   }
+  let reviewsResult = { mirrored: 0 };
+  try {
+    reviewsResult = await mirrorApplicantReviewsFromSheets();
+    console.log(`[people-mirror] ApplicantReviews: mirrored=${reviewsResult.mirrored}`);
+  } catch (error) {
+    console.warn("[people-mirror] ApplicantReviews mirror failed:", error.message);
+  }
   return {
     people: peopleResult.mirrored,
     peoplePruned: peopleResult.pruned,
@@ -561,6 +640,7 @@ async function mirrorPeopleAndDingFromSheets() {
     dingHistory: historyResult.mirrored,
     applicants: applicantsResult.mirrored,
     driveFiles: applicantsResult.driveFiles,
+    applicantReviews: reviewsResult.mirrored,
   };
 }
 
@@ -613,6 +693,7 @@ module.exports = {
   mirrorDingNumbersFromSheets,
   mirrorDingHistoryFromSheets,
   mirrorApplicantsAndDriveFromSheets,
+  mirrorApplicantReviewsFromSheets,
   mirrorPeopleAndApplicantsFromSheets,
   mirrorPeopleAndDingFromSheets,
   upsertPersonFromSheetProfile,

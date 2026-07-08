@@ -16,6 +16,7 @@ const {
   dingNumbers,
   dingChangeHistory,
   applicants,
+  applicantReviews,
 } = require("../db/schema");
 
 function normalizeEmail(email) {
@@ -927,6 +928,7 @@ async function isPeopleMirrorFresh() {
  *   classroom: { fresh: boolean, ageMs: number|null, lastSyncedAt: Date|string|null },
  *   people: { fresh: boolean, ageMs: number|null, lastSyncedAt: Date|string|null },
  *   applicants: { fresh: boolean, ageMs: number|null, lastSyncedAt: Date|string|null },
+ *   applicantReviews: { fresh: boolean, ageMs: number|null, lastSyncedAt: Date|string|null },
  * }>}
  */
 async function getMirrorCacheStatus() {
@@ -940,19 +942,26 @@ async function getMirrorCacheStatus() {
   const pool = getPool();
   let people = { fresh: false, ageMs: null, maxAgeMs, lastSyncedAt: null };
   let applicants = { fresh: false, ageMs: null, maxAgeMs, lastSyncedAt: null };
+  let applicantReviewsStatus = { fresh: false, ageMs: null, maxAgeMs, lastSyncedAt: null };
 
   if (pool) {
-    const [peopleResult, applicantsResult] = await Promise.all([
+    const [peopleResult, applicantsResult, reviewsResult] = await Promise.all([
       pool.query(`SELECT MAX(synced_at) AS latest FROM people WHERE synced_at IS NOT NULL`),
       pool.query(`SELECT MAX(synced_at) AS latest FROM applicants WHERE synced_at IS NOT NULL`),
+      pool.query(`SELECT MAX(synced_at) AS latest FROM applicant_reviews WHERE synced_at IS NOT NULL`),
     ]);
     const peopleLatest = peopleResult.rows[0]?.latest || null;
     const applicantsLatest = applicantsResult.rows[0]?.latest || null;
+    const reviewsLatest = reviewsResult.rows[0]?.latest || null;
     people = { ...describeMirrorTimestamp(peopleLatest), lastSyncedAt: peopleLatest };
     applicants = { ...describeMirrorTimestamp(applicantsLatest), lastSyncedAt: applicantsLatest };
+    applicantReviewsStatus = {
+      ...describeMirrorTimestamp(reviewsLatest),
+      lastSyncedAt: reviewsLatest,
+    };
   }
 
-  return { maxAgeMs, classroom, people, applicants };
+  return { maxAgeMs, classroom, people, applicants, applicantReviews: applicantReviewsStatus };
 }
 
 /** @deprecated use getMirrorCacheMaxAgeMs from services/mirrorCache.js */
@@ -1048,6 +1057,9 @@ async function getApplicantRowByAesopIdFromDb(aesopId) {
  * @param {{
  *   aesopId: string,
  *   email?: string,
+ *   name?: string,
+ *   appliedLevel?: string,
+ *   essay?: string,
  *   round1?: string,
  *   round2?: string,
  *   applicantLinks?: string,
@@ -1074,11 +1086,15 @@ async function upsertApplicantFromMirror(fields) {
   const syncedAt = fields.syncedAt instanceof Date ? fields.syncedAt : new Date();
   const result = await pool.query(
     `INSERT INTO applicants (
-       aesop_id, email, round1, round2, applicant_links, submitted_at,
+       aesop_id, email, name, applied_level, essay,
+       round1, round2, applicant_links, submitted_at,
        drive_file_id, drive_file_name, drive_duration_seconds, synced_at
-     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
      ON CONFLICT (aesop_id) DO UPDATE SET
        email = COALESCE(EXCLUDED.email, applicants.email),
+       name = EXCLUDED.name,
+       applied_level = EXCLUDED.applied_level,
+       essay = EXCLUDED.essay,
        round1 = EXCLUDED.round1,
        round2 = EXCLUDED.round2,
        applicant_links = EXCLUDED.applicant_links,
@@ -1091,6 +1107,9 @@ async function upsertApplicantFromMirror(fields) {
     [
       aesopId,
       email,
+      fields.name ?? "",
+      fields.appliedLevel ?? "",
+      fields.essay ?? "",
       fields.round1 ?? "",
       fields.round2 ?? "",
       fields.applicantLinks ?? "",
@@ -1102,6 +1121,162 @@ async function upsertApplicantFromMirror(fields) {
     ],
   );
   return result.rows[0] || null;
+}
+
+/** @returns {Promise<boolean>} */
+async function isApplicantReviewsMirrorFresh() {
+  const pool = getPool();
+  if (!pool) {
+    return false;
+  }
+  const result = await pool.query(
+    `SELECT MAX(synced_at) AS latest FROM applicant_reviews WHERE synced_at IS NOT NULL`,
+  );
+  return isMirrorTimestampFresh(result.rows[0]?.latest);
+}
+
+/**
+ * @param {string} aesopId
+ * @returns {Promise<Record<string, unknown>|null>}
+ */
+async function getApplicantReviewRowFromDb(aesopId) {
+  const pool = getPool();
+  if (!pool) {
+    return null;
+  }
+  const id = typeof aesopId === "string" ? aesopId.trim().toLowerCase() : "";
+  if (!id) {
+    return null;
+  }
+  if (!(await isApplicantReviewsMirrorFresh())) {
+    return null;
+  }
+  const result = await pool.query(
+    `SELECT * FROM applicant_reviews WHERE lower(aesop_id) = $1 LIMIT 1`,
+    [id],
+  );
+  return result.rows[0] || null;
+}
+
+/**
+ * @param {{
+ *   aesopId: string,
+ *   reviewerA?: string,
+ *   reviewerB?: string,
+ *   aEnglishLevel?: string,
+ *   aSuspectedAi?: string,
+ *   aInstructionFollowing?: string,
+ *   aOriginalThinking?: string,
+ *   aCharacter?: string,
+ *   bEnglishLevel?: string,
+ *   bSuspectedAi?: string,
+ *   bInstructionFollowing?: string,
+ *   bOriginalThinking?: string,
+ *   bCharacter?: string,
+ *   sheetRowNumber?: number|null,
+ *   syncedAt?: Date,
+ * }} fields
+ * @returns {Promise<{ id: number }|null>}
+ */
+async function upsertApplicantReviewFromMirror(fields) {
+  const pool = getPool();
+  if (!pool) {
+    return null;
+  }
+
+  const aesopId = String(fields.aesopId || "").trim();
+  if (!aesopId) {
+    return null;
+  }
+
+  const syncedAt = fields.syncedAt instanceof Date ? fields.syncedAt : new Date();
+  const result = await pool.query(
+    `INSERT INTO applicant_reviews (
+       aesop_id, reviewer_a, reviewer_b,
+       a_english_level, a_suspected_ai, a_instruction_following, a_original_thinking, a_character,
+       b_english_level, b_suspected_ai, b_instruction_following, b_original_thinking, b_character,
+       sheet_row_number, synced_at
+     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+     ON CONFLICT (aesop_id) DO UPDATE SET
+       reviewer_a = EXCLUDED.reviewer_a,
+       reviewer_b = EXCLUDED.reviewer_b,
+       a_english_level = EXCLUDED.a_english_level,
+       a_suspected_ai = EXCLUDED.a_suspected_ai,
+       a_instruction_following = EXCLUDED.a_instruction_following,
+       a_original_thinking = EXCLUDED.a_original_thinking,
+       a_character = EXCLUDED.a_character,
+       b_english_level = EXCLUDED.b_english_level,
+       b_suspected_ai = EXCLUDED.b_suspected_ai,
+       b_instruction_following = EXCLUDED.b_instruction_following,
+       b_original_thinking = EXCLUDED.b_original_thinking,
+       b_character = EXCLUDED.b_character,
+       sheet_row_number = COALESCE(EXCLUDED.sheet_row_number, applicant_reviews.sheet_row_number),
+       synced_at = EXCLUDED.synced_at
+     RETURNING id`,
+    [
+      aesopId,
+      fields.reviewerA ?? "",
+      fields.reviewerB ?? "",
+      fields.aEnglishLevel ?? "",
+      fields.aSuspectedAi ?? "",
+      fields.aInstructionFollowing ?? "",
+      fields.aOriginalThinking ?? "",
+      fields.aCharacter ?? "",
+      fields.bEnglishLevel ?? "",
+      fields.bSuspectedAi ?? "",
+      fields.bInstructionFollowing ?? "",
+      fields.bOriginalThinking ?? "",
+      fields.bCharacter ?? "",
+      fields.sheetRowNumber ?? null,
+      syncedAt,
+    ],
+  );
+  return result.rows[0] || null;
+}
+
+/**
+ * @param {string} reviewerAesopId
+ * @returns {Promise<Array<Record<string, unknown>>|null>}
+ */
+async function getReviewAssignmentsForReviewerFromDb(reviewerAesopId) {
+  const pool = getPool();
+  if (!pool) {
+    return null;
+  }
+  const reviewerKey = typeof reviewerAesopId === "string" ? reviewerAesopId.trim().toLowerCase() : "";
+  if (!reviewerKey) {
+    return [];
+  }
+  if (!(await isApplicantReviewsMirrorFresh())) {
+    return null;
+  }
+
+  const result = await pool.query(
+    `SELECT
+       ar.aesop_id,
+       ar.reviewer_a,
+       ar.reviewer_b,
+       ar.a_english_level,
+       ar.a_suspected_ai,
+       ar.a_instruction_following,
+       ar.a_original_thinking,
+       ar.a_character,
+       ar.b_english_level,
+       ar.b_suspected_ai,
+       ar.b_instruction_following,
+       ar.b_original_thinking,
+       ar.b_character,
+       a.name,
+       a.applied_level,
+       a.essay,
+       a.drive_file_id
+     FROM applicant_reviews ar
+     LEFT JOIN applicants a ON lower(a.aesop_id) = lower(ar.aesop_id)
+     WHERE lower(ar.reviewer_a) = $1 OR lower(ar.reviewer_b) = $1`,
+    [reviewerKey],
+  );
+
+  return result.rows;
 }
 
 module.exports = {
@@ -1116,10 +1291,14 @@ module.exports = {
   isPeopleMirrorFresh,
   isPeopleIdentityFresh,
   isApplicantsMirrorFresh,
+  isApplicantReviewsMirrorFresh,
   personRowToProfile,
   applicantRowFromDb,
   getApplicantRowByAesopIdFromDb,
   upsertApplicantFromMirror,
+  getApplicantReviewRowFromDb,
+  upsertApplicantReviewFromMirror,
+  getReviewAssignmentsForReviewerFromDb,
   getLastSyncRun,
   getSyncStats,
   getRoleByEmailFromDb,
