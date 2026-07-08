@@ -4,7 +4,7 @@ const { buildServiceAccountJwt } = require("./googleAuth");
 const { formatGoogleSheetsOperationError } = require("../utils/errorLogging");
 const { dateToGoogleSheetsSerial, formatEasternSheetTimestamp, sheetDatetimeCellTextToUtcMillis } = require("../utils/dingSheetTime");
 const { isDatabaseEnabled } = require("../db/index");
-const { getPersonByAesopId } = require("./classroomDb");
+const { getPersonByAesopId, isPeopleIdentityFresh, personRowToProfile } = require("./classroomDb");
 
 let doc = null;
 let initPromise = null;
@@ -127,6 +127,119 @@ function resolvePeopleRoleColumnIndex() {
   } catch {
     return null;
   }
+}
+
+function resolvePeopleTypeColumnIndex() {
+  const columnRef = config.googleSheets.peopleTypeColumn;
+  if (columnRef == null || String(columnRef).trim() === "" || String(columnRef).trim().toUpperCase() === "OFF") {
+    return null;
+  }
+  try {
+    return resolveColumnIndex(String(columnRef).trim());
+  } catch {
+    return null;
+  }
+}
+
+function peopleTypeHeaderCandidates() {
+  const configured = config.googleSheets.peopleTypeHeader;
+  const fromConfig = configured != null && String(configured).trim() !== "" ? [String(configured).trim()] : [];
+  return [...fromConfig, "Type (teacher, student)", "Type", "Teacher/Student"];
+}
+
+function readPeopleType(rowData, typeColumnIndex) {
+  if (typeColumnIndex === null) {
+    return "";
+  }
+  return String(rowData[typeColumnIndex] ?? "").trim();
+}
+
+/**
+ * @param {import("google-spreadsheet").GoogleSpreadsheetRow | null | undefined} row
+ * @param {string[]} rowData
+ * @param {number | null} typeColumnIndex
+ */
+function readPeopleTypeFromRow(row, rowData, typeColumnIndex) {
+  if (row && typeof row.get === "function") {
+    for (const header of peopleTypeHeaderCandidates()) {
+      try {
+        const value = row.get(header);
+        if (value != null && String(value).trim() !== "") {
+          return String(value).trim();
+        }
+      } catch {
+        // Header not registered on this worksheet.
+      }
+    }
+  }
+  return readPeopleType(rowData, typeColumnIndex);
+}
+
+/**
+ * Parse People column E values like:
+ * - "Student: E-1 (24.5%)" or "Teacher: I-1"
+ * - "Stud. A-1 (18.0%) / Teach I-3" (student in one class, teacher in another)
+ * When both student and teacher markers appear, Teacher wins (matches status priority).
+ * @param {unknown} rawType
+ * @returns {"Teacher"|"Student"|null}
+ */
+function parsePortalRoleFromPeopleType(rawType) {
+  const text = String(rawType || "").trim();
+  if (!text) {
+    return null;
+  }
+  const lower = text.toLowerCase();
+
+  const hasTeacher =
+    lower.startsWith("teacher:") ||
+    /^teacher\b/.test(lower) ||
+    /^teach\b/.test(lower) ||
+    /\/\s*teach\b/.test(lower);
+
+  const hasStudent =
+    lower.startsWith("student:") ||
+    /^student\b/.test(lower) ||
+    /^stud\./.test(lower) ||
+    /\bstud\./.test(lower);
+
+  if (hasTeacher && hasStudent) {
+    return "Teacher";
+  }
+  if (hasTeacher) {
+    return "Teacher";
+  }
+  if (hasStudent) {
+    return "Student";
+  }
+  return null;
+}
+
+/**
+ * Resolve portal_role from People tab type column, Admins column, and Applicants tab membership.
+ * @param {{ id?: string, peopleType?: string, portalRole?: string }} profile
+ * @param {Set<string>|null|undefined} applicantIdSet lowercase AESOP IDs from Applicants sheet
+ * @returns {"Admin"|"Teacher"|"Student"|"Applied"|null}
+ */
+function resolvePortalRoleFromPeopleSheet(profile, applicantIdSet) {
+  const adminRaw = profile?.portalRole || "";
+  if (isPeopleSheetAdminRole(adminRaw)) {
+    return "Admin";
+  }
+
+  const fromType = parsePortalRoleFromPeopleType(profile?.peopleType);
+  if (fromType) {
+    return fromType;
+  }
+
+  const typeText = String(profile?.peopleType || "").trim();
+  if (!typeText) {
+    const idKey = String(profile?.id || "").trim().toLowerCase();
+    if (idKey && applicantIdSet && applicantIdSet.has(idKey)) {
+      return "Applied";
+    }
+  }
+
+  return null;
 }
 
 function resolvePeopleReviewerColumnIndex() {
@@ -372,18 +485,9 @@ async function findProfileByIdFromDb(userId) {
     if (!person?.email) {
       return null;
     }
-    return {
-      name: person.name || "",
-      email: person.email,
-      id: person.aesopId || userId,
-      phone: person.phone || "",
-      portalRole: person.portalRole || "",
-      reviewerRole: "",
-      peopleStatus:
-        String(person.portalRole || "").trim().toLowerCase() === "applied"
-          ? "applied"
-          : resolvePeopleStatus(person.aesopId || userId, ""),
-    };
+    const profile = personRowToProfile(person);
+    profile.peopleStatus = resolvePeopleStatus(profile.id, profile.peopleStatus);
+    return profile;
   } catch (error) {
     console.warn("Profile DB lookup failed:", error.message);
     return null;
@@ -451,6 +555,24 @@ function googleSheetPlainText(value) {
  * @returns {Promise<{ name: string, email: string, id: string, phone: string, portalRole: string }|null>}
  */
 async function findProfileById(userId) {
+  const idKey = String(userId || "").trim();
+  if (!idKey) {
+    return null;
+  }
+
+  if (isDatabaseEnabled()) {
+    try {
+      const person = await getPersonByAesopId(idKey);
+      if (person?.email && isPeopleIdentityFresh(person)) {
+        const profile = personRowToProfile(person);
+        profile.peopleStatus = resolvePeopleStatus(profile.id, profile.peopleStatus);
+        return profile;
+      }
+    } catch (error) {
+      console.warn("Profile DB lookup failed:", error.message);
+    }
+  }
+
   try {
     const sheet = await initGoogleSheets();
     const sheetName = config.googleSheets.sheetName || "People";
@@ -476,9 +598,11 @@ async function findProfileById(userId) {
       }
     }
     const roleColumnIndex = resolvePeopleRoleColumnIndex();
+    const typeColumnIndex = resolvePeopleTypeColumnIndex();
     const reviewerColumnIndex = resolvePeopleReviewerColumnIndex();
     const statusColumnIndex = resolvePeopleStatusColumnIndex();
-    const normalizedId = userId.trim().toLowerCase();
+    const normalizedId = idKey.trim().toLowerCase();
+    const applicantIdSet = await require("./voiceMemoSync").loadApplicantAesopIdSetFromSheets();
 
     for (const row of rows) {
       try {
@@ -492,12 +616,17 @@ async function findProfileById(userId) {
           phoneColumnIndex !== null ? String(rowData[phoneColumnIndex] ?? "").trim() : "";
 
         const aesopId = String(rowData[idColumnIndex] || "").trim();
+        const adminRole = readPeoplePortalRoleFromRow(row, rowData, roleColumnIndex);
+        const peopleType = readPeopleTypeFromRow(row, rowData, typeColumnIndex);
         return {
           name: String(rowData[nameColumnIndex] || "").trim(),
           email: String(rowData[emailColumnIndex] || "").trim(),
           id: aesopId,
           phone: phoneRaw,
-          portalRole: readPeoplePortalRoleFromRow(row, rowData, roleColumnIndex),
+          portalRole: resolvePortalRoleFromPeopleSheet(
+            { id: aesopId, peopleType, portalRole: adminRole },
+            applicantIdSet,
+          ) || "",
           reviewerRole: readPeopleReviewerRoleFromRow(row, rowData, reviewerColumnIndex),
           peopleStatus: resolvePeopleStatus(
             aesopId,
@@ -565,9 +694,11 @@ async function findProfileByEmail(email) {
       }
     }
     const roleColumnIndex = resolvePeopleRoleColumnIndex();
+    const typeColumnIndex = resolvePeopleTypeColumnIndex();
     const reviewerColumnIndex = resolvePeopleReviewerColumnIndex();
     const statusColumnIndex = resolvePeopleStatusColumnIndex();
     const emailLower = email.toLowerCase().trim();
+    const applicantIdSet = await require("./voiceMemoSync").loadApplicantAesopIdSetFromSheets();
 
     for (const row of rows) {
       const rowData = Array.isArray(row._rawData) ? row._rawData : [];
@@ -577,12 +708,18 @@ async function findProfileByEmail(email) {
         const phoneRaw =
           phoneColumnIndex !== null ? String(rowData[phoneColumnIndex] ?? "").trim() : "";
         const aesopId = String(rowData[idColumnIndex] || "").trim();
+        const adminRole = readPeoplePortalRoleFromRow(row, rowData, roleColumnIndex);
+        const peopleType = readPeopleTypeFromRow(row, rowData, typeColumnIndex);
         return {
           name: String(rowData[nameColumnIndex] || "").trim(),
           email: String(rowData[emailColumnIndex] || "").trim(),
           id: aesopId,
           phone: phoneRaw,
-          portalRole: readPeoplePortalRoleFromRow(row, rowData, roleColumnIndex),
+          portalRole:
+            resolvePortalRoleFromPeopleSheet(
+              { id: aesopId, peopleType, portalRole: adminRole },
+              applicantIdSet,
+            ) || "",
           reviewerRole: readPeopleReviewerRoleFromRow(row, rowData, reviewerColumnIndex),
           peopleStatus: resolvePeopleStatus(
             aesopId,
@@ -822,85 +959,6 @@ async function getPortalDingChangeHistory(userId, options = {}) {
     atMs: e.tsMs != null && Number.isFinite(e.tsMs) ? e.tsMs : null,
     dingNumber: e.dingNumber,
   }));
-}
-
-/**
- * Read shared application calendar rows from the Calendar sheet tab.
- * @returns {Promise<{ sheetName: string, entries: Array<{ process: string, date: string }> }>}
- */
-async function getPortalApplicationCalendar() {
-  const gs = config.googleSheets || {};
-  const sheetName = String(gs.calendarSheetName || "Calendar").trim();
-  const headerRowNum = Math.max(1, parseInt(String(gs.calendarHeaderRow || "1"), 10) || 1);
-  const processHeader = String(gs.calendarProcessHeader || "Application process").trim();
-  const dateHeader = String(gs.calendarDateHeader || "Date").trim();
-
-  const doc = await initGoogleSheets();
-  const worksheet = await getWorksheetByTitle(doc, sheetName);
-  if (!worksheet) {
-    return { sheetName, entries: [] };
-  }
-
-  await worksheet.loadHeaderRow(headerRowNum);
-  const headerValues = Array.isArray(worksheet.headerValues) ? worksheet.headerValues : [];
-  const processIdx = headerValues.findIndex(
-    (header) => String(header || "").trim().toLowerCase() === processHeader.toLowerCase(),
-  );
-  const dateIdx = headerValues.findIndex(
-    (header) => String(header || "").trim().toLowerCase() === dateHeader.toLowerCase(),
-  );
-
-  if (processIdx < 0 || dateIdx < 0) {
-    throw new Error(
-      `Calendar sheet "${sheetName}" is missing required columns. Expected "${processHeader}" and "${dateHeader}".`,
-    );
-  }
-
-  const rows = await worksheet.getRows();
-  /** @type {Array<{ process: string, date: string, sortMs: number|null, order: number }>} */
-  const collected = [];
-  let order = 0;
-
-  for (const row of rows) {
-    const rowData = Array.isArray(row._rawData) ? row._rawData : [];
-    const process = String(rowData[processIdx] ?? "").trim();
-    const dateRaw = rowData[dateIdx];
-    const dateText = dateRaw == null ? "" : String(dateRaw).trim();
-    if (!process && !dateText) {
-      continue;
-    }
-
-    const parsedMs = parseSheetTimestamp(dateRaw);
-    let dateLabel = dateText;
-    if (parsedMs !== -Infinity && Number.isFinite(parsedMs)) {
-      dateLabel = formatEasternSheetTimestamp(new Date(parsedMs));
-    }
-
-    collected.push({
-      process,
-      date: dateLabel,
-      sortMs: parsedMs !== -Infinity && Number.isFinite(parsedMs) ? parsedMs : null,
-      order: order++,
-    });
-  }
-
-  collected.sort((a, b) => {
-    if (a.sortMs != null && b.sortMs != null && a.sortMs !== b.sortMs) {
-      return a.sortMs - b.sortMs;
-    }
-    if (a.sortMs != null && b.sortMs == null) {
-      return -1;
-    }
-    if (a.sortMs == null && b.sortMs != null) {
-      return 1;
-    }
-    return a.order - b.order;
-  });
-
-  return {
-    sheetName,
-    entries: collected.map(({ process, date }) => ({ process, date })),
-  };
 }
 
 /**
@@ -1842,6 +1900,7 @@ async function loadEmailToPeopleProfileMap() {
     const nameColumnIndex = resolveColumnIndex(config.googleSheets.nameColumn || "C");
     const emailColumnIndex = resolveColumnIndex(config.googleSheets.emailColumn || "D");
     const roleColumnIndex = resolvePeopleRoleColumnIndex();
+    const typeColumnIndex = resolvePeopleTypeColumnIndex();
     const reviewerColumnIndex = resolvePeopleReviewerColumnIndex();
     const statusColumnIndex = resolvePeopleStatusColumnIndex();
 
@@ -1857,6 +1916,7 @@ async function loadEmailToPeopleProfileMap() {
       map.set(email, {
         id: aesopId,
         name: String(rowData[nameColumnIndex] ?? "").trim(),
+        peopleType: readPeopleTypeFromRow(row, rowData, typeColumnIndex),
         portalRole: readPeoplePortalRoleFromRow(row, rowData, roleColumnIndex),
         peopleStatus: resolvePeopleStatus(
           aesopId,
@@ -2517,12 +2577,15 @@ module.exports = {
   listAllClassroomRoleRows,
   searchPeopleProfiles,
   getPortalDingChangeHistory,
-  getPortalApplicationCalendar,
   getPortalClassGradeByStudentName,
   getPortalTeacherByUserId,
   getRoleByEmail,
   isPeopleSheetAdminRole,
   isPeopleSheetReviewerRole,
+  parsePortalRoleFromPeopleType,
+  resolvePortalRoleFromPeopleSheet,
+  readPeopleTypeFromRow,
+  resolvePeopleTypeColumnIndex,
   isAppliedPeopleStatus,
   isAdmittedPeopleStatus,
   isTeachingPeopleStatus,

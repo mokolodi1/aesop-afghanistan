@@ -20,7 +20,7 @@ const {
 } = require('./services/googleSheets');
 const { getTeacherRoster, getStudentGrades } = require('./services/classroomSync');
 const { isDatabaseEnabled, checkDatabaseHealth } = require('./db/index');
-const { getRoleByEmailFromDb, getGradesByEmailFromDb, getPersonByAesopId } = require('./services/classroomDb');
+const { getRoleByEmailFromDb, getGradesByEmailFromDb, getPersonByAesopId, getMirrorCacheStatus } = require('./services/classroomDb');
 const {
   isPortalAdmin,
   isPortalReviewer,
@@ -1192,9 +1192,18 @@ app.post('/api/portal-admin/impersonate', portalAdminRateLimiter, async (req, re
 
 app.get('/api/health', async (_req, res) => {
   const db = await checkDatabaseHealth();
+  let mirrorCache = null;
+  if (db.enabled && db.ok) {
+    try {
+      mirrorCache = await getMirrorCacheStatus();
+    } catch (error) {
+      mirrorCache = { error: error.message || String(error) };
+    }
+  }
   res.json({
     ok: true,
     database: db,
+    mirrorCache,
     classroomEnabled: !!config.classroom?.enabled,
   });
 });

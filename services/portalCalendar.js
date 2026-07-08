@@ -1,9 +1,9 @@
 const {
   findProfileById,
-  getPortalApplicationCalendar,
   isAppliedPeopleStatus,
   resolvePeopleStatus,
 } = require("./googleSheets");
+const { getPortalApplicationCalendar } = require("./portalApplicationCalendar");
 const { getApplicantRowByAesopId } = require("./voiceMemoSync");
 
 /**
@@ -60,7 +60,7 @@ async function getPortalCalendarForApplicant({ userId, email }) {
     return { eligible: false };
   }
 
-  const calendar = await getPortalApplicationCalendar();
+  const calendar = getPortalApplicationCalendar();
   return {
     eligible: true,
     sheetName: calendar.sheetName,

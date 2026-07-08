@@ -1,58 +1,69 @@
 const { eq, and, sql } = require("drizzle-orm");
 const { getDb, getPool, isDatabaseEnabled } = require("../db/index");
 const { people, dingNumbers, dingChangeHistory } = require("../db/schema");
+const { upsertApplicantFromMirror } = require("./classroomDb");
 const {
   loadEmailToPeopleProfileMap,
   buildLatestDingNumberByUserIdMap,
   getPortalDingChangeHistory,
-  isAppliedPeopleStatus,
-  resolvePeopleStatus,
-  isPeopleSheetAdminRole,
+  resolvePortalRoleFromPeopleSheet,
   syncPeopleStatusOnPeopleSheet,
   loadClassroomRoleEmailSetsFromSheets,
 } = require("./googleSheets");
+const {
+  loadApplicantsDataForStats,
+  loadApplicantAesopIdSetFromSheets,
+  getVoiceMemoDriveScanOptions,
+  findVoiceMemoInScan,
+} = require("./voiceMemoSync");
+const { scanVoiceMemoFolder, resolveVoiceMemoDurationsMap } = require("./googleDrive");
 
-async function upsertPersonFromSheetProfile(profile, syncedAt = new Date()) {
-  const db = getDb();
-  if (!db || !profile?.email) {
+/**
+ * @param {object} profile
+ * @param {Date} syncedAt
+ * @param {Set<string>} applicantIdSet
+ */
+async function upsertPersonFromSheetProfile(profile, syncedAt = new Date(), applicantIdSet) {
+  const pool = getPool();
+  if (!pool || !profile?.email) {
     return null;
   }
   const email = profile.email.trim().toLowerCase();
-  const peopleStatus = resolvePeopleStatus(profile.id, profile.peopleStatus);
-  let portalRole =
-    profile.portalRole && String(profile.portalRole).trim()
-      ? String(profile.portalRole).trim()
-      : null;
-  if (isAppliedPeopleStatus(peopleStatus)) {
-    portalRole = "Applied";
-  } else if (isPeopleSheetAdminRole(portalRole)) {
-    portalRole = "Admin";
-  }
-  const updateSet = {
-    aesopId: sql`COALESCE(EXCLUDED.aesop_id, ${people.aesopId})`,
-    name: sql`COALESCE(EXCLUDED.name, ${people.name})`,
-    phone: sql`COALESCE(EXCLUDED.phone, ${people.phone})`,
-    syncedAt,
-  };
-  if (portalRole) {
-    updateSet.portalRole = portalRole;
-  }
-  const rows = await db
-    .insert(people)
-    .values({
-      aesopId: profile.id ? String(profile.id).trim() : null,
-      email,
-      name: profile.name || null,
-      phone: profile.phone || null,
-      portalRole,
-      syncedAt,
-    })
-    .onConflictDoUpdate({
-      target: people.email,
-      set: updateSet,
-    })
-    .returning();
-  return rows[0] || null;
+  const portalRole = resolvePortalRoleFromPeopleSheet(profile, applicantIdSet);
+  const aesopId = profile.id ? String(profile.id).trim() : null;
+  const result = await pool.query(
+    `INSERT INTO people (aesop_id, email, name, phone, portal_role, synced_at)
+     SELECT
+       CASE
+         WHEN NULLIF(trim($1::text), '') IS NULL THEN NULL
+         WHEN EXISTS (
+           SELECT 1 FROM people p
+           WHERE p.aesop_id IS NOT NULL AND lower(p.aesop_id) = lower(trim($1::text))
+         ) THEN NULL
+         ELSE trim($1::text)
+       END,
+       $2, $3, $4, $5, $6
+     ON CONFLICT (email) DO UPDATE SET
+       aesop_id = CASE
+         WHEN NULLIF(trim(EXCLUDED.aesop_id), '') IS NULL THEN people.aesop_id
+         WHEN people.aesop_id IS NOT NULL
+           AND lower(people.aesop_id) = lower(trim(EXCLUDED.aesop_id)) THEN people.aesop_id
+         WHEN EXISTS (
+           SELECT 1 FROM people p
+           WHERE p.id <> people.id
+             AND p.aesop_id IS NOT NULL
+             AND lower(p.aesop_id) = lower(trim(EXCLUDED.aesop_id))
+         ) THEN people.aesop_id
+         ELSE trim(EXCLUDED.aesop_id)
+       END,
+       name = COALESCE(EXCLUDED.name, people.name),
+       phone = COALESCE(EXCLUDED.phone, people.phone),
+       portal_role = EXCLUDED.portal_role,
+       synced_at = EXCLUDED.synced_at
+     RETURNING *`,
+    [aesopId, email, profile.name || null, profile.phone || null, portalRole, syncedAt],
+  );
+  return result.rows[0] || null;
 }
 
 async function mirrorAllPeopleFromSheets() {
@@ -60,12 +71,15 @@ async function mirrorAllPeopleFromSheets() {
     return { mirrored: 0 };
   }
 
-  const profileMap = await loadEmailToPeopleProfileMap();
+  const [profileMap, applicantIdSet] = await Promise.all([
+    loadEmailToPeopleProfileMap(),
+    loadApplicantAesopIdSetFromSheets(),
+  ]);
   const syncedAt = new Date();
   let mirrored = 0;
 
   for (const [email, profile] of profileMap.entries()) {
-    const row = await upsertPersonFromSheetProfile({ ...profile, email }, syncedAt);
+    const row = await upsertPersonFromSheetProfile({ ...profile, email }, syncedAt, applicantIdSet);
     if (row) {
       mirrored += 1;
     }
@@ -74,12 +88,13 @@ async function mirrorAllPeopleFromSheets() {
   return { mirrored };
 }
 
-async function mirrorDingNumbersFromSheets() {
+async function mirrorDingNumbersFromSheets(applicantIdSet) {
   if (!isDatabaseEnabled()) {
     return { mirrored: 0 };
   }
 
   const db = getDb();
+  const ids = applicantIdSet || (await loadApplicantAesopIdSetFromSheets());
   const [profileMap, dingByUserId] = await Promise.all([
     loadEmailToPeopleProfileMap(),
     buildLatestDingNumberByUserIdMap(),
@@ -96,7 +111,7 @@ async function mirrorDingNumbersFromSheets() {
       continue;
     }
     const [email, profile] = match;
-    const person = await upsertPersonFromSheetProfile({ ...profile, email }, syncedAt);
+    const person = await upsertPersonFromSheetProfile({ ...profile, email }, syncedAt, ids);
     if (!person) {
       continue;
     }
@@ -115,12 +130,13 @@ async function mirrorDingNumbersFromSheets() {
   return { mirrored };
 }
 
-async function mirrorDingHistoryFromSheets(options = {}) {
+async function mirrorDingHistoryFromSheets(options = {}, applicantIdSet) {
   if (!isDatabaseEnabled()) {
     return { mirrored: 0 };
   }
 
   const db = getDb();
+  const ids = applicantIdSet || (await loadApplicantAesopIdSetFromSheets());
   const profileMap = await loadEmailToPeopleProfileMap();
   const syncedAt = new Date();
   let mirrored = 0;
@@ -129,7 +145,7 @@ async function mirrorDingHistoryFromSheets(options = {}) {
     if (!profile?.id) {
       continue;
     }
-    const person = await upsertPersonFromSheetProfile(profile, syncedAt);
+    const person = await upsertPersonFromSheetProfile(profile, syncedAt, ids);
     if (!person) {
       continue;
     }
@@ -170,6 +186,69 @@ async function mirrorDingHistoryFromSheets(options = {}) {
   return { mirrored };
 }
 
+async function mirrorApplicantsAndDriveFromSheets() {
+  if (!isDatabaseEnabled()) {
+    return { mirrored: 0, driveFiles: 0 };
+  }
+
+  const syncedAt = new Date();
+  const { dataRows, columns, cfg } = await loadApplicantsDataForStats();
+
+  const folderId = String(cfg.voiceMemo?.driveFolderId || "").trim();
+  /** @type {Map<string, { aesopId: string, fileId: string, fileName: string }>} */
+  let memoById = new Map();
+  /** @type {Map<string, number|null>} */
+  let durationsMap = new Map();
+
+  if (folderId) {
+    const scanOptions = getVoiceMemoDriveScanOptions(cfg.voiceMemo);
+    const scan = await scanVoiceMemoFolder(folderId, scanOptions);
+    memoById = scan.memosById;
+    const fileIds = [...memoById.values()].map((memo) => memo.fileId);
+    durationsMap = await resolveVoiceMemoDurationsMap(fileIds, { concurrency: 4 });
+  }
+
+  let mirrored = 0;
+  for (const rowData of dataRows) {
+    const aesopId = String(rowData[cfg.idColumnIndex] ?? "").trim();
+    if (!aesopId) {
+      continue;
+    }
+
+    const email = String(rowData[cfg.emailColumnIndex] ?? "").trim();
+    const round1 = String(rowData[columns.round1] ?? "").trim();
+    const round2 = String(rowData[columns.round2] ?? "").trim();
+    const applicantLinks = String(rowData[columns.links] ?? "").trim();
+    const submittedAt = String(rowData[columns.date] ?? "").trim();
+    const driveFile = findVoiceMemoInScan(memoById, aesopId);
+    const driveFileId = driveFile?.fileId ? String(driveFile.fileId).trim() : null;
+    const driveFileName = driveFile?.fileName ? String(driveFile.fileName).trim() : null;
+    const durationRaw = driveFileId ? durationsMap.get(driveFileId) : null;
+    const driveDurationSeconds =
+      durationRaw != null && Number.isFinite(Number(durationRaw))
+        ? Math.round(Number(durationRaw))
+        : null;
+
+    const row = await upsertApplicantFromMirror({
+      aesopId,
+      email,
+      round1,
+      round2,
+      applicantLinks,
+      submittedAt,
+      driveFileId,
+      driveFileName,
+      driveDurationSeconds,
+      syncedAt,
+    });
+    if (row) {
+      mirrored += 1;
+    }
+  }
+
+  return { mirrored, driveFiles: memoById.size };
+}
+
 async function mirrorPeopleAndDingFromSheets() {
   try {
     const { teacherEmails, studentEmails } = await loadClassroomRoleEmailSetsFromSheets();
@@ -183,13 +262,45 @@ async function mirrorPeopleAndDingFromSheets() {
     console.warn("[people-mirror] People status sync failed:", error.message);
   }
 
+  const applicantIdSet = await loadApplicantAesopIdSetFromSheets();
   const peopleResult = await mirrorAllPeopleFromSheets();
-  const dingResult = await mirrorDingNumbersFromSheets();
-  const historyResult = await mirrorDingHistoryFromSheets();
+  const dingResult = await mirrorDingNumbersFromSheets(applicantIdSet);
+  const historyResult = await mirrorDingHistoryFromSheets({}, applicantIdSet);
+  let applicantsResult = { mirrored: 0, driveFiles: 0 };
+  try {
+    applicantsResult = await mirrorApplicantsAndDriveFromSheets();
+    console.log(
+      `[people-mirror] Applicants/Drive: mirrored=${applicantsResult.mirrored}, driveFiles=${applicantsResult.driveFiles}`,
+    );
+  } catch (error) {
+    console.warn("[people-mirror] Applicants/Drive mirror failed:", error.message);
+  }
   return {
     people: peopleResult.mirrored,
     dingNumbers: dingResult.mirrored,
     dingHistory: historyResult.mirrored,
+    applicants: applicantsResult.mirrored,
+    driveFiles: applicantsResult.driveFiles,
+  };
+}
+
+/**
+ * Mirror People + Applicants sheet + Drive into Postgres without Classroom sync or Ding tabs.
+ * People rows land in people; applicant rows land in applicants.
+ */
+async function mirrorPeopleAndApplicantsFromSheets() {
+  const peopleResult = await mirrorAllPeopleFromSheets();
+  console.log(`[people-mirror] People sheet: mirrored=${peopleResult.mirrored}`);
+
+  const applicantsResult = await mirrorApplicantsAndDriveFromSheets();
+  console.log(
+    `[people-mirror] Applicants/Drive: mirrored=${applicantsResult.mirrored}, driveFiles=${applicantsResult.driveFiles}`,
+  );
+
+  return {
+    people: peopleResult.mirrored,
+    applicants: applicantsResult.mirrored,
+    driveFiles: applicantsResult.driveFiles,
   };
 }
 
@@ -214,6 +325,8 @@ module.exports = {
   mirrorAllPeopleFromSheets,
   mirrorDingNumbersFromSheets,
   mirrorDingHistoryFromSheets,
+  mirrorApplicantsAndDriveFromSheets,
+  mirrorPeopleAndApplicantsFromSheets,
   mirrorPeopleAndDingFromSheets,
   upsertPersonFromSheetProfile,
   getPersonIdByAesopId,

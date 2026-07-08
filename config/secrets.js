@@ -30,6 +30,14 @@ function buildGoogleSheetsConfig(fileSection) {
     nameColumn: envOr("GOOGLE_NAME_COLUMN", "nameColumn", "C"),
     emailColumn: envOr("GOOGLE_EMAIL_COLUMN", "emailColumn", "D"),
     phoneColumn: envOr("GOOGLE_PHONE_COLUMN", "phoneColumn", "F"),
+    /** People sheet column for teacher/student type label (e.g. "Student: E-1 (24.5%)"). Blank or OFF disables. */
+    peopleTypeColumn: envOr("GOOGLE_PEOPLE_TYPE_COLUMN", "peopleTypeColumn", "E"),
+    /** Header label on People sheet for teacher/student type (used with loadHeaderRow). */
+    peopleTypeHeader: envOr(
+      "GOOGLE_PEOPLE_TYPE_COLUMN_HEADER",
+      "peopleTypeHeader",
+      "Type (teacher, student)",
+    ),
     /** People sheet column for manual portal role (e.g. Admin). Blank or OFF disables. */
     peopleRoleColumn: envOr("GOOGLE_PEOPLE_ROLE_COLUMN", "peopleRoleColumn", "S"),
     /** Header label on People sheet for manual admin flag (used with loadHeaderRow). */

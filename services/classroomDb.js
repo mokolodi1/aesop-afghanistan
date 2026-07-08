@@ -1,6 +1,11 @@
 const { eq, and, sql, desc, inArray } = require("drizzle-orm");
 const { getDb, isDatabaseEnabled, getPool } = require("../db/index");
 const {
+  getMirrorCacheMaxAgeMs,
+  isMirrorTimestampFresh,
+  describeMirrorTimestamp,
+} = require("./mirrorCache");
+const {
   syncRuns,
   people,
   courses,
@@ -10,6 +15,7 @@ const {
   assignmentGrades,
   dingNumbers,
   dingChangeHistory,
+  applicants,
 } = require("../db/schema");
 
 function normalizeEmail(email) {
@@ -95,7 +101,7 @@ async function getSyncStats() {
 
 async function getRoleByEmailFromDb(email) {
   const person = await getPersonByEmail(email);
-  if (!person) {
+  if (!person || !isPeopleIdentityFresh(person)) {
     return { found: false, role: "", isTeacher: false, teacherClasses: "" };
   }
   const role = person.portalRole || "";
@@ -112,7 +118,7 @@ async function getRoleByEmailFromDb(email) {
 
 async function getGradesByEmailFromDb(email) {
   const db = getDb();
-  if (!db) {
+  if (!db || !(await isClassroomMirrorFresh())) {
     return [];
   }
   const person = await getPersonByEmail(email);
@@ -140,7 +146,7 @@ async function getGradesByEmailFromDb(email) {
 
 async function getStudentGradesFromDb(email) {
   const db = getDb();
-  if (!db) {
+  if (!db || !(await isClassroomMirrorFresh())) {
     return null;
   }
   const person = await getPersonByEmail(email);
@@ -205,7 +211,7 @@ async function getStudentGradesFromDb(email) {
 
 async function getTeacherRosterFromDb(teacherEmail) {
   const db = getDb();
-  if (!db) {
+  if (!db || !(await isClassroomMirrorFresh())) {
     return null;
   }
   const teacher = await getPersonByEmail(teacherEmail);
@@ -312,7 +318,7 @@ async function getTeacherRosterFromDb(teacherEmail) {
 
 async function getAdminClassListFromDb() {
   const db = getDb();
-  if (!db) {
+  if (!db || !(await isClassroomMirrorFresh())) {
     return null;
   }
 
@@ -372,7 +378,7 @@ async function getAdminClassListFromDb() {
 
 async function getAdminClassRosterFromDb(courseId) {
   const db = getDb();
-  if (!db) {
+  if (!db || !(await isClassroomMirrorFresh())) {
     return null;
   }
   const id = typeof courseId === "string" ? courseId.trim() : "";
@@ -443,7 +449,7 @@ async function getAdminClassRosterFromDb(courseId) {
  */
 async function listAllClassroomGradeRowsFromDb() {
   const db = getDb();
-  if (!db) {
+  if (!db || !(await isClassroomMirrorFresh())) {
     return null;
   }
 
@@ -468,7 +474,7 @@ async function listAllClassroomGradeRowsFromDb() {
 
 async function getHighGradeStudentsFromDb(threshold) {
   const db = getDb();
-  if (!db) {
+  if (!db || !(await isClassroomMirrorFresh())) {
     return null;
   }
 
@@ -519,7 +525,7 @@ async function getHighGradeStudentsFromDb(threshold) {
 
 async function lookupPersonGradesAndRoleFromDb(aesopId) {
   const person = await getPersonByAesopId(aesopId);
-  if (!person) {
+  if (!person || !isPeopleIdentityFresh(person)) {
     return null;
   }
   const [role, classGrades, dingHistory] = await Promise.all([
@@ -552,7 +558,7 @@ async function getCurrentDingNumberFromDb(personId) {
 
 async function getDingHistoryFromDb(personId, maxRows = 10) {
   const db = getDb();
-  if (!db) {
+  if (!db || !(await isPeopleMirrorFresh())) {
     return [];
   }
   return db
@@ -566,6 +572,64 @@ async function getDingHistoryFromDb(personId, maxRows = 10) {
     .orderBy(desc(dingChangeHistory.changedAt))
     .limit(maxRows);
 }
+
+/**
+ * Classroom sync can emit multiple emails that map to the same AESOP ID (shared
+ * accounts, sheet quirks). people.aesop_id is UNIQUE, so keep the ID on one row only.
+ * @param {Array<{ email: string, aesopId?: string }>} rows
+ */
+function dedupePeopleRowsByAesopId(rows) {
+  const aesopIdToEmail = new Map();
+  for (const row of rows) {
+    const id = String(row.aesopId || "").trim();
+    if (!id) {
+      continue;
+    }
+    const key = id.toLowerCase();
+    const priorEmail = aesopIdToEmail.get(key);
+    if (priorEmail && priorEmail !== row.email) {
+      console.warn(
+        `[classroom-sync] duplicate AESOP ID ${id} for ${priorEmail} and ${row.email}; classroom sync will store ${row.email} without aesop_id`,
+      );
+      row.aesopId = "";
+      continue;
+    }
+    aesopIdToEmail.set(key, row.email);
+  }
+}
+
+const UPSERT_PERSON_FROM_CLASSROOM_SYNC_SQL = `
+  INSERT INTO people (aesop_id, email, name, phone, portal_role, teacher_classes, synced_at)
+  SELECT
+    CASE
+      WHEN NULLIF(trim($1::text), '') IS NULL THEN NULL
+      WHEN EXISTS (
+        SELECT 1 FROM people p
+        WHERE p.aesop_id IS NOT NULL AND lower(p.aesop_id) = lower(trim($1::text))
+      ) THEN NULL
+      ELSE trim($1::text)
+    END,
+    $2, $3, $4, $5, $6, $7
+  ON CONFLICT (email) DO UPDATE SET
+    aesop_id = CASE
+      WHEN NULLIF(trim(EXCLUDED.aesop_id), '') IS NULL THEN people.aesop_id
+      WHEN people.aesop_id IS NOT NULL
+        AND lower(people.aesop_id) = lower(trim(EXCLUDED.aesop_id)) THEN people.aesop_id
+      WHEN EXISTS (
+        SELECT 1 FROM people p
+        WHERE p.id <> people.id
+          AND p.aesop_id IS NOT NULL
+          AND lower(p.aesop_id) = lower(trim(EXCLUDED.aesop_id))
+      ) THEN people.aesop_id
+      ELSE trim(EXCLUDED.aesop_id)
+    END,
+    name = COALESCE(EXCLUDED.name, people.name),
+    phone = COALESCE(EXCLUDED.phone, people.phone),
+    portal_role = EXCLUDED.portal_role,
+    teacher_classes = EXCLUDED.teacher_classes,
+    synced_at = EXCLUDED.synced_at
+  RETURNING id
+`;
 
 /**
  * Persist a full Classroom sync snapshot inside a transaction.
@@ -604,29 +668,19 @@ async function persistClassroomSync(payload) {
     await client.query(`DELETE FROM course_enrollments`);
     await client.query(`DELETE FROM courses`);
 
+    dedupePeopleRowsByAesopId(payload.people);
+
     const personIdByEmail = new Map();
     for (const row of payload.people) {
-      const result = await client.query(
-        `INSERT INTO people (aesop_id, email, name, phone, portal_role, teacher_classes, synced_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)
-         ON CONFLICT (email) DO UPDATE SET
-           aesop_id = COALESCE(EXCLUDED.aesop_id, people.aesop_id),
-           name = COALESCE(EXCLUDED.name, people.name),
-           phone = COALESCE(EXCLUDED.phone, people.phone),
-           portal_role = EXCLUDED.portal_role,
-           teacher_classes = EXCLUDED.teacher_classes,
-           synced_at = EXCLUDED.synced_at
-         RETURNING id`,
-        [
-          row.aesopId || null,
-          row.email,
-          row.name || null,
-          row.phone || null,
-          row.portalRole || null,
-          row.teacherClasses || null,
-          startedAt,
-        ],
-      );
+      const result = await client.query(UPSERT_PERSON_FROM_CLASSROOM_SYNC_SQL, [
+        row.aesopId || null,
+        row.email,
+        row.name || null,
+        row.phone || null,
+        row.portalRole || null,
+        row.teacherClasses || null,
+        startedAt,
+      ]);
       personIdByEmail.set(row.email, result.rows[0].id);
     }
 
@@ -833,12 +887,221 @@ async function exportSnapshotFromDb() {
   };
 }
 
+/** @returns {Promise<boolean>} */
+async function isClassroomMirrorFresh() {
+  const lastRun = await getLastSyncRun();
+  return isMirrorTimestampFresh(lastRun?.finishedAt);
+}
+
+/** @returns {Promise<boolean>} */
+async function isPeopleMirrorFresh() {
+  const pool = getPool();
+  if (!pool) {
+    return false;
+  }
+  const result = await pool.query(
+    `SELECT MAX(synced_at) AS latest FROM people WHERE synced_at IS NOT NULL`,
+  );
+  return isMirrorTimestampFresh(result.rows[0]?.latest);
+}
+
+/**
+ * @returns {Promise<{
+ *   maxAgeMs: number,
+ *   classroom: { fresh: boolean, ageMs: number|null, lastSyncedAt: Date|string|null },
+ *   people: { fresh: boolean, ageMs: number|null, lastSyncedAt: Date|string|null },
+ *   applicants: { fresh: boolean, ageMs: number|null, lastSyncedAt: Date|string|null },
+ * }>}
+ */
+async function getMirrorCacheStatus() {
+  const maxAgeMs = getMirrorCacheMaxAgeMs();
+  const lastRun = await getLastSyncRun();
+  const classroom = {
+    ...describeMirrorTimestamp(lastRun?.finishedAt),
+    lastSyncedAt: lastRun?.finishedAt || null,
+  };
+
+  const pool = getPool();
+  let people = { fresh: false, ageMs: null, maxAgeMs, lastSyncedAt: null };
+  let applicants = { fresh: false, ageMs: null, maxAgeMs, lastSyncedAt: null };
+
+  if (pool) {
+    const [peopleResult, applicantsResult] = await Promise.all([
+      pool.query(`SELECT MAX(synced_at) AS latest FROM people WHERE synced_at IS NOT NULL`),
+      pool.query(`SELECT MAX(synced_at) AS latest FROM applicants WHERE synced_at IS NOT NULL`),
+    ]);
+    const peopleLatest = peopleResult.rows[0]?.latest || null;
+    const applicantsLatest = applicantsResult.rows[0]?.latest || null;
+    people = { ...describeMirrorTimestamp(peopleLatest), lastSyncedAt: peopleLatest };
+    applicants = { ...describeMirrorTimestamp(applicantsLatest), lastSyncedAt: applicantsLatest };
+  }
+
+  return { maxAgeMs, classroom, people, applicants };
+}
+
+/** @deprecated use getMirrorCacheMaxAgeMs from services/mirrorCache.js */
+function getPortalMirrorMaxAgeMs() {
+  return getMirrorCacheMaxAgeMs();
+}
+
+/**
+ * @param {{ syncedAt?: Date|string|null }} person
+ * @returns {boolean}
+ */
+function isPeopleIdentityFresh(person) {
+  return isMirrorTimestampFresh(person?.syncedAt);
+}
+
+/**
+ * @param {import('../db/schema').people.$inferSelect} person
+ * @returns {{ name: string, email: string, id: string, phone: string, portalRole: string, reviewerRole: string, peopleStatus: string }}
+ */
+function personRowToProfile(person) {
+  const aesopId = person.aesopId || "";
+  const portalRole = person.portalRole || "";
+  return {
+    name: person.name || "",
+    email: person.email || "",
+    id: aesopId,
+    phone: person.phone || "",
+    portalRole,
+    reviewerRole: "",
+    peopleStatus:
+      String(portalRole).trim().toLowerCase() === "applied" ? "applied" : "",
+  };
+}
+
+/**
+ * @param {{ syncedAt?: Date|string|null }} applicant
+ * @returns {boolean}
+ */
+function isApplicantsMirrorFresh(applicant) {
+  return isMirrorTimestampFresh(applicant?.syncedAt);
+}
+
+/**
+ * @param {import('../db/schema').applicants.$inferSelect} applicant
+ * @returns {{ aesopId: string, round1: string, round2: string, links: string, submittedAt: string, email: string, driveFileId: string|null, driveFileName: string|null, driveDurationSeconds: number|null }}
+ */
+function applicantRowFromDb(applicant) {
+  return {
+    aesopId: String(applicant.aesopId || "").trim(),
+    round1: String(applicant.round1 ?? "").trim(),
+    round2: String(applicant.round2 ?? "").trim(),
+    links: String(applicant.applicantLinks ?? "").trim(),
+    submittedAt: String(applicant.submittedAt ?? "").trim(),
+    email: String(applicant.email || "").trim(),
+    driveFileId: applicant.driveFileId ? String(applicant.driveFileId).trim() : null,
+    driveFileName: applicant.driveFileName ? String(applicant.driveFileName).trim() : null,
+    driveDurationSeconds:
+      applicant.driveDurationSeconds != null && Number.isFinite(Number(applicant.driveDurationSeconds))
+        ? Number(applicant.driveDurationSeconds)
+        : null,
+  };
+}
+
+/**
+ * @param {string} aesopId
+ * @returns {Promise<ReturnType<typeof applicantRowFromDb>|null>}
+ */
+async function getApplicantRowByAesopIdFromDb(aesopId) {
+  const db = getDb();
+  if (!db) {
+    return null;
+  }
+  const id = typeof aesopId === "string" ? aesopId.trim().toLowerCase() : "";
+  if (!id) {
+    return null;
+  }
+  const rows = await db
+    .select()
+    .from(applicants)
+    .where(sql`lower(${applicants.aesopId}) = ${id}`)
+    .limit(1);
+  const applicant = rows[0];
+  if (!applicant || !isApplicantsMirrorFresh(applicant)) {
+    return null;
+  }
+  return applicantRowFromDb(applicant);
+}
+
+/**
+ * Upsert one Applicants sheet row (+ optional Drive metadata) into applicants.
+ * @param {{
+ *   aesopId: string,
+ *   email?: string,
+ *   round1?: string,
+ *   round2?: string,
+ *   applicantLinks?: string,
+ *   submittedAt?: string,
+ *   driveFileId?: string|null,
+ *   driveFileName?: string|null,
+ *   driveDurationSeconds?: number|null,
+ *   syncedAt?: Date,
+ * }} fields
+ * @returns {Promise<{ id: number }|null>}
+ */
+async function upsertApplicantFromMirror(fields) {
+  const pool = getPool();
+  if (!pool) {
+    return null;
+  }
+
+  const aesopId = String(fields.aesopId || "").trim();
+  if (!aesopId) {
+    return null;
+  }
+
+  const email = fields.email ? normalizeEmail(fields.email) : null;
+  const syncedAt = fields.syncedAt instanceof Date ? fields.syncedAt : new Date();
+  const result = await pool.query(
+    `INSERT INTO applicants (
+       aesop_id, email, round1, round2, applicant_links, submitted_at,
+       drive_file_id, drive_file_name, drive_duration_seconds, synced_at
+     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+     ON CONFLICT (aesop_id) DO UPDATE SET
+       email = COALESCE(EXCLUDED.email, applicants.email),
+       round1 = EXCLUDED.round1,
+       round2 = EXCLUDED.round2,
+       applicant_links = EXCLUDED.applicant_links,
+       submitted_at = EXCLUDED.submitted_at,
+       drive_file_id = EXCLUDED.drive_file_id,
+       drive_file_name = EXCLUDED.drive_file_name,
+       drive_duration_seconds = EXCLUDED.drive_duration_seconds,
+       synced_at = EXCLUDED.synced_at
+     RETURNING id`,
+    [
+      aesopId,
+      email,
+      fields.round1 ?? "",
+      fields.round2 ?? "",
+      fields.applicantLinks ?? "",
+      fields.submittedAt ?? "",
+      fields.driveFileId || null,
+      fields.driveFileName || null,
+      fields.driveDurationSeconds ?? null,
+      syncedAt,
+    ],
+  );
+  return result.rows[0] || null;
+}
+
 module.exports = {
   isDatabaseEnabled,
   normalizeEmail,
   parseGradePercent,
   getPersonByEmail,
   getPersonByAesopId,
+  getPortalMirrorMaxAgeMs,
+  getMirrorCacheStatus,
+  isClassroomMirrorFresh,
+  isPeopleMirrorFresh,
+  isPeopleIdentityFresh,
+  isApplicantsMirrorFresh,
+  personRowToProfile,
+  applicantRowFromDb,
+  getApplicantRowByAesopIdFromDb,
+  upsertApplicantFromMirror,
   getLastSyncRun,
   getSyncStats,
   getRoleByEmailFromDb,

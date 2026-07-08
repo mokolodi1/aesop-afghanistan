@@ -1,4 +1,3 @@
-const config = require("../config/secrets");
 const { formatEasternSheetTimestamp } = require("../utils/dingSheetTime");
 const {
   classifyVoiceMemoDuration,
@@ -6,11 +5,7 @@ const {
   formatVoiceMemoDurationLabel,
 } = require("../utils/voiceMemoDuration");
 const { findProfileById } = require("./googleSheets");
-const {
-  getVoiceMemoFileForAesopId,
-  streamVoiceMemoFile,
-  getVoiceMemoDurationSeconds,
-} = require("./googleDrive");
+const { streamVoiceMemoFile, getVoiceMemoFileForAesopId, getVoiceMemoDurationSeconds } = require("./googleDrive");
 const {
   getApplicantRowByAesopId,
   getVoiceMemoSheetConfig,
@@ -52,6 +47,76 @@ async function verifyPortalVoiceMemoSession({ userId, email }) {
 }
 
 /**
+ * @param {Awaited<ReturnType<typeof getApplicantRowByAesopId>>} applicant
+ * @param {ReturnType<typeof getVoiceMemoSheetConfig>} cfg
+ * @returns {Promise<{ fileId: string, fileName: string|null, submittedAt: Date|null }|null>}
+ */
+async function resolveDriveFileForApplicant(applicant, cfg) {
+  const cachedFileId = applicant?.driveFileId ? String(applicant.driveFileId).trim() : "";
+  if (cachedFileId) {
+    return {
+      fileId: cachedFileId,
+      fileName: applicant.driveFileName ? String(applicant.driveFileName).trim() : null,
+      submittedAt: null,
+    };
+  }
+
+  const folderId = String(cfg.voiceMemo.driveFolderId || "").trim();
+  if (!folderId || !applicant?.aesopId) {
+    return null;
+  }
+
+  const scanOptions = getVoiceMemoDriveScanOptions(cfg.voiceMemo);
+  const driveFile = await getVoiceMemoFileForAesopId(folderId, applicant.aesopId, scanOptions);
+  if (!driveFile) {
+    return null;
+  }
+
+  return {
+    fileId: driveFile.fileId,
+    fileName: driveFile.fileName,
+    submittedAt: driveFile.submittedAt,
+  };
+}
+
+/**
+ * @param {Awaited<ReturnType<typeof getApplicantRowByAesopId>>} applicant
+ * @param {{ minSeconds: number, maxSeconds: number }} durationLimits
+ * @param {ReturnType<typeof getVoiceMemoSheetConfig>} cfg
+ * @returns {Promise<{ fileName: string|null, hasRecording: boolean, durationSeconds: number|null, durationStatus: 'valid'|'too_short'|'too_long'|'unknown', durationWarning: string|null, submittedAt: Date|null }>}
+ */
+async function resolveVoiceMemoRecordingFromApplicant(applicant, durationLimits, cfg) {
+  const driveFile = await resolveDriveFileForApplicant(applicant, cfg);
+  if (!driveFile) {
+    return {
+      fileName: null,
+      hasRecording: false,
+      durationSeconds: null,
+      durationStatus: "unknown",
+      durationWarning: null,
+      submittedAt: null,
+    };
+  }
+
+  let durationSeconds =
+    applicant.driveDurationSeconds != null && Number.isFinite(Number(applicant.driveDurationSeconds))
+      ? Number(applicant.driveDurationSeconds)
+      : null;
+  if (durationSeconds == null) {
+    durationSeconds = await getVoiceMemoDurationSeconds(driveFile.fileId);
+  }
+  const durationStatus = classifyVoiceMemoDuration(durationSeconds, durationLimits);
+  return {
+    fileName: driveFile.fileName,
+    hasRecording: true,
+    durationSeconds,
+    durationStatus,
+    durationWarning: voiceMemoDurationWarning(durationStatus, durationLimits),
+    submittedAt: driveFile.submittedAt,
+  };
+}
+
+/**
  * @param {string} userId
  * @returns {Promise<{ eligible: false }|{
  *   eligible: true,
@@ -78,7 +143,6 @@ async function getPortalVoiceMemoStatus({ userId, email }) {
 
   const cfg = getVoiceMemoSheetConfig();
   const durationLimits = getVoiceMemoDurationLimits(cfg.voiceMemo);
-  const scanOptions = getVoiceMemoDriveScanOptions(cfg.voiceMemo);
   const submissionInstructions = String(cfg.voiceMemo.submissionInstructions || "").trim();
   const applicant = await getApplicantRowByAesopId(profile.id || userId);
   if (!applicant) {
@@ -99,19 +163,18 @@ async function getPortalVoiceMemoStatus({ userId, email }) {
   let durationStatus = "unknown";
   let durationWarning = null;
 
-  const folderId = String(cfg.voiceMemo.driveFolderId || "").trim();
-  if (folderId) {
-    const driveFile = await getVoiceMemoFileForAesopId(folderId, applicant.aesopId, scanOptions);
-    if (driveFile) {
-      fileName = driveFile.fileName;
-      hasRecording = true;
-      if (!submitted) {
-        submitted = true;
-        submittedAt = submittedAt || formatEasternSheetTimestamp(driveFile.submittedAt);
-      }
-      durationSeconds = await getVoiceMemoDurationSeconds(driveFile.fileId);
-      durationStatus = classifyVoiceMemoDuration(durationSeconds, durationLimits);
-      durationWarning = voiceMemoDurationWarning(durationStatus, durationLimits);
+  const recording = await resolveVoiceMemoRecordingFromApplicant(applicant, durationLimits, cfg);
+  if (recording.hasRecording) {
+    fileName = recording.fileName;
+    hasRecording = true;
+    durationSeconds = recording.durationSeconds;
+    durationStatus = recording.durationStatus;
+    durationWarning = recording.durationWarning;
+    if (!submitted) {
+      submitted = true;
+      submittedAt =
+        submittedAt ||
+        (recording.submittedAt ? formatEasternSheetTimestamp(recording.submittedAt) : formatEasternSheetTimestamp(new Date()));
     }
   }
 
@@ -144,7 +207,6 @@ async function getPortalVoiceMemoStream({ userId, email, rangeHeader = "" }) {
   }
 
   const cfg = getVoiceMemoSheetConfig();
-  const scanOptions = getVoiceMemoDriveScanOptions(cfg.voiceMemo);
   const applicant = await getApplicantRowByAesopId(profile.id || userId);
   if (!applicant) {
     const error = new Error("Voice memo is not available for your account.");
@@ -159,15 +221,7 @@ async function getPortalVoiceMemoStream({ userId, email, rangeHeader = "" }) {
     throw error;
   }
 
-  const folderId = String(cfg.voiceMemo.driveFolderId || "").trim();
-  if (!folderId) {
-    const error = new Error("Voice memo playback is not configured.");
-    error.statusCode = 503;
-    throw error;
-  }
-
-  const driveFile = await getVoiceMemoFileForAesopId(folderId, applicant.aesopId, scanOptions);
-
+  const driveFile = await resolveDriveFileForApplicant(applicant, cfg);
   if (!driveFile) {
     const error = new Error("No voice memo file was found for your account.");
     error.statusCode = 404;

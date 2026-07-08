@@ -23,19 +23,68 @@ export DATABASE_URL='postgres://user:pass@localhost:5432/aesop'
 npm run db:migrate
 ```
 
-## Daily Classroom sync (24h)
+## Hourly Postgres cache
 
-The sync job writes to Postgres, mirrors People/Ding data from Sheets, dual-writes Classroom tabs (unless `CLASSROOM_SHEET_DUAL_WRITE=false`), and exports admin backup JSON files.
+Postgres is the **read cache** for the portal and admin UI. A background job refreshes it; the app serves from DB when data is **fresh**, and falls back to Google Sheets / Classroom API when stale.
+
+### TTL (default: 1 hour)
+
+| Variable | Example | Purpose |
+|----------|---------|---------|
+| `MIRROR_CACHE_TTL_HOURS` | `1` | Human-friendly cache TTL |
+| `MIRROR_CACHE_MAX_AGE_MS` | `3600000` | Cache TTL in milliseconds |
+| `PORTAL_MIRROR_MAX_AGE_MS` | `3600000` | Legacy alias for the same TTL |
+
+Freshness is checked per domain:
+
+- **People** — row `synced_at` on `people`
+- **Applicants + Drive** — row `synced_at` on `applicants` (includes Drive file metadata)
+- **Classroom** — last successful `sync_runs.finished_at` (rosters, grades, enrollments)
+
+When cache is stale, reads fall back to live Sheets/Classroom (slower but current).
+
+### Refresh the cache (hourly on Fly)
+
+**Hourly job** — People, Ding, **Applicants**, and **Google Drive** voice memo metadata:
+
+```bash
+npm run sync:hourly-cache
+```
+
+Schedule on Fly:
+
+```bash
+bash scripts/schedule-hourly-cache.sh
+```
+
+This runs `mirrorPeopleAndDingFromSheets()` every hour (~10–15 min):
+
+| Source | Postgres tables |
+|--------|-----------------|
+| People tab | `people` |
+| Ding changes tab | `ding_numbers`, `ding_change_history` |
+| Applicants tab | `applicants` |
+| Google Drive folder | `applicants.drive_file_id`, `drive_file_name`, `drive_duration_seconds` |
+
+Google Classroom is **not** included in the hourly job by default (too heavy). Keep Classroom on a daily schedule (below). To also run Classroom hourly, set `HOURLY_CACHE_INCLUDE_CLASSROOM=true` on the scheduled machine.
+
+**Daily job** — Google Classroom rosters, grades, enrollments (+ sheet dual-write + backup export):
 
 ```bash
 npm run sync:classroom
 ```
 
-Schedule on Fly (existing script):
-
 ```bash
 bash scripts/schedule-classroom-sync.sh
 ```
+
+### Monitor cache age
+
+```
+GET /api/health
+```
+
+Response includes `mirrorCache` with `classroom`, `people`, and `applicants` freshness vs `maxAgeMs`.
 
 ## Backup layers
 
@@ -96,6 +145,10 @@ JSON snapshots are primarily for **admin reporting archives** and audit; they ar
 |----------|---------|
 | `DATABASE_URL` | Postgres connection string |
 | `DATABASE_SSL` | Set to `false` for local Postgres without SSL |
+| `MIRROR_CACHE_TTL_HOURS` | Postgres read cache TTL in hours (default `1`) |
+| `MIRROR_CACHE_MAX_AGE_MS` | Same TTL in milliseconds (overrides hours when set) |
+| `PORTAL_MIRROR_MAX_AGE_MS` | Legacy alias for mirror cache TTL |
+| `HOURLY_CACHE_INCLUDE_CLASSROOM` | `true` to run Google Classroom sync inside hourly job (default off) |
 | `CLASSROOM_SHEET_DUAL_WRITE` | `false` to stop writing Classroom tabs (default: dual-write on) |
 | `BACKUP_EXPORT_ENABLED` | `false` to skip snapshot exports |
 | `BACKUP_EXPORT_PROVIDER` | `local`, `s3`, or `tigris` |

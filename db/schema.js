@@ -45,6 +45,28 @@ const people = pgTable(
   }),
 );
 
+const applicants = pgTable(
+  "applicants",
+  {
+    id: serial("id").primaryKey(),
+    aesopId: varchar("aesop_id", { length: 64 }).notNull(),
+    email: varchar("email", { length: 320 }),
+    round1: varchar("round1", { length: 64 }),
+    round2: varchar("round2", { length: 64 }),
+    applicantLinks: text("applicant_links"),
+    submittedAt: varchar("submitted_at", { length: 128 }),
+    driveFileId: varchar("drive_file_id", { length: 128 }),
+    driveFileName: varchar("drive_file_name", { length: 255 }),
+    driveDurationSeconds: integer("drive_duration_seconds"),
+    syncedAt: timestamp("synced_at", { withTimezone: true }),
+  },
+  (table) => ({
+    aesopIdUnique: unique("applicants_aesop_id_unique").on(table.aesopId),
+    aesopIdIdx: index("applicants_aesop_id_idx").on(table.aesopId),
+    emailIdx: index("applicants_email_idx").on(table.email),
+  }),
+);
+
 const courses = pgTable(
   "courses",
   {
@@ -285,6 +307,7 @@ const emailCampaignRecipients = pgTable(
 module.exports = {
   syncRuns,
   people,
+  applicants,
   courses,
   courseEnrollments,
   courseGrades,

@@ -21,6 +21,8 @@ const {
   getWorksheetByTitle,
   resolveColumnIndex,
 } = require("./googleSheets");
+const { isDatabaseEnabled } = require("../db/index");
+const { getApplicantRowByAesopIdFromDb } = require("./classroomDb");
 
 const VOICE_NOTE_LINK_HEADERS = ["Voice note link", "Links"];
 const VOICE_NOTE_DATE_HEADERS = [
@@ -468,6 +470,28 @@ async function getApplicantRowByAesopId(aesopId) {
   if (!idKey) {
     return null;
   }
+
+  if (isDatabaseEnabled()) {
+    try {
+      const fromDb = await getApplicantRowByAesopIdFromDb(idKey);
+      if (fromDb) {
+        return {
+          aesopId: fromDb.aesopId,
+          round1: fromDb.round1,
+          round2: fromDb.round2,
+          links: fromDb.links,
+          submittedAt: fromDb.submittedAt,
+          email: fromDb.email,
+          driveFileId: fromDb.driveFileId,
+          driveFileName: fromDb.driveFileName,
+          driveDurationSeconds: fromDb.driveDurationSeconds,
+        };
+      }
+    } catch (error) {
+      console.warn("Applicants DB lookup failed:", error.message);
+    }
+  }
+
   const idKeyLower = idKey.toLowerCase();
 
   const { worksheet, columns, cfg } = await loadApplicantsWorksheet();
@@ -486,6 +510,9 @@ async function getApplicantRowByAesopId(aesopId) {
       links: String(rowData[columns.links] ?? "").trim(),
       submittedAt: String(rowData[columns.date] ?? "").trim(),
       email: String(rowData[cfg.emailColumnIndex] ?? "").trim(),
+      driveFileId: null,
+      driveFileName: null,
+      driveDurationSeconds: null,
     };
   }
 
@@ -684,14 +711,32 @@ async function syncVoiceMemoRound2Status() {
   };
 }
 
+/**
+ * @returns {Promise<Set<string>>} normalized lowercase AESOP IDs from the Applicants sheet
+ */
+async function loadApplicantAesopIdSetFromSheets() {
+  const { dataRows, cfg } = await loadApplicantsDataForStats();
+  const ids = new Set();
+  for (const rowData of dataRows) {
+    const id = String(rowData[cfg.idColumnIndex] ?? "").trim().toLowerCase();
+    if (id) {
+      ids.add(id);
+    }
+  }
+  return ids;
+}
+
 module.exports = {
   syncVoiceMemoRound2Status,
   loadApplicantsWorksheet,
+  loadApplicantsDataForStats,
   getApplicantRowByAesopId,
+  loadApplicantAesopIdSetFromSheets,
   getVoiceMemoSheetConfig,
   getVoiceMemoDriveScanOptions,
   getVoiceMemoDurationLimits,
   classifyRound1ApplicationStatus,
   getRound1ApplicationStats,
   buildVoiceMemoDriveWarnings,
+  findVoiceMemoInScan,
 };

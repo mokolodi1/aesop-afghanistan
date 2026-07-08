@@ -1,34 +1,24 @@
 #!/usr/bin/env bash
 #
-# Create (or re-create) a Fly.io scheduled Machine that runs the Google Classroom
-# sync on a timer. The Machine reuses the app's current image and inherits the
-# app secrets (SECRETS_JSON), so no extra credentials are needed.
+# Schedule hourly Postgres cache refresh (People, Ding, Applicants, Google Drive).
+# Does NOT include Google Classroom unless HOURLY_CACHE_INCLUDE_CLASSROOM=true on the app.
 #
 # Usage:
-#   bash scripts/schedule-classroom-sync.sh                 # daily Classroom sync
-#   bash scripts/schedule-hourly-cache.sh                   # hourly People/Ding/Applicants/Drive
-#   FLY_APP=my-app SCHEDULE=hourly bash scripts/schedule-classroom-sync.sh  # legacy alias → use schedule-hourly-cache.sh
+#   bash scripts/schedule-hourly-cache.sh
+#   FLY_APP=my-app VM_MEMORY=1024 bash scripts/schedule-hourly-cache.sh
 #
-# Schedule values accepted by Fly: hourly | daily | weekly | monthly.
-#
-# Prerequisites:
-#   - flyctl installed and authenticated (fly auth login)
-#   - classroom.enabled=true and classroom.impersonateEmail set in SECRETS_JSON
-#     (push with: bash scripts/update_secrets.sh)
 set -euo pipefail
 
 APP="${FLY_APP:-aesop-afghanistan}"
-SCHEDULE="${SCHEDULE:-daily}"
-VM_MEMORY="${VM_MEMORY:-512}"
+SCHEDULE="${SCHEDULE:-hourly}"
+VM_MEMORY="${VM_MEMORY:-1024}"
 IMAGE="${1:-}"
 
 if ! command -v fly >/dev/null 2>&1; then
   echo "Error: flyctl ('fly') is not installed or not on PATH." >&2
-  echo "Install: https://fly.io/docs/flyctl/install/" >&2
   exit 1
 fi
 
-# Resolve the app's current image when not provided explicitly.
 if [ -z "$IMAGE" ]; then
   echo "Resolving current image for app '$APP'..."
   IMAGE="$(fly machines list -a "$APP" --json 2>/dev/null | node -e "
@@ -61,7 +51,6 @@ if [ -z "$IMAGE" ]; then
   " || true)"
   if [ -z "$IMAGE" ]; then
     echo "Error: could not resolve the deployed image automatically." >&2
-    echo "Run 'fly image show -a $APP' and pass the image ref as the first argument." >&2
     exit 1
   fi
 fi
@@ -70,15 +59,14 @@ echo "App:      $APP"
 echo "Image:    $IMAGE"
 echo "Schedule: $SCHEDULE"
 echo "Memory:   ${VM_MEMORY}MB"
-echo "Command:  node scripts/sync-classroom.js"
+echo "Command:  node scripts/sync-hourly-cache.js"
 echo
 
 fly machine run "$IMAGE" \
   -a "$APP" \
   --schedule "$SCHEDULE" \
   --vm-memory "$VM_MEMORY" \
-  node scripts/sync-classroom.js
+  node scripts/sync-hourly-cache.js
 
 echo
-echo "Scheduled Machine created. Inspect with: fly machine list -a $APP"
-echo "Logs after it runs:                      fly logs -a $APP"
+echo "Hourly cache Machine created. Inspect: fly machine list -a $APP"

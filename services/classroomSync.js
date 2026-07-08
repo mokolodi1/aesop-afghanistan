@@ -5,8 +5,7 @@ const {
   resolveColumnIndex,
   loadEmailToPeopleProfileMap,
   listAllClassroomGradeRows,
-  isPeopleSheetAdminRole,
-  isAppliedPeopleStatus,
+  resolvePortalRoleFromPeopleSheet,
   derivePeopleSheetStatus,
   syncPeopleStatusOnPeopleSheet,
 } = require("./googleSheets");
@@ -21,6 +20,7 @@ const {
 } = require("./classroomDb");
 const { exportSyncBackup } = require("./backupExport");
 const { mirrorPeopleAndDingFromSheets } = require("./peopleMirror");
+const { loadApplicantAesopIdSetFromSheets } = require("./voiceMemoSync");
 
 /**
  * Read-only Classroom scopes used by the unattended sync. The service account
@@ -390,6 +390,7 @@ async function runClassroomSync() {
   if (isDatabaseEnabled()) {
     try {
       const profileMap = await loadEmailToPeopleProfileMap();
+      const applicantIdSet = await loadApplicantAesopIdSetFromSheets();
       const peopleEmails = new Set([...teacherClasses.keys(), ...studentSections.keys()]);
       for (const row of dbEnrollments) {
         peopleEmails.add(row.email);
@@ -404,20 +405,7 @@ async function runClassroomSync() {
       for (const email of peopleEmails) {
         const profile = profileMap.get(email);
         const isTeacher = teacherClasses.has(email);
-        const sheetPortalRole = profile?.portalRole || "";
-        const isStudent = studentSections.has(email);
-        const sheetStatus = derivePeopleSheetStatus({
-          aesopId: profile?.id,
-          isTeacher,
-          isStudent,
-        });
-        const portalRole = isPeopleSheetAdminRole(sheetPortalRole)
-          ? "Admin"
-          : isAppliedPeopleStatus(sheetStatus)
-            ? "Applied"
-            : isTeacher
-              ? "Teacher"
-              : "Student";
+        const portalRole = resolvePortalRoleFromPeopleSheet(profile, applicantIdSet);
         dbPeople.push({
           email,
           aesopId: profile?.id || "",
@@ -459,7 +447,7 @@ async function runClassroomSync() {
       try {
         const mirrorResult = await mirrorPeopleAndDingFromSheets();
         console.log(
-          `[classroom-sync] mirrored People/Ding: people=${mirrorResult.people}, dingNumbers=${mirrorResult.dingNumbers}, dingHistory=${mirrorResult.dingHistory}`,
+          `[classroom-sync] mirrored People/Ding: people=${mirrorResult.people}, dingNumbers=${mirrorResult.dingNumbers}, dingHistory=${mirrorResult.dingHistory}, applicants=${mirrorResult.applicants ?? 0}, driveFiles=${mirrorResult.driveFiles ?? 0}`,
         );
       } catch (mirrorErr) {
         console.warn("[classroom-sync] People/Ding mirror failed:", mirrorErr.message);
@@ -734,9 +722,7 @@ async function getTeacherRoster(teacherEmail, options = {}) {
       }
     } catch (dbErr) {
       console.warn("[classroom] teacher roster DB read failed:", dbErr.message);
-      return { classes: [] };
     }
-    return { classes: [] };
   }
 
   if (!options.force) {
@@ -817,9 +803,7 @@ async function getStudentGrades(studentEmail, options = {}) {
       }
     } catch (dbErr) {
       console.warn("[classroom] student grades DB read failed:", dbErr.message);
-      return { classes: [] };
     }
-    return { classes: [] };
   }
 
   if (!options.force) {

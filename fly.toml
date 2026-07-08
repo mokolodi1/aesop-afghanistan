@@ -25,3 +25,4 @@ primary_region = "iad"
 [env]
   BASE_URL = "https://aesop-afghanistan.fly.dev"
   DATABASE_AUTO_MIGRATE = "true"
+  MIRROR_CACHE_TTL_HOURS = "1"
