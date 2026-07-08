@@ -137,15 +137,42 @@ async function prunePeopleNotOnSheet(emails, client) {
   return result.rowCount || 0;
 }
 
+/**
+ * People sheet can contain duplicate emails; DB email is UNIQUE — keep last row per email.
+ * @param {Array<object>} rows
+ * @returns {{ rows: Array<object>, duplicateCount: number }}
+ */
+function dedupePeopleRowsByEmail(rows) {
+  const byEmail = new Map();
+  let duplicateCount = 0;
+  for (const row of rows) {
+    const email = String(row.email || "").trim().toLowerCase();
+    if (!email) {
+      continue;
+    }
+    if (byEmail.has(email)) {
+      duplicateCount += 1;
+    }
+    byEmail.set(email, { ...row, email });
+  }
+  return { rows: [...byEmail.values()], duplicateCount };
+}
+
 async function mirrorAllPeopleFromSheets(options = {}) {
   if (!isDatabaseEnabled()) {
-    return { mirrored: 0, pruned: 0 };
+    return { mirrored: 0, pruned: 0, duplicateEmails: 0 };
   }
 
-  const [rows, applicantIdSet] = await Promise.all([
+  const [rawRows, applicantIdSet] = await Promise.all([
     loadAllPeopleRowsFromSheets(),
     loadApplicantAesopIdSetFromSheets(),
   ]);
+  const { rows, duplicateCount } = dedupePeopleRowsByEmail(rawRows);
+  if (duplicateCount > 0) {
+    console.warn(
+      `[people-mirror] ${duplicateCount} duplicate People sheet email(s); keeping last row per email.`,
+    );
+  }
   const syncedAt = new Date();
   let mirrored = 0;
 
@@ -163,7 +190,7 @@ async function mirrorAllPeopleFromSheets(options = {}) {
     );
   }
 
-  return { mirrored, pruned };
+  return { mirrored, pruned, duplicateEmails: duplicateCount };
 }
 
 /**
@@ -175,15 +202,18 @@ async function rebuildPeopleTableFromSheets(options = {}) {
     throw new Error("DATABASE_URL is not set.");
   }
 
-  const [rows, applicantIdSet] = await Promise.all([
+  const [rawRows, applicantIdSet] = await Promise.all([
     loadAllPeopleRowsFromSheets(),
     loadApplicantAesopIdSetFromSheets(),
   ]);
+  const { rows, duplicateCount } = dedupePeopleRowsByEmail(rawRows);
 
   if (options.dryRun) {
     return {
       dryRun: true,
-      sheetRows: rows.length,
+      sheetRows: rawRows.length,
+      uniqueEmails: rows.length,
+      duplicateEmails: duplicateCount,
       wouldTruncate: true,
       sampleHeaders: rows[0]?.sheetRow ? Object.keys(rows[0].sheetRow).slice(0, 12) : [],
     };
@@ -191,6 +221,12 @@ async function rebuildPeopleTableFromSheets(options = {}) {
 
   if (rows.length === 0) {
     throw new Error("People sheet returned zero rows — aborting rebuild.");
+  }
+
+  if (duplicateCount > 0) {
+    console.warn(
+      `[people-mirror] ${duplicateCount} duplicate People sheet email(s); keeping last row per email.`,
+    );
   }
 
   const pool = getPool();
@@ -218,7 +254,7 @@ async function rebuildPeopleTableFromSheets(options = {}) {
     client.release();
   }
 
-  return { inserted, sheetRows: rows.length };
+  return { inserted, sheetRows: rawRows.length, uniqueEmails: rows.length, duplicateEmails: duplicateCount };
 }
 
 async function mirrorDingNumbersFromSheets(applicantIdSet) {
