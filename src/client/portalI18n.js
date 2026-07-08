@@ -162,6 +162,7 @@ const TRANSLATIONS = {
     'reviews.accessDenied':
       'Reviewer access is required to view this page. Your AESOP ID must be marked as a reviewer on the People sheet (Reviewer column), then sign out and use a new magic link.',
     'reviews.applicantId': 'AESOP ID',
+    'reviews.age': 'Age',
     'reviews.appliedLevel': 'Applied level',
     'reviews.notAvailable': 'Not listed',
     'reviews.essayLabel': 'Essay',
@@ -375,6 +376,7 @@ const TRANSLATIONS = {
     'reviews.accessDenied':
       'برای دیدن این صفحه دسترسی بررسی‌کننده لازم است. AESOP ID شما باید در برگه People در ستون Reviewer علامت‌گذاری شود، سپس خارج شوید و با لینک جادویی جدید وارد شوید.',
     'reviews.applicantId': 'AESOP ID',
+    'reviews.age': 'سن',
     'reviews.appliedLevel': 'سطح درخواستی',
     'reviews.notAvailable': 'ثبت نشده',
     'reviews.essayLabel': 'انشا',

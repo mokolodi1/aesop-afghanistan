@@ -168,6 +168,7 @@ function buildGoogleSheetsConfig(fileSection) {
     admissionsNameColumn: envOr("GOOGLE_ADMISSIONS_NAME_COLUMN", "admissionsNameColumn", "C"),
     admissionsEmailColumn: envOr("GOOGLE_ADMISSIONS_EMAIL_COLUMN", "admissionsEmailColumn", "D"),
     admissionsLevelColumn: envOr("GOOGLE_ADMISSIONS_LEVEL_COLUMN", "admissionsLevelColumn", "E"),
+    admissionsAgeColumn: envOr("GOOGLE_ADMISSIONS_AGE_COLUMN", "admissionsAgeColumn", "L"),
     admissionsEssayColumn: envOr("GOOGLE_ADMISSIONS_ESSAY_COLUMN", "admissionsEssayColumn", "K"),
     /** Applicants sheet column for special send groups (e.g. didnt-send-mistake). Filter-only; sends use Email column. */
     admissionsSpecialEmailColumn: envOr(

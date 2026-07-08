@@ -166,8 +166,7 @@ function getSlotColumns(cfg, slot) {
  *   sheetName: string,
  *   headerRowNum: number,
  *   idColumnIndex: number,
- *   nameColumnIndex: number,
- *   levelColumnIndex: number,
+ *   ageColumnIndex: number,
  *   essayColumnIndex: number,
  * }}
  */
@@ -177,14 +176,13 @@ function getApplicantsReviewConfig() {
     sheetName: gs.admissionsSheetName || "Applicants",
     headerRowNum: Math.max(1, parseInt(String(gs.admissionsHeaderRow || "1"), 10) || 1),
     idColumnIndex: resolveColumnIndex(gs.admissionsIdColumn || "A"),
-    nameColumnIndex: resolveColumnIndex(gs.admissionsNameColumn || "C"),
-    levelColumnIndex: resolveColumnIndex(gs.admissionsLevelColumn || "E"),
+    ageColumnIndex: resolveColumnIndex(gs.admissionsAgeColumn || "L"),
     essayColumnIndex: resolveColumnIndex(gs.admissionsEssayColumn || "K"),
   };
 }
 
 /**
- * @returns {Promise<Map<string, { name: string, appliedLevel: string, essay: string }>>}
+ * @returns {Promise<Map<string, { age: string, essay: string }>>}
  */
 async function loadApplicantsByIdMap() {
   const cfg = getApplicantsReviewConfig();
@@ -196,7 +194,7 @@ async function loadApplicantsByIdMap() {
 
   await worksheet.loadHeaderRow(cfg.headerRowNum);
   const rows = await worksheet.getRows();
-  /** @type {Map<string, { name: string, appliedLevel: string, essay: string }>} */
+  /** @type {Map<string, { age: string, essay: string }>} */
   const byId = new Map();
 
   for (const row of rows) {
@@ -206,8 +204,7 @@ async function loadApplicantsByIdMap() {
       continue;
     }
     byId.set(normalizeAesopIdKey(aesopId), {
-      name: String(rowData[cfg.nameColumnIndex] ?? "").trim(),
-      appliedLevel: String(rowData[cfg.levelColumnIndex] ?? "").trim(),
+      age: String(rowData[cfg.ageColumnIndex] ?? "").trim(),
       essay: String(rowData[cfg.essayColumnIndex] ?? "").trim(),
     });
   }
@@ -262,10 +259,10 @@ function readReviewFieldsFromDbRow(row, slot) {
 /**
  * @param {Array<Record<string, unknown>>} rows
  * @param {string} reviewerKey
- * @returns {Array<{ applicantId: string, name: string, appliedLevel: string, essay: string, slot: 'A'|'B', englishLevel: string, suspectedAi: boolean, instructionFollowing: string, originalThinking: string, character: string, hasVoiceMemo: boolean }>}
+ * @returns {Array<{ applicantId: string, age: string, essay: string, slot: 'A'|'B', englishLevel: string, suspectedAi: boolean, instructionFollowing: string, originalThinking: string, character: string, hasVoiceMemo: boolean }>}
  */
 function mapReviewAssignmentsFromDbRows(rows, reviewerKey) {
-  /** @type {Array<{ applicantId: string, name: string, appliedLevel: string, essay: string, slot: 'A'|'B', englishLevel: string, suspectedAi: boolean, instructionFollowing: string, originalThinking: string, character: string, hasVoiceMemo: boolean }>} */
+  /** @type {Array<{ applicantId: string, age: string, essay: string, slot: 'A'|'B', englishLevel: string, suspectedAi: boolean, instructionFollowing: string, originalThinking: string, character: string, hasVoiceMemo: boolean }>} */
   const assignments = [];
 
   for (const row of rows) {
@@ -290,8 +287,7 @@ function mapReviewAssignmentsFromDbRows(rows, reviewerKey) {
 
     assignments.push({
       applicantId,
-      name: String(row.name ?? "").trim() || applicantId,
-      appliedLevel: String(row.applied_level ?? "").trim(),
+      age: String(row.age ?? "").trim(),
       essay: String(row.essay ?? "").trim(),
       slot,
       ...reviewFields,
@@ -299,10 +295,8 @@ function mapReviewAssignmentsFromDbRows(rows, reviewerKey) {
     });
   }
 
-  assignments.sort(
-    (a, b) =>
-      a.name.localeCompare(b.name, undefined, { sensitivity: "base" }) ||
-      a.applicantId.localeCompare(b.applicantId, undefined, { sensitivity: "base" }),
+  assignments.sort((a, b) =>
+    a.applicantId.localeCompare(b.applicantId, undefined, { sensitivity: "base" }),
   );
 
   return assignments;
@@ -324,7 +318,7 @@ async function loadReviewAssignmentsForReviewerFromSheets(reviewerKey) {
   const folderId = String(voiceMemo.driveFolderId || "").trim();
   const scanOptions = getVoiceMemoDriveScanOptions(voiceMemo);
 
-  /** @type {Array<{ applicantId: string, name: string, appliedLevel: string, essay: string, slot: 'A'|'B', englishLevel: string, suspectedAi: boolean, instructionFollowing: string, originalThinking: string, character: string, hasVoiceMemo: boolean }>} */
+  /** @type {Array<{ applicantId: string, age: string, essay: string, slot: 'A'|'B', englishLevel: string, suspectedAi: boolean, instructionFollowing: string, originalThinking: string, character: string, hasVoiceMemo: boolean }>} */
   const assignments = [];
 
   for (const row of rows) {
@@ -346,7 +340,6 @@ async function loadReviewAssignmentsForReviewerFromSheets(reviewerKey) {
     }
 
     const applicant = applicantsById.get(normalizeAesopIdKey(applicantId));
-    const appliedLevel = applicant?.appliedLevel || "";
     const slotCols = getSlotColumns(reviewsCfg, slot);
     const reviewFields = readReviewFieldsFromRow(rowData, slotCols);
 
@@ -362,8 +355,7 @@ async function loadReviewAssignmentsForReviewerFromSheets(reviewerKey) {
 
     assignments.push({
       applicantId,
-      name: applicant?.name || applicantId,
-      appliedLevel,
+      age: applicant?.age || "",
       essay: applicant?.essay || "",
       slot,
       ...reviewFields,
@@ -371,10 +363,8 @@ async function loadReviewAssignmentsForReviewerFromSheets(reviewerKey) {
     });
   }
 
-  assignments.sort(
-    (a, b) =>
-      a.name.localeCompare(b.name, undefined, { sensitivity: "base" }) ||
-      a.applicantId.localeCompare(b.applicantId, undefined, { sensitivity: "base" }),
+  assignments.sort((a, b) =>
+    a.applicantId.localeCompare(b.applicantId, undefined, { sensitivity: "base" }),
   );
 
   return assignments;

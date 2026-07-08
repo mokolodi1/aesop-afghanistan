@@ -60,6 +60,7 @@ const applicants = pgTable(
     email: varchar("email", { length: 320 }),
     name: varchar("name", { length: 255 }),
     appliedLevel: varchar("applied_level", { length: 64 }),
+    age: varchar("age", { length: 32 }),
     essay: text("essay"),
     round1: varchar("round1", { length: 64 }),
     round2: varchar("round2", { length: 64 }),

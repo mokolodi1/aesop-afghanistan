@@ -1059,6 +1059,7 @@ async function getApplicantRowByAesopIdFromDb(aesopId) {
  *   email?: string,
  *   name?: string,
  *   appliedLevel?: string,
+ *   age?: string,
  *   essay?: string,
  *   round1?: string,
  *   round2?: string,
@@ -1086,14 +1087,15 @@ async function upsertApplicantFromMirror(fields) {
   const syncedAt = fields.syncedAt instanceof Date ? fields.syncedAt : new Date();
   const result = await pool.query(
     `INSERT INTO applicants (
-       aesop_id, email, name, applied_level, essay,
+       aesop_id, email, name, applied_level, age, essay,
        round1, round2, applicant_links, submitted_at,
        drive_file_id, drive_file_name, drive_duration_seconds, synced_at
-     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
      ON CONFLICT (aesop_id) DO UPDATE SET
        email = COALESCE(EXCLUDED.email, applicants.email),
        name = EXCLUDED.name,
        applied_level = EXCLUDED.applied_level,
+       age = EXCLUDED.age,
        essay = EXCLUDED.essay,
        round1 = EXCLUDED.round1,
        round2 = EXCLUDED.round2,
@@ -1109,6 +1111,7 @@ async function upsertApplicantFromMirror(fields) {
       email,
       fields.name ?? "",
       fields.appliedLevel ?? "",
+      fields.age ?? "",
       fields.essay ?? "",
       fields.round1 ?? "",
       fields.round2 ?? "",
@@ -1266,8 +1269,7 @@ async function getReviewAssignmentsForReviewerFromDb(reviewerAesopId) {
        ar.b_instruction_following,
        ar.b_original_thinking,
        ar.b_character,
-       a.name,
-       a.applied_level,
+       a.age,
        a.essay,
        a.drive_file_id
      FROM applicant_reviews ar

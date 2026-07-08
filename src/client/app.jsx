@@ -6185,11 +6185,16 @@ function useReviewAutoSave({ drafts, onSaveOne }) {
 }
 
 function PortalReviewCard({ assignment, draft, onDraftChange, onMarkDirty, onNextStudent, showNextStudent, t }) {
+  const ageDisplay = assignment.age?.trim() || t('reviews.notAvailable');
+
   return (
-    <article className="portal-review-card" aria-labelledby={`review-${assignment.applicantId}-name`}>
+    <article className="portal-review-card" aria-labelledby={`review-${assignment.applicantId}-title`}>
       <header className="portal-review-card-header">
-        <h3 className="portal-review-card-title" id={`review-${assignment.applicantId}-name`}>
-          {assignment.name}
+        <h3 className="portal-review-card-title" id={`review-${assignment.applicantId}-title`}>
+          <span className="portal-ltr portal-admin-mono">{assignment.applicantId}</span>
+          <span className="portal-review-card-age">
+            {t('reviews.age')}: {ageDisplay}
+          </span>
         </h3>
       </header>
 
@@ -6291,7 +6296,7 @@ function PortalReviewStudentList({ assignments, drafts, selectedApplicantId, onS
           const isSelected = assignment.applicantId === selectedApplicantId;
           const draft = drafts[assignment.applicantId] || EMPTY_REVIEW_DRAFT;
           const isComplete = reviewDraftIsSaveable(draft);
-          const appliedLevelDisplay = assignment.appliedLevel.trim() || t('reviews.notAvailable');
+          const ageDisplay = assignment.age?.trim() || t('reviews.notAvailable');
 
           return (
             <li key={assignment.applicantId}>
@@ -6306,10 +6311,13 @@ function PortalReviewStudentList({ assignments, drafts, selectedApplicantId, onS
                   event.currentTarget.focus({ preventScroll: true });
                 }}
               >
-                <span className="portal-review-student-name">{assignment.name}</span>
+                <span className="portal-review-student-name portal-ltr portal-admin-mono">
+                  {assignment.applicantId}
+                </span>
                 <span className="portal-review-student-idline portal-ltr">
-                  <span className="portal-review-student-id portal-admin-mono">{assignment.applicantId}</span>
-                  <span className="portal-review-student-level-tag">{appliedLevelDisplay}</span>
+                  <span className="portal-review-student-level-tag">
+                    {t('reviews.age')}: {ageDisplay}
+                  </span>
                 </span>
               </button>
             </li>
