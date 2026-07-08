@@ -2267,42 +2267,9 @@ function getAdmissionsSpecialEmailHeaderLabel(gs = config.googleSheets || {}) {
   return String(gs.admissionsSpecialEmailHeader || "Special emails").trim() || "Special emails";
 }
 
-function readApplicantSpecialEmail(row, gs = config.googleSheets || {}) {
-  const header = getAdmissionsSpecialEmailHeaderLabel(gs);
-  if (row?.fields && Object.prototype.hasOwnProperty.call(row.fields, header)) {
-    return String(row.fields[header] ?? "").trim();
-  }
-  if (row?.fields) {
-    const lower = header.toLowerCase();
-    for (const [key, value] of Object.entries(row.fields)) {
-      if (key.toLowerCase() === lower) {
-        return String(value ?? "").trim();
-      }
-    }
-  }
-  return "";
-}
-
-function isSpecialEmailRecipientFilter(filter, gs = config.googleSheets || {}) {
-  if (!filter?.column) {
-    return false;
-  }
-  const special = getAdmissionsSpecialEmailHeaderLabel(gs).toLowerCase();
-  return String(filter.column).trim().toLowerCase() === special;
-}
-
-function resolveApplicantRecipientEmail(row, filter, gs = config.googleSheets || {}) {
-  if (isSpecialEmailRecipientFilter(filter, gs)) {
-    return readApplicantSpecialEmail(row, gs);
-  }
-  return String(row.email || "").trim();
-}
-
-function withApplicantRecipientEmails(rows, filter, gs = config.googleSheets || {}) {
-  return rows.map((row) => {
-    const sendEmail = resolveApplicantRecipientEmail(row, filter, gs);
-    return { ...row, email: sendEmail };
-  });
+/** Admissions rows always send to the primary Email column; filter columns only select rows. */
+function withApplicantRecipientEmails(rows) {
+  return rows;
 }
 
 /**
@@ -2368,13 +2335,13 @@ async function loadAdmissionsSheet() {
     const idColumnIndex = resolveColumnIndex(gs.admissionsIdColumn || "A");
     const nameColumnIndex = resolveColumnIndex(gs.admissionsNameColumn || "C");
     const emailColumnIndex = resolveColumnIndex(gs.admissionsEmailColumn || "D");
-    const specialEmailColumnIndex = resolveColumnIndex(gs.admissionsSpecialEmailColumn || "M");
+    const specialGroupColumnIndex = resolveColumnIndex(gs.admissionsSpecialEmailColumn || "M");
     const identityColumnIndices = new Set([idColumnIndex, nameColumnIndex, emailColumnIndex]);
     const columnMapping = {
       id: columnIndexToLetter(idColumnIndex),
       name: columnIndexToLetter(nameColumnIndex),
       email: columnIndexToLetter(emailColumnIndex),
-      specialEmail: columnIndexToLetter(specialEmailColumnIndex),
+      specialEmail: columnIndexToLetter(specialGroupColumnIndex),
     };
 
     const sheet = await initGoogleSheets();
@@ -2408,22 +2375,14 @@ async function loadAdmissionsSheet() {
     const rows = [];
     let dataRowsRead = 0;
     let rowsSkippedNoEmail = 0;
-    let rowsWithPrimaryEmail = 0;
-    let rowsWithSpecialEmailOnly = 0;
     const dataRows = await worksheet.getRows();
     for (const row of dataRows) {
       dataRowsRead += 1;
       const rowData = Array.isArray(row._rawData) ? row._rawData : [];
       const email = String(rowData[emailColumnIndex] ?? "").trim();
-      const specialEmail = String(rowData[specialEmailColumnIndex] ?? "").trim();
-      if (!email && !specialEmail) {
+      if (!email) {
         rowsSkippedNoEmail += 1;
         continue;
-      }
-      if (email) {
-        rowsWithPrimaryEmail += 1;
-      } else {
-        rowsWithSpecialEmailOnly += 1;
       }
       const fields = {};
       for (const header of headers) {
@@ -2447,8 +2406,6 @@ async function loadAdmissionsSheet() {
       headerRowNum,
       dataRowsRead,
       rowsWithEmail: rows.length,
-      rowsWithPrimaryEmail,
-      rowsWithSpecialEmailOnly,
       rowsSkippedNoEmail,
       columnMapping,
       specialEmailHeader: getAdmissionsSpecialEmailHeaderLabel(gs),
@@ -2458,7 +2415,7 @@ async function loadAdmissionsSheet() {
       duplicateEmailGroups: duplicateAnalysis.duplicateEmailGroups,
     };
     console.info(
-      `[admissions-email] tab "${sheetName}": ${dataRowsRead} data row(s), ${rows.length} with email in column ${columnMapping.email} and/or ${columnMapping.specialEmail}, ${rowsSkippedNoEmail} skipped (no primary or special email)`,
+      `[admissions-email] tab "${sheetName}": ${dataRowsRead} data row(s), ${rows.length} with email in column ${columnMapping.email}, ${rowsSkippedNoEmail} skipped (no email in column ${columnMapping.email})`,
     );
 
     return { headers, rows, identityColumnIndices, stats };
@@ -2601,7 +2558,5 @@ module.exports = {
   getAdmissionsFilterOptions,
   analyzeDuplicateApplicantEmails,
   getAdmissionsSpecialEmailHeaderLabel,
-  isSpecialEmailRecipientFilter,
-  resolveApplicantRecipientEmail,
   withApplicantRecipientEmails,
 };

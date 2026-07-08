@@ -4409,9 +4409,7 @@ function resolvePanelExcludedRows(recipientStats) {
     return fromPreview;
   }
   const skippedNoEmail = Array.isArray(recipientStats.skippedFromSend)
-    ? recipientStats.skippedFromSend.filter(
-        (row) => row.reason === 'no-email' || row.reason === 'no-special-email',
-      )
+    ? recipientStats.skippedFromSend.filter((row) => row.reason === 'no-email')
     : [];
   return skippedNoEmail;
 }
@@ -4421,9 +4419,6 @@ function formatRecipientSkipRow(row) {
   const name = row.name || '(no name)';
   if (row.reason === 'no-email') {
     return `${id} — ${name} (Email column is empty)`;
-  }
-  if (row.reason === 'no-special-email') {
-    return `${id} — ${name} (Special emails column is empty)`;
   }
   if (row.reason === 'duplicate-email' && row.sharedWith) {
     const keptId = row.sharedWith.id ? `AESOP ID ${row.sharedWith.id}` : 'another row';
@@ -4480,9 +4475,7 @@ function ApplicantsSheetDebugPanel({
   const duplicateSkips = resolvePanelDuplicateSkips(recipientStats, stats, activeFilter);
   const duplicateGroups = resolvePanelDuplicateGroups(recipientStats, stats, activeFilter);
   const excludedRows = resolvePanelExcludedRows(recipientStats);
-  const excludedNoEmail = excludedRows.filter(
-    (row) => row.reason === 'no-email' || row.reason === 'no-special-email',
-  );
+  const excludedNoEmail = excludedRows.filter((row) => row.reason === 'no-email');
   const excludedDuplicates = excludedRows.filter((row) => row.reason === 'duplicate-email');
 
   return (
@@ -4497,7 +4490,7 @@ function ApplicantsSheetDebugPanel({
           {mapping.email || 'D'}
           {mapping.specialEmail ? (
             <>
-              , Special emails = {mapping.specialEmail}
+              , Special emails (group filter) = {mapping.specialEmail}
             </>
           ) : null}
         </li>
@@ -4508,19 +4501,13 @@ function ApplicantsSheetDebugPanel({
           <strong>{stats.dataRowsRead ?? 0}</strong> data row(s) read from the sheet
         </li>
         <li>
-          <strong>{stats.rowsWithEmail ?? 0}</strong> row(s) with a non-empty primary email (column{' '}
-          {mapping.email || 'D'}) or special email (column {mapping.specialEmail || 'M'})
+          <strong>{stats.rowsWithEmail ?? 0}</strong> row(s) with a non-empty email (column{' '}
+          {mapping.email || 'D'})
         </li>
-        {(stats.rowsWithSpecialEmailOnly ?? 0) > 0 ? (
-          <li>
-            <strong>{stats.rowsWithSpecialEmailOnly}</strong> row(s) have only a special email (column{' '}
-            {mapping.specialEmail || 'M'}) — included when filtering on Special emails
-          </li>
-        ) : null}
         {(stats.rowsSkippedNoEmail ?? 0) > 0 ? (
           <li>
             <strong>{stats.rowsSkippedNoEmail}</strong> row(s) skipped — no email in column{' '}
-            {mapping.email || 'D'} or special email in column {mapping.specialEmail || 'M'}
+            {mapping.email || 'D'}
           </li>
         ) : null}
         {previewLoading ? (
@@ -4570,9 +4557,7 @@ function ApplicantsSheetDebugPanel({
           {excludedNoEmail.length > 0 ? (
             <>
               <p className="portal-admin-emails-debug-gap-reason">
-                {activeFilter?.column?.toLowerCase() === 'special emails'
-                  ? 'Empty special email in column ' + (mapping.specialEmail || 'M') + ':'
-                  : 'Empty email in column ' + (mapping.email || 'D') + ':'}
+                Empty email in column {mapping.email || 'D'}:
               </p>
               <ul className="portal-admin-emails-debug-skip-list">
                 {excludedNoEmail.map((row) => (
