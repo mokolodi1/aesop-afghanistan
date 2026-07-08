@@ -208,6 +208,27 @@ function isPortalReviewer(profile) {
 }
 
 /**
+ * @param {{ id?: string, reviewerRole?: string }|null|undefined} profile
+ * @returns {Promise<boolean>}
+ */
+async function resolvePortalReviewerAccess(profile) {
+  if (isPortalReviewer(profile)) {
+    return true;
+  }
+  const aesopId = typeof profile === "object" && profile ? profile.id : "";
+  if (!aesopId) {
+    return false;
+  }
+  try {
+    const { isListedAsApplicantReviewer } = require("./applicantReviews");
+    return await isListedAsApplicantReviewer(aesopId);
+  } catch (error) {
+    console.warn("ApplicantReviews reviewer lookup failed:", error.message);
+    return false;
+  }
+}
+
+/**
  * @param {string} email
  * @returns {boolean}
  */
@@ -711,6 +732,7 @@ module.exports = {
   isAdminEmail,
   isPortalAdmin,
   isPortalReviewer,
+  resolvePortalReviewerAccess,
   getAdminDashboard,
   getHighGradeStudents,
   buildDingConnectTopUpCsv,

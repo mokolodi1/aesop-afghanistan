@@ -2274,7 +2274,7 @@ function PortalSectionLinks({ current, isAdmin, isReviewer = false, showEditDing
       <a href={hubHref} className={current === 'hub' ? 'is-current' : undefined}>
         {t('nav.profile')}
       </a>
-      {showEditDingLink ? (
+      {showEditDingLink && !isReviewer ? (
         <>
           <span className="portal-section-links-sep" aria-hidden="true">
             ·
@@ -2328,7 +2328,10 @@ function usePortalStudentRecord() {
   const [newDingNumber, setNewDingNumber] = useState(() => readSessionField('studentPortalNewDingNumber'));
 
   const canUpdateDing =
-    studentUserId.length > 0 && studentEmail.length > 0 && !readPortalIsApplicant();
+    studentUserId.length > 0 &&
+    studentEmail.length > 0 &&
+    !readPortalIsApplicant() &&
+    !readPortalIsReviewer();
   return {
     studentName,
     studentEmail,
@@ -2813,18 +2816,12 @@ function PortalHubPage() {
             {showStudentFields && signedIn ? <PortalStudentGrades isStudent /> : null}
             </>
           ) : isReviewer ? (
-            <>
-              <PortalSectionLinks
-                current="hub"
-                isAdmin={showAdminFeatures}
-                isReviewer={isReviewer}
-                showEditDingLink={false}
-              />
-              <h2 className="portal-welcome">
-                {t('hub.welcomeNamed', { name: welcomeName })}
-              </h2>
-              <p className="portal-field-hint">{t('hub.reviewerLead')}</p>
-            </>
+            <PortalSectionLinks
+              current="hub"
+              isAdmin={showAdminFeatures}
+              isReviewer={isReviewer}
+              showEditDingLink={false}
+            />
           ) : (
             <>
               {showAdminFeatures ? (
@@ -3019,6 +3016,19 @@ function PortalAdminApplicationCategoryPanel({ categoryKey, people, onEmailGroup
   );
 }
 
+function formatMirrorCacheFreshness(entry) {
+  if (!entry) {
+    return '—';
+  }
+  if (entry.fresh) {
+    return 'Fresh';
+  }
+  if (entry.lastSyncedAt) {
+    return `Stale (last ${new Date(entry.lastSyncedAt).toLocaleString()})`;
+  }
+  return 'Never synced';
+}
+
 function PortalAdminPage() {
   const { isAdmin } = usePortalClassGrade();
   const signedIn = isPortalSessionCompleteSync();
@@ -3045,6 +3055,12 @@ function PortalAdminPage() {
   const [voiceMemoSyncLoading, setVoiceMemoSyncLoading] = useState(false);
   const [voiceMemoSyncError, setVoiceMemoSyncError] = useState('');
   const [voiceMemoSyncResult, setVoiceMemoSyncResult] = useState(null);
+
+  const [mirrorCacheStatus, setMirrorCacheStatus] = useState(null);
+  const [cacheRefreshLoading, setCacheRefreshLoading] = useState(false);
+  const [cacheRefreshError, setCacheRefreshError] = useState('');
+  const [cacheRefreshResult, setCacheRefreshResult] = useState(null);
+  const [cacheRefreshIncludeClassroom, setCacheRefreshIncludeClassroom] = useState(true);
 
   const [round1StatsLoading, setRound1StatsLoading] = useState(false);
   const [round1StatsError, setRound1StatsError] = useState('');
@@ -3078,6 +3094,28 @@ function PortalAdminPage() {
       cancelled = true;
     };
   }, [signedIn, isAdmin, activeTab]);
+
+  useEffect(() => {
+    if (!signedIn || !isAdmin || activeTab !== 'overview') {
+      return undefined;
+    }
+    let cancelled = false;
+    fetch('/api/health')
+      .then((response) => response.json())
+      .then((data) => {
+        if (!cancelled) {
+          setMirrorCacheStatus(data.mirrorCache || null);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setMirrorCacheStatus(null);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [signedIn, isAdmin, activeTab, cacheRefreshResult]);
 
   useEffect(() => {
     if (!signedIn || !isAdmin || activeTab !== 'high-grades') {
@@ -3181,6 +3219,37 @@ function PortalAdminPage() {
       setVoiceMemoSyncError(err.message || 'Voice memo sync failed.');
     } finally {
       setVoiceMemoSyncLoading(false);
+    }
+  };
+
+  const runCacheRefresh = async () => {
+    setCacheRefreshLoading(true);
+    setCacheRefreshError('');
+    setCacheRefreshResult(null);
+    try {
+      const data = await adminApiPost('/api/portal-admin/cache/refresh', {
+        includeClassroom: cacheRefreshIncludeClassroom,
+      });
+      setCacheRefreshResult(data);
+      if (data.mirrorCache) {
+        setMirrorCacheStatus(data.mirrorCache);
+      }
+      if (activeTab === 'overview') {
+        setDashboardLoading(true);
+        setDashboardError('');
+        try {
+          const dashboardData = await adminApiPost('/api/portal-admin/dashboard');
+          setDashboard(dashboardData.dashboard || null);
+        } catch (err) {
+          setDashboardError(err.message || 'Could not reload dashboard.');
+        } finally {
+          setDashboardLoading(false);
+        }
+      }
+    } catch (err) {
+      setCacheRefreshError(err.message || 'Cache refresh failed.');
+    } finally {
+      setCacheRefreshLoading(false);
     }
   };
 
@@ -3316,6 +3385,104 @@ function PortalAdminPage() {
               </dl>
             ) : null}
             {dashboard?.syncHint ? <p className="portal-admin-hint">{dashboard.syncHint}</p> : null}
+            <div className="portal-admin-voice-memo-sync">
+              <h3 className="portal-admin-subheading">Portal cache</h3>
+              <p className="portal-admin-hint">
+                Refresh the Postgres mirror from Google Sheets and Drive (People, Ding numbers,
+                Applicants, voice memo metadata). When Classroom sync is enabled, also pulls live
+                Classroom rosters and grades. This can take several minutes — keep this tab open
+                until it finishes.
+              </p>
+              {mirrorCacheStatus ? (
+                <dl className="portal-admin-stats portal-admin-stats--compact">
+                  <div className="portal-admin-stat-row">
+                    <dt>People cache</dt>
+                    <dd>{formatMirrorCacheFreshness(mirrorCacheStatus.people)}</dd>
+                  </div>
+                  <div className="portal-admin-stat-row">
+                    <dt>Applicants cache</dt>
+                    <dd>{formatMirrorCacheFreshness(mirrorCacheStatus.applicants)}</dd>
+                  </div>
+                  <div className="portal-admin-stat-row">
+                    <dt>Classroom cache</dt>
+                    <dd>{formatMirrorCacheFreshness(mirrorCacheStatus.classroom)}</dd>
+                  </div>
+                </dl>
+              ) : null}
+              {dashboard?.classroomEnabled ? (
+                <label className="portal-admin-emails-checkbox">
+                  <input
+                    type="checkbox"
+                    checked={cacheRefreshIncludeClassroom}
+                    disabled={cacheRefreshLoading}
+                    onChange={(event) => setCacheRefreshIncludeClassroom(event.target.checked)}
+                  />
+                  Include Google Classroom sync (rosters and grades)
+                </label>
+              ) : null}
+              <button
+                type="button"
+                className="portal-btn portal-btn--secondary"
+                disabled={cacheRefreshLoading || !dashboard?.databaseEnabled}
+                onClick={runCacheRefresh}
+              >
+                {cacheRefreshLoading ? 'Refreshing caches…' : 'Refresh all caches'}
+              </button>
+              {!dashboard?.databaseEnabled ? (
+                <p className="portal-admin-hint">
+                  Postgres is not configured — portal cache refresh requires DATABASE_URL.
+                </p>
+              ) : null}
+              {cacheRefreshError ? (
+                <p className="portal-admin-status portal-admin-status--error" role="alert">
+                  {cacheRefreshError}
+                </p>
+              ) : null}
+              {cacheRefreshResult ? (
+                <dl className="portal-admin-stats portal-admin-stats--compact">
+                  {cacheRefreshResult.mirror ? (
+                    <>
+                      <div className="portal-admin-stat-row">
+                        <dt>People mirrored</dt>
+                        <dd>{cacheRefreshResult.mirror.people ?? 0}</dd>
+                      </div>
+                      <div className="portal-admin-stat-row">
+                        <dt>Ding numbers mirrored</dt>
+                        <dd>{cacheRefreshResult.mirror.dingNumbers ?? 0}</dd>
+                      </div>
+                      <div className="portal-admin-stat-row">
+                        <dt>Applicants mirrored</dt>
+                        <dd>{cacheRefreshResult.mirror.applicants ?? 0}</dd>
+                      </div>
+                      <div className="portal-admin-stat-row">
+                        <dt>Drive voice files indexed</dt>
+                        <dd>{cacheRefreshResult.mirror.driveFiles ?? 0}</dd>
+                      </div>
+                    </>
+                  ) : null}
+                  {cacheRefreshResult.classroom ? (
+                    <>
+                      <div className="portal-admin-stat-row">
+                        <dt>Classroom courses</dt>
+                        <dd>{cacheRefreshResult.classroom.courses ?? 0}</dd>
+                      </div>
+                      <div className="portal-admin-stat-row">
+                        <dt>Teachers synced</dt>
+                        <dd>{cacheRefreshResult.classroom.teachers ?? 0}</dd>
+                      </div>
+                      <div className="portal-admin-stat-row">
+                        <dt>Students synced</dt>
+                        <dd>{cacheRefreshResult.classroom.students ?? 0}</dd>
+                      </div>
+                      <div className="portal-admin-stat-row">
+                        <dt>Grade rows</dt>
+                        <dd>{cacheRefreshResult.classroom.gradeRows ?? 0}</dd>
+                      </div>
+                    </>
+                  ) : null}
+                </dl>
+              ) : null}
+            </div>
             <div className="portal-admin-voice-memo-sync">
               <h3 className="portal-admin-subheading">Voice memos</h3>
               <p className="portal-admin-hint">
@@ -6417,6 +6584,7 @@ function PortalProfilePage() {
   const sessionComplete = studentUserId.length > 0 && studentEmail.length > 0;
   const hasApplicantPortalAccess = readPortalIsApplicant();
   const isApplicantProfile = hasApplicantPortalAccess;
+  const reviewerOnly = isReviewer && !hasApplicantPortalAccess;
 
   /** Single open accordion panel on Edit Ding (others close automatically). */
   const [activeDingPanel, setActiveDingPanel] = useState(null); // null | 'update' | 'history' | 'help'
@@ -6490,6 +6658,12 @@ function PortalProfilePage() {
       cancelled = true;
     };
   }, [activeDingPanel, canUpdateDing, studentUserId, studentEmail]);
+
+  useEffect(() => {
+    if (sessionComplete && reviewerOnly) {
+      window.location.replace('/reviews');
+    }
+  }, [sessionComplete, reviewerOnly]);
 
   const submitDingUpdate = async () => {
     if (!canUpdateDing) {
@@ -6634,6 +6808,21 @@ function PortalProfilePage() {
       setDingHelpSubmitting(false);
     }
   };
+
+  if (sessionComplete && reviewerOnly) {
+    return (
+      <PortalLayout>
+        <div className="portal-card portal-content">
+          <PortalSectionLinks
+            current="profile"
+            isAdmin={showAdminFeatures}
+            isReviewer={isReviewer}
+            showEditDingLink={false}
+          />
+        </div>
+      </PortalLayout>
+    );
+  }
 
   if (sessionComplete && !hasApplicantPortalAccess && !isReviewer) {
     return (
