@@ -515,6 +515,32 @@ function buildBackupConfig(fileSection) {
 }
 
 /**
+ * App-level signing secrets. `streamTokenSecret` signs short-lived portal
+ * stream tokens (e.g. voice-memo audio). Set STREAM_TOKEN_SECRET (or
+ * security.streamTokenSecret) to a random value in production so tokens
+ * validate across all Fly machines. When unset, consumers derive a key from
+ * another shared secret — see services/portalVoiceMemo.js.
+ * @param {Record<string, unknown>|undefined} fileSection
+ */
+function buildSecurityConfig(fileSection) {
+  const f = fileSection && typeof fileSection === "object" ? fileSection : {};
+  const envOr = (envKey, fileKey, fallback = "") => {
+    const fromEnv = process.env[envKey];
+    if (fromEnv != null && String(fromEnv).trim() !== "") {
+      return String(fromEnv).trim();
+    }
+    const fromFile = f[fileKey];
+    if (fromFile != null && String(fromFile).trim() !== "") {
+      return String(fromFile).trim();
+    }
+    return fallback;
+  };
+  return {
+    streamTokenSecret: envOr("STREAM_TOKEN_SECRET", "streamTokenSecret", ""),
+  };
+}
+
+/**
  * Optional inbox for portal “contact us” Ding help requests. `PORTAL_CONTACT_EMAIL` overrides file value.
  * @param {Record<string, unknown>} target
  */
@@ -554,6 +580,7 @@ function loadSecretsFromSecretsJsonEnv() {
     parsed.admin = buildAdminConfig(parsed.admin);
     parsed.database = buildDatabaseConfig(parsed.database);
     parsed.backup = buildBackupConfig(parsed.backup);
+    parsed.security = buildSecurityConfig(parsed.security);
     parsed.postmark = buildPostmarkConfig(parsed.postmark);
     mergePostmarkSecrets(parsed);
     mergePortalContactEmail(parsed);
@@ -590,6 +617,7 @@ function loadSecrets() {
       secrets.admin = buildAdminConfig(secrets.admin);
       secrets.database = buildDatabaseConfig(secrets.database);
       secrets.backup = buildBackupConfig(secrets.backup);
+      secrets.security = buildSecurityConfig(secrets.security);
       secrets.postmark = buildPostmarkConfig(secrets.postmark);
       mergePostmarkSecrets(secrets);
       mergePortalContactEmail(secrets);
@@ -607,6 +635,7 @@ function loadSecrets() {
     admin: buildAdminConfig(undefined),
     database: buildDatabaseConfig(undefined),
     backup: buildBackupConfig(undefined),
+    security: buildSecurityConfig(undefined),
     postmark: buildPostmarkConfig(undefined),
     email: emailFromEnv,
     portalContactEmail: "",

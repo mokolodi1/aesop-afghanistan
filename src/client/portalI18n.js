@@ -131,7 +131,9 @@ const TRANSLATIONS = {
     'magicLink.invalidId': 'Please enter a valid ID.',
     'magicLink.invalidIdNotFound':
       'Your ID is invalid. Please enter a correct ID. Please enter the AESOP ID you received in your email.',
-    'magicLink.sending': 'Checking ID and sending magic link...',
+    'magicLink.linkSent':
+      'If that AESOP ID is registered, a sign-in link has been sent to the email on file. Please check your email.',
+    'magicLink.sending': 'Checking your ID and sending a magic link...',
     'magicLink.networkError': 'Internal error. Please try again.',
 
     'profile.applicantBlockedTitle': 'Not available for applicants',
@@ -342,6 +344,8 @@ const TRANSLATIONS = {
     'magicLink.invalidId': 'لطفاً یک AESOP ID معتبر وارد کنید.',
     'magicLink.invalidIdNotFound':
       'AESOP ID شما معتبر نیست. لطفاً AESOP ID درست را وارد کنید — همان شناسه‌ای که در ایمیل خود دریافت کرده‌اید.',
+    'magicLink.linkSent':
+      'اگر این AESOP ID ثبت شده باشد، لینک ورود به ایمیل ثبت‌شده ارسال شده است. لطفاً ایمیل خود را بررسی کنید.',
     'magicLink.sending': 'در حال بررسی AESOP ID و ارسال لینک جادویی…',
     'magicLink.networkError': 'خطای داخلی. لطفاً دوباره تلاش کنید.',
 

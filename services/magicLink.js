@@ -216,14 +216,16 @@ async function sendMagicLinkEmail(email, token, { name = '', userId = '' } = {})
   const greetingName = safeName ? escapeHtml(safeName) : 'there';
 
   if (!isFlyProduction()) {
-    const magicLink = `${localDevMagicLinkOrigin()}/verify.html?token=${token}`;
+    const magicLink = `${localDevMagicLinkOrigin()}/verify.html#token=${token}`;
     console.log(`[magic-link] sign-in link for ${email}${safeName ? ` (${safeName})` : ''}${safeUserId ? ` [${safeUserId}]` : ''}:`);
     console.log(magicLink);
     return;
   }
 
   const origin = magicLinkSiteOrigin();
-  const magicLink = `${origin}/verify.html?token=${token}`;
+  // Token goes in the URL fragment (#), which browsers never send to the
+  // server — keeps it out of Fly/proxy access logs and Referer headers.
+  const magicLink = `${origin}/verify.html#token=${token}`;
 
   const emailSubject = 'Sign in to your AESOP portal';
   const { ink, muted, accent, accentDark, skyTint, line } = AESOP_EMAIL;

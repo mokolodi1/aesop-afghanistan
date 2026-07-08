@@ -64,6 +64,7 @@ const {
 const {
   getPortalVoiceMemoStatus,
   getPortalVoiceMemoStream,
+  getPortalVoiceMemoStreamByToken,
 } = require('./services/portalVoiceMemo');
 const { getPortalCalendarForApplicant } = require('./services/portalCalendar');
 const {
@@ -390,22 +391,16 @@ app.post('/api/request-magic-link', magicLinkRateLimiter, async (req, res) => {
       return res.status(400).json({ error: 'Invalid ID format' });
     }
 
-    const result = await checkIdAndSendMagicLink(userId);
-    if (!result?.userFound) {
-      console.warn('Invalid student ID request: ID not found', {
-        ip: req.ip,
-        route: req.originalUrl,
-        userId
-      });
-      return res.json({
-        success: false,
-        message: INVALID_MAGIC_LINK_ID_MESSAGE,
-      });
-    }
+    // Never reveal whether the ID exists (prevents AESOP ID enumeration).
+    // Fire the lookup + send without awaiting so the response time is identical
+    // whether or not the ID was found; errors are logged, not surfaced.
+    checkIdAndSendMagicLink(userId).catch((error) => {
+      console.error('Error requesting magic link:', formatErrorForLog(error));
+    });
 
     res.json({
       success: true,
-      message: 'Your ID is valid. A magic link has been sent to your registered email.'
+      message: MAGIC_LINK_REQUEST_ACK_MESSAGE,
     });
   } catch (error) {
     // Log error but don't expose details to client
@@ -581,8 +576,8 @@ const portalStudentGradesRateLimiter = createRateLimiter({ name: 'portal-student
 
 const portalAdminRateLimiter = createRateLimiter({ name: 'portal-admin', windowMs: 15 * 60 * 1000, max: 200 });
 
-const INVALID_MAGIC_LINK_ID_MESSAGE =
-  'Your ID is invalid. Please enter a correct ID. Please enter the AESOP ID you received in your email.';
+const MAGIC_LINK_REQUEST_ACK_MESSAGE =
+  'If that AESOP ID is registered, a sign-in link has been sent to the email on file.';
 
 const portalVoiceMemoRateLimiter = createRateLimiter({ name: 'portal-voice-memo', windowMs: 15 * 60 * 1000, max: 40 });
 const portalVoiceMemoStreamRateLimiter = createRateLimiter({
@@ -592,6 +587,10 @@ const portalVoiceMemoStreamRateLimiter = createRateLimiter({
 });
 const portalCalendarRateLimiter = createRateLimiter({ name: 'portal-calendar', windowMs: 15 * 60 * 1000, max: 40 });
 const portalReviewsRateLimiter = createRateLimiter({ name: 'portal-reviews', windowMs: 15 * 60 * 1000, max: 40 });
+// Postmark sends many events per campaign from a few source IPs; keep this
+// generous but bounded so an unauthenticated flood or secret brute-force is throttled.
+// Throttled events return non-2xx and Postmark retries them later with backoff.
+const postmarkWebhookRateLimiter = createRateLimiter({ name: 'postmark-webhook', windowMs: 60 * 1000, max: 600 });
 
 app.post('/api/update-ding-number', dingUpdateRateLimiter, async (req, res) => {
   try {
@@ -1434,14 +1433,8 @@ app.post('/api/portal-reviews/save', portalReviewsRateLimiter, async (req, res) 
   }
 });
 
-async function pipePortalVoiceMemoStream(req, res, userId, emailSan) {
-  const rangeHeader = typeof req.headers.range === 'string' ? req.headers.range : '';
-  const { stream, mimeType, fileName, size, status, contentRange, contentLength } =
-    await getPortalVoiceMemoStream({
-      userId,
-      email: emailSan,
-      rangeHeader,
-    });
+function writeVoiceMemoStream(res, streamResult) {
+  const { stream, mimeType, fileName, size, status, contentRange, contentLength } = streamResult;
 
   res.status(status === 206 ? 206 : 200);
   res.setHeader('Content-Type', mimeType || 'audio/mp4');
@@ -1468,18 +1461,28 @@ async function pipePortalVoiceMemoStream(req, res, userId, emailSan) {
   stream.pipe(res);
 }
 
+async function pipePortalVoiceMemoStream(req, res, userId, emailSan) {
+  const rangeHeader = typeof req.headers.range === 'string' ? req.headers.range : '';
+  const streamResult = await getPortalVoiceMemoStream({ userId, email: emailSan, rangeHeader });
+  writeVoiceMemoStream(res, streamResult);
+}
+
+async function pipePortalVoiceMemoStreamByToken(req, res, token) {
+  const rangeHeader = typeof req.headers.range === 'string' ? req.headers.range : '';
+  const streamResult = await getPortalVoiceMemoStreamByToken({ token, rangeHeader });
+  writeVoiceMemoStream(res, streamResult);
+}
+
 app.get('/api/portal-voice-memo/stream', portalVoiceMemoStreamRateLimiter, async (req, res) => {
   try {
-    let userId = typeof req.query.userId === 'string' ? req.query.userId : '';
-    let email = typeof req.query.email === 'string' ? req.query.email : '';
-
-    userId = sanitizeIdentifier(userId);
-    const emailSan = sanitizeEmail(email);
-    if (!userId || !emailSan) {
-      return res.status(400).json({ error: 'Invalid ID or email.' });
+    // Authorized by a short-lived signed token (minted by the status endpoint),
+    // so no userId/email appears in the URL, access logs, or browser history.
+    const token = typeof req.query.st === 'string' ? req.query.st : '';
+    if (!token) {
+      return res.status(400).json({ error: 'Missing stream token.' });
     }
 
-    await pipePortalVoiceMemoStream(req, res, userId, emailSan);
+    await pipePortalVoiceMemoStreamByToken(req, res, token);
   } catch (error) {
     console.error('Error streaming portal voice memo:', formatErrorForLog(error));
     const status = error.statusCode || 500;
@@ -1590,7 +1593,7 @@ app.post('/api/portal-admin/email/campaign-detail', portalAdminRateLimiter, asyn
   }
 });
 
-app.post('/api/postmark/webhook', async (req, res) => {
+app.post('/api/postmark/webhook', postmarkWebhookRateLimiter, async (req, res) => {
   if (!verifyPostmarkWebhookAuth(req)) {
     return res.status(401).json({ error: 'Unauthorized webhook request.' });
   }

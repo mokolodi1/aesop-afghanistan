@@ -1,3 +1,4 @@
+const crypto = require("crypto");
 const { eq, and, isNull } = require("drizzle-orm");
 const config = require("../config/secrets");
 const { getDb, isDatabaseEnabled } = require("../db/index");
@@ -7,16 +8,32 @@ function getWebhookSecret() {
   return config.postmark?.webhookSecret || process.env.POSTMARK_WEBHOOK_SECRET || "";
 }
 
+/**
+ * Constant-time string comparison. Returns false for unequal lengths without
+ * leaking content via timing.
+ * @param {string} a
+ * @param {string} b
+ * @returns {boolean}
+ */
+function safeEqual(a, b) {
+  const bufA = Buffer.from(String(a || ""), "utf8");
+  const bufB = Buffer.from(String(b || ""), "utf8");
+  if (bufA.length !== bufB.length) {
+    return false;
+  }
+  return crypto.timingSafeEqual(bufA, bufB);
+}
+
 function verifyPostmarkWebhookAuth(req) {
   const secret = getWebhookSecret();
   if (!secret) {
     return false;
   }
   const authHeader = req.get("authorization") || "";
-  if (authHeader === `Bearer ${secret}`) {
+  if (safeEqual(authHeader, `Bearer ${secret}`)) {
     return true;
   }
-  if (req.get("x-aesop-postmark-webhook-secret") === secret) {
+  if (safeEqual(req.get("x-aesop-postmark-webhook-secret") || "", secret)) {
     return true;
   }
   return false;

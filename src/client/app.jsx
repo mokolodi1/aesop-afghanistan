@@ -1655,19 +1655,10 @@ function MagicLinkRequestForm({ inputId, submitLabel }) {
         return;
       }
 
-      if (data.success === false) {
-        setStatus({
-          type: 'error',
-          text: data.message || t('magicLink.invalidIdNotFound'),
-        });
-        return;
-      }
-
+      // Use the localized neutral message (the server's `message` is English-only).
       setStatus({
         type: 'success',
-        text:
-          data.message ||
-          'Your ID is valid. A magic link has been sent to your registered email.',
+        text: t('magicLink.linkSent'),
       });
       sessionStorage.setItem('studentPortalPendingMagicUserId', trimmedUserId);
       persistRememberUserId(trimmedUserId, rememberUserId);
@@ -1776,7 +1767,25 @@ function VerifyMagicLinkApp() {
 
   useEffect(() => {
     const runVerification = async () => {
-      const token = new URLSearchParams(window.location.search).get('token');
+      // Prefer the URL fragment (never sent to the server/logs); fall back to
+      // the query string for any older links still in inboxes.
+      const hashParams = new URLSearchParams(
+        window.location.hash.startsWith('#')
+          ? window.location.hash.slice(1)
+          : window.location.hash,
+      );
+      const token =
+        hashParams.get('token') ||
+        new URLSearchParams(window.location.search).get('token');
+
+      if (token) {
+        // Drop the token from the address bar/history; it lives in state now.
+        try {
+          window.history.replaceState(null, '', window.location.pathname);
+        } catch {
+          // Non-fatal: verification proceeds with the token already in memory.
+        }
+      }
 
       if (!token) {
         setStatus('Invalid Link');
@@ -2350,20 +2359,21 @@ function PortalVoiceMemoSection({ studentUserId, studentEmail, enabled }) {
   const [voiceMemoError, setVoiceMemoError] = useState('');
   const [voiceMemoStatus, setVoiceMemoStatus] = useState(null);
   const [voiceMemoAudioError, setVoiceMemoAudioError] = useState('');
+  const [voiceMemoReloadKey, setVoiceMemoReloadKey] = useState(0);
+  const voiceMemoRetryCountRef = useRef(0);
 
   const voiceMemoStreamSrc = useMemo(() => {
     if (!voiceMemoOpen || !voiceMemoStatus?.hasRecording || !enabled) {
       return '';
     }
-    if (!studentUserId.trim() || !studentEmail.trim()) {
+    // The stream URL carries only a short-lived signed token (no userId/email).
+    const streamToken = voiceMemoStatus?.streamToken;
+    if (!streamToken) {
       return '';
     }
-    const params = new URLSearchParams({
-      userId: studentUserId.trim(),
-      email: studentEmail.trim(),
-    });
+    const params = new URLSearchParams({ st: streamToken });
     return `/api/portal-voice-memo/stream?${params.toString()}`;
-  }, [voiceMemoOpen, voiceMemoStatus?.hasRecording, enabled, studentUserId, studentEmail]);
+  }, [voiceMemoOpen, voiceMemoStatus?.hasRecording, voiceMemoStatus?.streamToken, enabled]);
 
   useEffect(() => {
     if (!enabled) {
@@ -2408,7 +2418,7 @@ function PortalVoiceMemoSection({ studentUserId, studentEmail, enabled }) {
     return () => {
       cancelled = true;
     };
-  }, [enabled, studentUserId, studentEmail, t]);
+  }, [enabled, studentUserId, studentEmail, t, voiceMemoReloadKey]);
 
   const voiceMemoDurationWarning = useMemo(() => {
     if (!voiceMemoStatus?.durationStatus) {
@@ -2464,7 +2474,14 @@ function PortalVoiceMemoSection({ studentUserId, studentEmail, enabled }) {
             aria-controls="voice-memo-panel"
             aria-expanded={voiceMemoOpen}
             className={`portal-ding-tab${voiceMemoOpen ? ' is-active' : ''}`}
-            onClick={() => setVoiceMemoOpen((open) => !open)}
+            onClick={() =>
+              setVoiceMemoOpen((open) => {
+                if (!open) {
+                  voiceMemoRetryCountRef.current = 0;
+                }
+                return !open;
+              })
+            }
           >
             <span className="portal-ding-tab-label">{t('voiceMemo.label')}</span>
             <span className="portal-ding-tab-chevron" aria-hidden="true">
@@ -2521,7 +2538,17 @@ function PortalVoiceMemoSection({ studentUserId, studentEmail, enabled }) {
                           controls
                           preload="metadata"
                           src={voiceMemoStreamSrc}
-                          onError={() => setVoiceMemoAudioError(t('voiceMemo.audioPlayError'))}
+                          onError={() => {
+                            // A likely-expired token: refresh status once to mint
+                            // a fresh one before surfacing an error to the user.
+                            if (voiceMemoRetryCountRef.current < 1) {
+                              voiceMemoRetryCountRef.current += 1;
+                              setVoiceMemoAudioError('');
+                              setVoiceMemoReloadKey((key) => key + 1);
+                              return;
+                            }
+                            setVoiceMemoAudioError(t('voiceMemo.audioPlayError'));
+                          }}
                         >
                           {t('voiceMemo.audioUnsupported')}
                         </audio>
@@ -4372,19 +4399,19 @@ function filterDuplicateSkipsForScope(skips, filter) {
 }
 
 function resolvePanelDuplicateSkips(recipientStats, stats, activeFilter) {
-  const fromPreview = filterDuplicateSkipsForScope(recipientStats?.duplicateEmailSkips, activeFilter);
-  if (fromPreview.length > 0) {
-    return fromPreview;
+  if (recipientStats) {
+    return Array.isArray(recipientStats.duplicateEmailSkips)
+      ? recipientStats.duplicateEmailSkips
+      : [];
   }
   return filterDuplicateSkipsForScope(stats?.duplicateEmailSkips, activeFilter);
 }
 
 function resolvePanelDuplicateGroups(recipientStats, stats, activeFilter) {
-  const fromPreview = Array.isArray(recipientStats?.duplicateEmailGroups)
-    ? recipientStats.duplicateEmailGroups
-    : [];
-  if (fromPreview.length > 0) {
-    return fromPreview;
+  if (recipientStats) {
+    return Array.isArray(recipientStats.duplicateEmailGroups)
+      ? recipientStats.duplicateEmailGroups
+      : [];
   }
   const fromStats = Array.isArray(stats?.duplicateEmailGroups) ? stats.duplicateEmailGroups : [];
   if (!activeFilter) {
