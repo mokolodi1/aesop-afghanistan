@@ -9,6 +9,9 @@
  *
  * Requires local config/secrets.json or SECRETS_JSON / env matching production.
  *
+ * People tab data is mirrored separately (npm run sync:hourly-cache). Classroom sync
+ * only attaches rosters/grades to people rows that already exist from that mirror.
+ *
  * Usage: npm run sync:classroom
  */
 

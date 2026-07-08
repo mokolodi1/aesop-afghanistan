@@ -17,9 +17,9 @@ const {
   getStudentGradesFromDb,
   getTeacherRosterFromDb,
   getAdminClassRosterFromDb,
+  isPeopleMirrorFresh,
 } = require("./classroomDb");
 const { exportSyncBackup } = require("./backupExport");
-const { mirrorPeopleAndDingFromSheets } = require("./peopleMirror");
 const { loadApplicantAesopIdSetFromSheets } = require("./voiceMemoSync");
 
 /**
@@ -389,6 +389,13 @@ async function runClassroomSync() {
 
   if (isDatabaseEnabled()) {
     try {
+      const peopleMirrorFresh = await isPeopleMirrorFresh();
+      if (!peopleMirrorFresh) {
+        console.warn(
+          "[classroom-sync] People mirror is stale or empty; run npm run sync:hourly-cache first so Classroom rows link to People sheet emails.",
+        );
+      }
+
       const profileMap = await loadEmailToPeopleProfileMap();
       const applicantIdSet = await loadApplicantAesopIdSetFromSheets();
       const peopleEmails = new Set([...teacherClasses.keys(), ...studentSections.keys()]);
@@ -434,7 +441,7 @@ async function runClassroomSync() {
         });
       }
 
-      const { syncRunId } = await persistClassroomSync({
+      const { syncRunId, peopleLinkStats } = await persistClassroomSync({
         courses: dbCourses,
         people: dbPeople,
         enrollments: dbEnrollments,
@@ -443,14 +450,12 @@ async function runClassroomSync() {
         assignmentGrades: dbAssignmentGrades,
         summary,
       });
-
-      try {
-        const mirrorResult = await mirrorPeopleAndDingFromSheets();
+      if (peopleLinkStats) {
         console.log(
-          `[classroom-sync] mirrored People/Ding: people=${mirrorResult.people}, dingNumbers=${mirrorResult.dingNumbers}, dingHistory=${mirrorResult.dingHistory}, applicants=${mirrorResult.applicants ?? 0}, driveFiles=${mirrorResult.driveFiles ?? 0}`,
+          `[classroom-sync] people link: linked=${peopleLinkStats.linked}, ` +
+            `skippedNotOnPeopleSheet=${peopleLinkStats.missing}, ` +
+            `teacherClassesUpdated=${peopleLinkStats.teacherClassesUpdated}`,
         );
-      } catch (mirrorErr) {
-        console.warn("[classroom-sync] People/Ding mirror failed:", mirrorErr.message);
       }
 
       try {

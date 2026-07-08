@@ -3,6 +3,7 @@ const { getDb, getPool, isDatabaseEnabled } = require("../db/index");
 const { people, dingNumbers, dingChangeHistory } = require("../db/schema");
 const { upsertApplicantFromMirror } = require("./classroomDb");
 const {
+  loadAllPeopleRowsFromSheets,
   loadEmailToPeopleProfileMap,
   buildLatestDingNumberByUserIdMap,
   getPortalDingChangeHistory,
@@ -18,76 +19,206 @@ const {
 } = require("./voiceMemoSync");
 const { scanVoiceMemoFolder, resolveVoiceMemoDurationsMap } = require("./googleDrive");
 
+const UPSERT_PERSON_FROM_SHEET_SQL = `
+  INSERT INTO people (
+    aesop_id, email, name, phone, portal_role, reviewer_role,
+    people_type, admin_role, people_status, last_login, past_ding, sheet_row, synced_at
+  )
+  SELECT
+    CASE
+      WHEN NULLIF(trim($1::text), '') IS NULL THEN NULL
+      WHEN EXISTS (
+        SELECT 1 FROM people p
+        WHERE p.aesop_id IS NOT NULL AND lower(p.aesop_id) = lower(trim($1::text))
+      ) THEN NULL
+      ELSE trim($1::text)
+    END,
+    $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb, $13
+  ON CONFLICT (email) DO UPDATE SET
+    aesop_id = CASE
+      WHEN NULLIF(trim(EXCLUDED.aesop_id), '') IS NULL THEN people.aesop_id
+      WHEN people.aesop_id IS NOT NULL
+        AND lower(people.aesop_id) = lower(trim(EXCLUDED.aesop_id)) THEN people.aesop_id
+      WHEN EXISTS (
+        SELECT 1 FROM people p
+        WHERE p.id <> people.id
+          AND p.aesop_id IS NOT NULL
+          AND lower(p.aesop_id) = lower(trim(EXCLUDED.aesop_id))
+      ) THEN people.aesop_id
+      ELSE trim(EXCLUDED.aesop_id)
+    END,
+    name = COALESCE(EXCLUDED.name, people.name),
+    phone = COALESCE(EXCLUDED.phone, people.phone),
+    portal_role = EXCLUDED.portal_role,
+    reviewer_role = EXCLUDED.reviewer_role,
+    people_type = EXCLUDED.people_type,
+    admin_role = EXCLUDED.admin_role,
+    people_status = EXCLUDED.people_status,
+    last_login = EXCLUDED.last_login,
+    past_ding = EXCLUDED.past_ding,
+    sheet_row = EXCLUDED.sheet_row,
+    synced_at = EXCLUDED.synced_at
+  RETURNING *
+`;
+
+const INSERT_PERSON_FROM_SHEET_SQL = `
+  INSERT INTO people (
+    aesop_id, email, name, phone, portal_role, reviewer_role,
+    people_type, admin_role, people_status, last_login, past_ding, sheet_row, synced_at
+  )
+  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb, $13)
+  RETURNING *
+`;
+
 /**
  * @param {object} profile
  * @param {Date} syncedAt
  * @param {Set<string>} applicantIdSet
  */
-async function upsertPersonFromSheetProfile(profile, syncedAt = new Date(), applicantIdSet) {
-  const pool = getPool();
-  if (!pool || !profile?.email) {
-    return null;
-  }
+function buildPersonInsertParams(profile, syncedAt, applicantIdSet) {
   const email = profile.email.trim().toLowerCase();
   const portalRole = resolvePortalRoleFromPeopleSheet(profile, applicantIdSet);
   const aesopId = profile.id ? String(profile.id).trim() : null;
-  const reviewerRole = profile.reviewerRole ? String(profile.reviewerRole).trim() : null;
-  const result = await pool.query(
-    `INSERT INTO people (aesop_id, email, name, phone, portal_role, reviewer_role, synced_at)
-     SELECT
-       CASE
-         WHEN NULLIF(trim($1::text), '') IS NULL THEN NULL
-         WHEN EXISTS (
-           SELECT 1 FROM people p
-           WHERE p.aesop_id IS NOT NULL AND lower(p.aesop_id) = lower(trim($1::text))
-         ) THEN NULL
-         ELSE trim($1::text)
-       END,
-       $2, $3, $4, $5, $6, $7
-     ON CONFLICT (email) DO UPDATE SET
-       aesop_id = CASE
-         WHEN NULLIF(trim(EXCLUDED.aesop_id), '') IS NULL THEN people.aesop_id
-         WHEN people.aesop_id IS NOT NULL
-           AND lower(people.aesop_id) = lower(trim(EXCLUDED.aesop_id)) THEN people.aesop_id
-         WHEN EXISTS (
-           SELECT 1 FROM people p
-           WHERE p.id <> people.id
-             AND p.aesop_id IS NOT NULL
-             AND lower(p.aesop_id) = lower(trim(EXCLUDED.aesop_id))
-         ) THEN people.aesop_id
-         ELSE trim(EXCLUDED.aesop_id)
-       END,
-       name = COALESCE(EXCLUDED.name, people.name),
-       phone = COALESCE(EXCLUDED.phone, people.phone),
-       portal_role = EXCLUDED.portal_role,
-       reviewer_role = EXCLUDED.reviewer_role,
-       synced_at = EXCLUDED.synced_at
-     RETURNING *`,
-    [aesopId, email, profile.name || null, profile.phone || null, portalRole, reviewerRole, syncedAt],
-  );
+  return [
+    aesopId,
+    email,
+    profile.name || null,
+    profile.phone || null,
+    portalRole,
+    profile.reviewerRole ? String(profile.reviewerRole).trim() : null,
+    profile.peopleType ? String(profile.peopleType).trim() : null,
+    profile.adminRole ? String(profile.adminRole).trim() : null,
+    profile.peopleStatus ? String(profile.peopleStatus).trim() : null,
+    profile.lastLogin ? String(profile.lastLogin).trim() : null,
+    profile.pastDing ? String(profile.pastDing).trim() : null,
+    JSON.stringify(profile.sheetRow || {}),
+    syncedAt,
+  ];
+}
+
+/**
+ * @param {object} profile
+ * @param {Date} syncedAt
+ * @param {Set<string>} applicantIdSet
+ * @param {{ client?: import("pg").PoolClient, insertOnly?: boolean }} [options]
+ */
+async function upsertPersonFromSheetProfile(profile, syncedAt = new Date(), applicantIdSet, options = {}) {
+  const pool = getPool();
+  if ((!pool && !options.client) || !profile?.email) {
+    return null;
+  }
+  const params = buildPersonInsertParams(profile, syncedAt, applicantIdSet);
+  const sqlText = options.insertOnly ? INSERT_PERSON_FROM_SHEET_SQL : UPSERT_PERSON_FROM_SHEET_SQL;
+  if (options.client) {
+    const result = await options.client.query(sqlText, params);
+    return result.rows[0] || null;
+  }
+  const result = await pool.query(sqlText, params);
   return result.rows[0] || null;
 }
 
-async function mirrorAllPeopleFromSheets() {
+/**
+ * @param {string[]} emails
+ * @param {import("pg").PoolClient} [client]
+ */
+async function prunePeopleNotOnSheet(emails, client) {
+  if (!emails.length) {
+    return 0;
+  }
+  const runner = client || getPool();
+  if (!runner) {
+    return 0;
+  }
+  const result = await runner.query(
+    `DELETE FROM people
+     WHERE lower(trim(email)) NOT IN (SELECT unnest($1::text[]))`,
+    [emails],
+  );
+  return result.rowCount || 0;
+}
+
+async function mirrorAllPeopleFromSheets(options = {}) {
   if (!isDatabaseEnabled()) {
-    return { mirrored: 0 };
+    return { mirrored: 0, pruned: 0 };
   }
 
-  const [profileMap, applicantIdSet] = await Promise.all([
-    loadEmailToPeopleProfileMap(),
+  const [rows, applicantIdSet] = await Promise.all([
+    loadAllPeopleRowsFromSheets(),
     loadApplicantAesopIdSetFromSheets(),
   ]);
   const syncedAt = new Date();
   let mirrored = 0;
 
-  for (const [email, profile] of profileMap.entries()) {
-    const row = await upsertPersonFromSheetProfile({ ...profile, email }, syncedAt, applicantIdSet);
+  for (const profile of rows) {
+    const row = await upsertPersonFromSheetProfile(profile, syncedAt, applicantIdSet);
     if (row) {
       mirrored += 1;
     }
   }
 
-  return { mirrored };
+  let pruned = 0;
+  if (options.pruneMissing !== false) {
+    pruned = await prunePeopleNotOnSheet(
+      rows.map((row) => row.email),
+    );
+  }
+
+  return { mirrored, pruned };
+}
+
+/**
+ * Truncate people and rebuild entirely from the People Google Sheet tab.
+ * @param {{ dryRun?: boolean }} [options]
+ */
+async function rebuildPeopleTableFromSheets(options = {}) {
+  if (!isDatabaseEnabled()) {
+    throw new Error("DATABASE_URL is not set.");
+  }
+
+  const [rows, applicantIdSet] = await Promise.all([
+    loadAllPeopleRowsFromSheets(),
+    loadApplicantAesopIdSetFromSheets(),
+  ]);
+
+  if (options.dryRun) {
+    return {
+      dryRun: true,
+      sheetRows: rows.length,
+      wouldTruncate: true,
+      sampleHeaders: rows[0]?.sheetRow ? Object.keys(rows[0].sheetRow).slice(0, 12) : [],
+    };
+  }
+
+  if (rows.length === 0) {
+    throw new Error("People sheet returned zero rows — aborting rebuild.");
+  }
+
+  const pool = getPool();
+  const client = await pool.connect();
+  const syncedAt = new Date();
+  let inserted = 0;
+
+  try {
+    await client.query("BEGIN");
+    await client.query("TRUNCATE TABLE people RESTART IDENTITY CASCADE");
+    for (const profile of rows) {
+      const row = await upsertPersonFromSheetProfile(profile, syncedAt, applicantIdSet, {
+        client,
+        insertOnly: true,
+      });
+      if (row) {
+        inserted += 1;
+      }
+    }
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+
+  return { inserted, sheetRows: rows.length };
 }
 
 async function mirrorDingNumbersFromSheets(applicantIdSet) {
@@ -279,6 +410,7 @@ async function mirrorPeopleAndDingFromSheets() {
   }
   return {
     people: peopleResult.mirrored,
+    peoplePruned: peopleResult.pruned,
     dingNumbers: dingResult.mirrored,
     dingHistory: historyResult.mirrored,
     applicants: applicantsResult.mirrored,
@@ -292,7 +424,9 @@ async function mirrorPeopleAndDingFromSheets() {
  */
 async function mirrorPeopleAndApplicantsFromSheets() {
   const peopleResult = await mirrorAllPeopleFromSheets();
-  console.log(`[people-mirror] People sheet: mirrored=${peopleResult.mirrored}`);
+  console.log(
+    `[people-mirror] People sheet: mirrored=${peopleResult.mirrored}, pruned=${peopleResult.pruned}`,
+  );
 
   const applicantsResult = await mirrorApplicantsAndDriveFromSheets();
   console.log(
@@ -301,6 +435,7 @@ async function mirrorPeopleAndApplicantsFromSheets() {
 
   return {
     people: peopleResult.mirrored,
+    peoplePruned: peopleResult.pruned,
     applicants: applicantsResult.mirrored,
     driveFiles: applicantsResult.driveFiles,
   };
@@ -325,6 +460,7 @@ async function getPersonIdByAesopId(aesopId) {
 
 module.exports = {
   mirrorAllPeopleFromSheets,
+  rebuildPeopleTableFromSheets,
   mirrorDingNumbersFromSheets,
   mirrorDingHistoryFromSheets,
   mirrorApplicantsAndDriveFromSheets,

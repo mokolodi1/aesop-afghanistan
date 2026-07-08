@@ -10,6 +10,7 @@ const {
   primaryKey,
   unique,
   index,
+  jsonb,
 } = require("drizzle-orm/pg-core");
 
 const syncRuns = pgTable("sync_runs", {
@@ -35,6 +36,12 @@ const people = pgTable(
     phone: varchar("phone", { length: 64 }),
     portalRole: varchar("portal_role", { length: 20 }),
     reviewerRole: varchar("reviewer_role", { length: 64 }),
+    peopleType: text("people_type"),
+    adminRole: varchar("admin_role", { length: 64 }),
+    peopleStatus: varchar("people_status", { length: 64 }),
+    lastLogin: varchar("last_login", { length: 128 }),
+    pastDing: text("past_ding"),
+    sheetRow: jsonb("sheet_row"),
     teacherClasses: text("teacher_classes"),
     syncedAt: timestamp("synced_at", { withTimezone: true }),
   },

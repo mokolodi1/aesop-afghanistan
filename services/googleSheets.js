@@ -403,6 +403,76 @@ function isPeopleLastLoginSyncEnabled() {
   return resolvePeopleLastLoginColumnIndex() !== null;
 }
 
+function resolvePeoplePastDingColumnIndex() {
+  const columnRef = config.googleSheets.peoplePastDingColumn;
+  if (columnRef == null || String(columnRef).trim() === "" || String(columnRef).trim().toUpperCase() === "OFF") {
+    return null;
+  }
+  try {
+    return resolveColumnIndex(String(columnRef).trim());
+  } catch {
+    return null;
+  }
+}
+
+/** Strip Google Sheets plain-text prefix from ID cells. */
+function normalizeSheetAesopId(value) {
+  let s = String(value ?? "").trim();
+  if (s.startsWith("'")) {
+    s = s.slice(1);
+  }
+  if (s.endsWith("'")) {
+    s = s.slice(0, -1);
+  }
+  return s.trim();
+}
+
+function readPeopleLastLoginFromRow(row, rowData, lastLoginColumnIndex) {
+  if (lastLoginColumnIndex === null) {
+    return "";
+  }
+  if (row && typeof row.get === "function") {
+    for (const header of peopleLastLoginHeaderCandidates()) {
+      try {
+        const value = row.get(header);
+        if (value != null && String(value).trim() !== "") {
+          return String(value).trim();
+        }
+      } catch {
+        // try next header
+      }
+    }
+  }
+  return String(rowData[lastLoginColumnIndex] ?? "").trim();
+}
+
+function readPeoplePastDingFromRow(row, rowData, pastDingColumnIndex) {
+  if (pastDingColumnIndex === null) {
+    return "";
+  }
+  return String(rowData[pastDingColumnIndex] ?? "").trim();
+}
+
+/**
+ * @param {string[]} headerValues
+ * @param {unknown[]} rowData
+ * @returns {Record<string, string>}
+ */
+function buildPeopleSheetRowObject(headerValues, rowData) {
+  /** @type {Record<string, string>} */
+  const sheetRow = {};
+  const headers = Array.isArray(headerValues) ? headerValues : [];
+  const cells = Array.isArray(rowData) ? rowData : [];
+  for (let i = 0; i < headers.length; i += 1) {
+    const header = String(headers[i] ?? "").trim();
+    if (!header) {
+      continue;
+    }
+    sheetRow[header] = String(cells[i] ?? "").trim();
+  }
+  return sheetRow;
+}
+
 function peopleRoleHeaderCandidates() {
   const configured = config.googleSheets.peopleRoleHeader;
   const fromConfig = configured != null && String(configured).trim() !== "" ? [String(configured).trim()] : [];
@@ -1874,22 +1944,35 @@ async function getUserData(email) {
 }
 
 /**
- * Build a lookup map from normalized People-tab email to AESOP ID and display name.
- * Used to enrich Classroom rosters with student IDs for portal search.
- * @returns {Promise<Map<string, { id: string, name: string }>>}
+ * Load every People tab row with typed mirror fields and a full header→value map.
+ * @returns {Promise<Array<{
+ *   email: string,
+ *   id: string,
+ *   name: string,
+ *   phone: string,
+ *   peopleType: string,
+ *   portalRole: string,
+ *   adminRole: string,
+ *   reviewerRole: string,
+ *   peopleStatus: string,
+ *   lastLogin: string,
+ *   pastDing: string,
+ *   sheetRow: Record<string, string>,
+ * }>>}
  */
-async function loadEmailToPeopleProfileMap() {
-  const map = new Map();
+async function loadAllPeopleRowsFromSheets() {
+  const rows = [];
   try {
     const sheet = await initGoogleSheets();
     const sheetName = config.googleSheets.sheetName || "People";
     const worksheet = sheet.sheetsByTitle[sheetName];
     if (!worksheet) {
-      return map;
+      return rows;
     }
 
     await preparePeopleWorksheet(worksheet);
-    const rows = await worksheet.getRows();
+    const headerValues = Array.isArray(worksheet.headerValues) ? worksheet.headerValues : [];
+    const sheetRows = await worksheet.getRows();
     const idColumnIndex = resolveColumnIndex(config.googleSheets.idColumn || "B");
     const nameColumnIndex = resolveColumnIndex(config.googleSheets.nameColumn || "C");
     const emailColumnIndex = resolveColumnIndex(config.googleSheets.emailColumn || "D");
@@ -1898,8 +1981,10 @@ async function loadEmailToPeopleProfileMap() {
     const reviewerColumnIndex = resolvePeopleReviewerColumnIndex();
     const statusColumnIndex = resolvePeopleStatusColumnIndex();
     const phoneColumnIndex = resolvePeoplePhoneColumnIndex();
+    const lastLoginColumnIndex = resolvePeopleLastLoginColumnIndex();
+    const pastDingColumnIndex = resolvePeoplePastDingColumnIndex();
 
-    for (const row of rows) {
+    for (const row of sheetRows) {
       const rowData = Array.isArray(row._rawData) ? row._rawData : [];
       const email = String(rowData[emailColumnIndex] ?? "")
         .trim()
@@ -1907,24 +1992,44 @@ async function loadEmailToPeopleProfileMap() {
       if (!email) {
         continue;
       }
-      const aesopId = String(rowData[idColumnIndex] ?? "").trim();
+      const aesopId = normalizeSheetAesopId(rowData[idColumnIndex]);
       const phoneRaw =
         phoneColumnIndex !== null ? String(rowData[phoneColumnIndex] ?? "").trim() : "";
-      map.set(email, {
+      const adminRole = readPeoplePortalRoleFromRow(row, rowData, roleColumnIndex);
+      const peopleType = readPeopleTypeFromRow(row, rowData, typeColumnIndex);
+      rows.push({
+        email,
         id: aesopId,
         name: String(rowData[nameColumnIndex] ?? "").trim(),
         phone: phoneRaw,
-        peopleType: readPeopleTypeFromRow(row, rowData, typeColumnIndex),
-        portalRole: readPeoplePortalRoleFromRow(row, rowData, roleColumnIndex),
+        peopleType,
+        portalRole: adminRole,
+        adminRole,
         reviewerRole: readPeopleReviewerRoleFromRow(row, rowData, reviewerColumnIndex),
         peopleStatus: resolvePeopleStatus(
           aesopId,
           readPeopleStatusFromRow(row, rowData, statusColumnIndex),
         ),
+        lastLogin: readPeopleLastLoginFromRow(row, rowData, lastLoginColumnIndex),
+        pastDing: readPeoplePastDingFromRow(row, rowData, pastDingColumnIndex),
+        sheetRow: buildPeopleSheetRowObject(headerValues, rowData),
       });
     }
   } catch (error) {
-    console.warn("loadEmailToPeopleProfileMap:", formatGoogleSheetsOperationError(error));
+    console.warn("loadAllPeopleRowsFromSheets:", formatGoogleSheetsOperationError(error));
+  }
+  return rows;
+}
+
+/**
+ * Build a lookup map from normalized People-tab email to profile fields.
+ * @returns {Promise<Map<string, object>>}
+ */
+async function loadEmailToPeopleProfileMap() {
+  const map = new Map();
+  const rows = await loadAllPeopleRowsFromSheets();
+  for (const profile of rows) {
+    map.set(profile.email, profile);
   }
   return map;
 }
@@ -2563,6 +2668,7 @@ module.exports = {
   findProfileById,
   recordPeopleLastLogin,
   getClassroomTabStats,
+  loadAllPeopleRowsFromSheets,
   loadEmailToPeopleProfileMap,
   listAllClassroomGradeRows,
   listAllClassroomRoleRows,

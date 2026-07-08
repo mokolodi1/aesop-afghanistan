@@ -574,62 +574,89 @@ async function getDingHistoryFromDb(personId, maxRows = 10) {
 }
 
 /**
- * Classroom sync can emit multiple emails that map to the same AESOP ID (shared
- * accounts, sheet quirks). people.aesop_id is UNIQUE, so keep the ID on one row only.
- * @param {Array<{ email: string, aesopId?: string }>} rows
+ * @param {{
+ *   people?: Array<{ email: string, teacherClasses?: string }>,
+ *   enrollments?: Array<{ email: string }>,
+ *   courseGrades?: Array<{ email: string }>,
+ *   assignmentGrades?: Array<{ email: string }>,
+ * }} payload
+ * @returns {Set<string>}
  */
-function dedupePeopleRowsByAesopId(rows) {
-  const aesopIdToEmail = new Map();
-  for (const row of rows) {
-    const id = String(row.aesopId || "").trim();
-    if (!id) {
+function collectClassroomSyncEmails(payload) {
+  const emails = new Set();
+  for (const list of [
+    payload.people,
+    payload.enrollments,
+    payload.courseGrades,
+    payload.assignmentGrades,
+  ]) {
+    if (!Array.isArray(list)) {
       continue;
     }
-    const key = id.toLowerCase();
-    const priorEmail = aesopIdToEmail.get(key);
-    if (priorEmail && priorEmail !== row.email) {
-      console.warn(
-        `[classroom-sync] duplicate AESOP ID ${id} for ${priorEmail} and ${row.email}; classroom sync will store ${row.email} without aesop_id`,
-      );
-      row.aesopId = "";
-      continue;
+    for (const row of list) {
+      const email = normalizeEmail(row?.email);
+      if (email) {
+        emails.add(email);
+      }
     }
-    aesopIdToEmail.set(key, row.email);
   }
+  return emails;
 }
 
-const UPSERT_PERSON_FROM_CLASSROOM_SYNC_SQL = `
-  INSERT INTO people (aesop_id, email, name, phone, portal_role, teacher_classes, synced_at)
-  SELECT
-    CASE
-      WHEN NULLIF(trim($1::text), '') IS NULL THEN NULL
-      WHEN EXISTS (
-        SELECT 1 FROM people p
-        WHERE p.aesop_id IS NOT NULL AND lower(p.aesop_id) = lower(trim($1::text))
-      ) THEN NULL
-      ELSE trim($1::text)
-    END,
-    $2, $3, $4, $5, $6, $7
-  ON CONFLICT (email) DO UPDATE SET
-    aesop_id = CASE
-      WHEN NULLIF(trim(EXCLUDED.aesop_id), '') IS NULL THEN people.aesop_id
-      WHEN people.aesop_id IS NOT NULL
-        AND lower(people.aesop_id) = lower(trim(EXCLUDED.aesop_id)) THEN people.aesop_id
-      WHEN EXISTS (
-        SELECT 1 FROM people p
-        WHERE p.id <> people.id
-          AND p.aesop_id IS NOT NULL
-          AND lower(p.aesop_id) = lower(trim(EXCLUDED.aesop_id))
-      ) THEN people.aesop_id
-      ELSE trim(EXCLUDED.aesop_id)
-    END,
-    name = COALESCE(EXCLUDED.name, people.name),
-    phone = COALESCE(EXCLUDED.phone, people.phone),
-    portal_role = EXCLUDED.portal_role,
-    teacher_classes = EXCLUDED.teacher_classes,
-    synced_at = EXCLUDED.synced_at
-  RETURNING id
-`;
+/**
+ * Link Classroom rows to existing People sheet mirror rows only — never insert people.
+ * @param {import("pg").PoolClient} client
+ * @param {{
+ *   people?: Array<{ email: string, teacherClasses?: string }>,
+ *   enrollments?: Array<{ email: string }>,
+ *   courseGrades?: Array<{ email: string }>,
+ *   assignmentGrades?: Array<{ email: string }>,
+ * }} payload
+ * @returns {Promise<{ personIdByEmail: Map<string, number>, stats: { linked: number, missing: number, teacherClassesUpdated: number } }>}
+ */
+async function linkPeopleForClassroomSync(client, payload) {
+  const emails = [...collectClassroomSyncEmails(payload)];
+  const personIdByEmail = new Map();
+  const stats = { linked: 0, missing: 0, teacherClassesUpdated: 0 };
+
+  if (emails.length === 0) {
+    return { personIdByEmail, stats };
+  }
+
+  const result = await client.query(
+    `SELECT id, lower(trim(email)) AS email_key
+     FROM people
+     WHERE lower(trim(email)) = ANY($1::text[])`,
+    [emails],
+  );
+  const idByEmail = new Map(result.rows.map((row) => [row.email_key, row.id]));
+
+  for (const email of emails) {
+    const personId = idByEmail.get(email);
+    if (personId) {
+      personIdByEmail.set(email, personId);
+      stats.linked += 1;
+    } else {
+      stats.missing += 1;
+    }
+  }
+
+  for (const row of payload.people || []) {
+    const email = normalizeEmail(row.email);
+    const teacherClasses = String(row.teacherClasses || "").trim();
+    const personId = personIdByEmail.get(email);
+    if (!email || !teacherClasses || !personId) {
+      continue;
+    }
+    const updated = await client.query(`UPDATE people SET teacher_classes = $1 WHERE id = $2`, [
+      teacherClasses,
+      personId,
+    ]);
+    stats.teacherClassesUpdated += updated.rowCount;
+  }
+
+  return { personIdByEmail, stats };
+}
 
 /**
  * Persist a full Classroom sync snapshot inside a transaction.
@@ -668,21 +695,10 @@ async function persistClassroomSync(payload) {
     await client.query(`DELETE FROM course_enrollments`);
     await client.query(`DELETE FROM courses`);
 
-    dedupePeopleRowsByAesopId(payload.people);
-
-    const personIdByEmail = new Map();
-    for (const row of payload.people) {
-      const result = await client.query(UPSERT_PERSON_FROM_CLASSROOM_SYNC_SQL, [
-        row.aesopId || null,
-        row.email,
-        row.name || null,
-        row.phone || null,
-        row.portalRole || null,
-        row.teacherClasses || null,
-        startedAt,
-      ]);
-      personIdByEmail.set(row.email, result.rows[0].id);
-    }
+    const { personIdByEmail, stats: peopleLinkStats } = await linkPeopleForClassroomSync(
+      client,
+      payload,
+    );
 
     const courseIdByClassroomId = new Map();
     for (const row of payload.courses) {
@@ -696,7 +712,7 @@ async function persistClassroomSync(payload) {
     }
 
     for (const row of payload.enrollments) {
-      const personId = personIdByEmail.get(row.email);
+      const personId = personIdByEmail.get(normalizeEmail(row.email));
       const courseId = courseIdByClassroomId.get(row.classroomCourseId);
       if (!personId || !courseId) {
         continue;
@@ -710,7 +726,7 @@ async function persistClassroomSync(payload) {
     }
 
     for (const row of payload.courseGrades) {
-      const personId = personIdByEmail.get(row.email);
+      const personId = personIdByEmail.get(normalizeEmail(row.email));
       const courseId = courseIdByClassroomId.get(row.classroomCourseId);
       if (!personId || !courseId) {
         continue;
@@ -750,7 +766,7 @@ async function persistClassroomSync(payload) {
     }
 
     for (const row of payload.assignmentGrades) {
-      const personId = personIdByEmail.get(row.email);
+      const personId = personIdByEmail.get(normalizeEmail(row.email));
       const assignmentId = assignmentIdByKey.get(`${row.classroomCourseId}:${row.classroomWorkId}`);
       if (!personId || !assignmentId) {
         continue;
@@ -786,7 +802,7 @@ async function persistClassroomSync(payload) {
     );
 
     await client.query("COMMIT");
-    return { syncRunId, startedAt };
+    return { syncRunId, startedAt, peopleLinkStats };
   } catch (error) {
     await client.query("ROLLBACK");
     if (syncRunId) {
@@ -959,6 +975,7 @@ function isPeopleIdentityFresh(person) {
 function personRowToProfile(person) {
   const aesopId = person.aesopId || "";
   const portalRole = person.portalRole || "";
+  const storedStatus = person.peopleStatus ? String(person.peopleStatus).trim() : "";
   return {
     name: person.name || "",
     email: person.email || "",
@@ -967,7 +984,8 @@ function personRowToProfile(person) {
     portalRole,
     reviewerRole: person.reviewerRole || "",
     peopleStatus:
-      String(portalRole).trim().toLowerCase() === "applied" ? "applied" : "",
+      storedStatus ||
+      (String(portalRole).trim().toLowerCase() === "applied" ? "applied" : ""),
   };
 }
 

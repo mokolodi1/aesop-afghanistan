@@ -23,6 +23,14 @@ export DATABASE_URL='postgres://user:pass@localhost:5432/aesop'
 npm run db:migrate
 ```
 
+**Rebuild `people` from scratch** (truncates `people` and FK-linked rows, then imports the full People sheet):
+
+```bash
+npm run db:rebuild-people -- --dry-run
+npm run db:rebuild-people
+npm run sync:hourly-cache   # repopulate Ding mirror after rebuild
+```
+
 ## Hourly Postgres cache
 
 Postgres is the **read cache** for the portal and admin UI. A background job refreshes it; the app serves from DB when data is **fresh**, and falls back to Google Sheets / Classroom API when stale.
@@ -59,9 +67,14 @@ bash scripts/schedule-hourly-cache.sh
 
 This runs `mirrorPeopleAndDingFromSheets()` every hour (~10–15 min):
 
+| Source | Postgres `people` columns |
+|--------|---------------------------|
+| People tab | `aesop_id`, `name`, `email`, `phone`, `people_type`, `admin_role`, `people_status`, `last_login`, `past_ding`, `reviewer_role`, `portal_role` (derived), `sheet_row` (full header→value JSON) |
+
+Other hourly mirrors:
+
 | Source | Postgres tables |
 |--------|-----------------|
-| People tab | `people` |
 | Ding changes tab | `ding_numbers`, `ding_change_history` |
 | Applicants tab | `applicants` |
 | Google Drive folder | `applicants.drive_file_id`, `drive_file_name`, `drive_duration_seconds` |
@@ -77,6 +90,8 @@ npm run sync:classroom
 ```bash
 bash scripts/schedule-classroom-sync.sh
 ```
+
+**People vs Classroom:** the hourly job owns the `people` table (from the **People** sheet). Classroom sync only writes `courses`, enrollments, and grades, and links them to emails that already exist in `people`. It does **not** create people rows for Classroom-only emails without a People sheet row. Run `sync:hourly-cache` before `sync:classroom` when both are due.
 
 ### Monitor cache age
 
@@ -165,6 +180,6 @@ Returns `{ ok, database: { enabled, ok }, classroomEnabled }`.
 ## Schema overview
 
 - `sync_runs` — sync job audit log
-- `people` — AESOP IDs, emails, portal roles (Classroom + People mirror)
+- `people` — AESOP IDs, emails, portal roles (**People sheet mirror only**; Classroom sync links by email)
 - `courses`, `course_enrollments`, `course_grades`, `assignments`, `assignment_grades` — Classroom cache
 - `ding_numbers`, `ding_change_history`, `ding_topups` — Ding mirror and future DingConnect automation audit
