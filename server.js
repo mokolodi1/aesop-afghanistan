@@ -20,10 +20,10 @@ const {
 } = require('./services/googleSheets');
 const { getTeacherRoster, getStudentGrades } = require('./services/classroomSync');
 const { isDatabaseEnabled, checkDatabaseHealth } = require('./db/index');
-const { getRoleByEmailFromDb, getGradesByEmailFromDb, getPersonByAesopId, getMirrorCacheStatus } = require('./services/classroomDb');
+const { getRoleByEmailFromDb, getGradesByEmailFromDb, getPersonByAesopId, getMirrorCacheStatus, personRowToProfile } = require('./services/classroomDb');
 const {
   isPortalAdmin,
-  isPortalReviewer,
+  resolvePortalReviewerAccess,
   getAdminDashboard,
   getHighGradeStudents,
   buildDingConnectTopUpCsv,
@@ -35,6 +35,7 @@ const {
   getAdminViewAsStudent,
   getAdminViewAsTeacher,
 } = require('./services/adminPortal');
+const { refreshPortalCaches } = require('./services/portalCacheRefresh');
 const {
   loadReviewAssignmentsForReviewer,
   saveReviewAssessment,
@@ -270,7 +271,7 @@ async function requirePortalReviewer(res, body) {
     res.status(403).json({ error: 'Unable to continue. Please sign in again from the magic link.' });
     return null;
   }
-  if (!isPortalReviewer(profile)) {
+  if (!await resolvePortalReviewerAccess(profile)) {
     res.status(403).json({ error: 'Reviewer access required.' });
     return null;
   }
@@ -478,17 +479,11 @@ app.post('/api/verify-magic-link', verifyRateLimiter, async (req, res) => {
         try {
           const fromDb = await getPersonByAesopId(result.userId);
           if (fromDb) {
-            profile = {
-              id: fromDb.aesopId || result.userId,
-              name: fromDb.name || '',
-              email: fromDb.email || sanitizedEmail,
-              phone: fromDb.phone || '',
-              portalRole: fromDb.portalRole || '',
-              peopleStatus:
-                String(fromDb.portalRole || '').trim().toLowerCase() === 'applied'
-                  ? 'applied'
-                  : resolvePeopleStatus(fromDb.aesopId || result.userId, ''),
-            };
+            profile = personRowToProfile(fromDb);
+            profile.peopleStatus = resolvePeopleStatus(
+              profile.id || result.userId,
+              profile.peopleStatus,
+            );
           }
         } catch (dbError) {
           console.warn('Profile DB lookup failed during verify:', formatErrorForLog(dbError));
@@ -529,7 +524,7 @@ app.post('/api/verify-magic-link', verifyRateLimiter, async (req, res) => {
         peopleStatus: profile?.peopleStatus,
       });
       const isAdmin = isPortalAdmin({ email: emailFromSheet, portalRole: profile?.portalRole });
-      const isReviewer = isPortalReviewer(profile);
+      const isReviewer = await resolvePortalReviewerAccess(profile);
       const applicationStatus = await resolveApplicationStatus(studentUserId, isApplicant);
 
       if (studentUserId) {
@@ -855,7 +850,7 @@ app.post('/api/portal-class-grade', portalClassGradeRateLimiter, async (req, res
       peopleStatus: profile?.peopleStatus,
     });
     const isAdmin = isPortalAdmin({ email: profileEmail, portalRole: profile?.portalRole });
-    const isReviewer = isPortalReviewer(profile);
+    const isReviewer = await resolvePortalReviewerAccess(profile);
     const applicationStatus = await resolveApplicationStatus(userId, isApplicant);
 
     res.json({
@@ -1164,7 +1159,7 @@ app.post('/api/portal-admin/impersonate', portalAdminRateLimiter, async (req, re
       peopleStatus: targetProfile.peopleStatus,
     });
     const applicationStatus = await resolveApplicationStatus(targetUserId, isApplicant);
-    const isReviewer = isPortalReviewer(targetProfile);
+    const isReviewer = await resolvePortalReviewerAccess(targetProfile);
     res.json({
       success: true,
       email: emailFromSheet,
@@ -1511,6 +1506,22 @@ app.post('/api/portal-voice-memo/stream', portalVoiceMemoStreamRateLimiter, asyn
     console.error('Error streaming portal voice memo:', formatErrorForLog(error));
     const status = error.statusCode || 500;
     res.status(status).json({ error: error.message || 'Could not stream voice memo.' });
+  }
+});
+
+app.post('/api/portal-admin/cache/refresh', portalAdminRateLimiter, async (req, res) => {
+  try {
+    const profile = await requirePortalAdmin(res, req.body);
+    if (!profile) {
+      return;
+    }
+    const includeClassroom = req.body.includeClassroom !== false;
+    const result = await refreshPortalCaches({ includeClassroom });
+    res.json({ success: true, ...result });
+  } catch (error) {
+    console.error('Error refreshing portal cache:', formatErrorForLog(error));
+    const status = error.statusCode || 500;
+    res.status(status).json({ error: error.message || 'Could not refresh portal cache.' });
   }
 });
 

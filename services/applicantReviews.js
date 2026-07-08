@@ -445,6 +445,38 @@ async function saveReviewAssessment({
   };
 }
 
+/**
+ * @param {string} reviewerAesopId
+ * @returns {Promise<boolean>}
+ */
+async function isListedAsApplicantReviewer(reviewerAesopId) {
+  const reviewerKey = normalizeAesopIdKey(reviewerAesopId);
+  if (!reviewerKey) {
+    return false;
+  }
+
+  const reviewsCfg = getApplicantReviewsConfig();
+  const doc = await initGoogleSheets();
+  const worksheet = await getWorksheetByTitle(doc, reviewsCfg.sheetName);
+  if (!worksheet) {
+    return false;
+  }
+
+  await worksheet.loadHeaderRow(reviewsCfg.headerRowNum);
+  const rows = await worksheet.getRows();
+
+  for (const row of rows) {
+    const rowData = Array.isArray(row._rawData) ? row._rawData : [];
+    const reviewerA = normalizeAesopIdKey(rowData[reviewsCfg.reviewerACol]);
+    const reviewerB = normalizeAesopIdKey(rowData[reviewsCfg.reviewerBCol]);
+    if (reviewerA === reviewerKey || reviewerB === reviewerKey) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 module.exports = {
   ENGLISH_LEVELS,
   FITNESS_SCORES,
@@ -453,4 +485,5 @@ module.exports = {
   normalizeFitnessScore,
   loadReviewAssignmentsForReviewer,
   saveReviewAssessment,
+  isListedAsApplicantReviewer,
 };

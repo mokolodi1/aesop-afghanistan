@@ -18,11 +18,11 @@
  */
 require("../config/secrets");
 const { runMigrations } = require("../db/migrate");
-const { runClassroomSync } = require("../services/classroomSync");
-const { mirrorPeopleAndDingFromSheets } = require("../services/peopleMirror");
 const { formatErrorForLog } = require("../utils/errorLogging");
-const { getPool, isDatabaseEnabled, closeDatabase } = require("../db/index");
+const { isDatabaseEnabled, closeDatabase } = require("../db/index");
 const { getMirrorCacheMaxAgeMs } = require("../services/mirrorCache");
+const { refreshPortalCaches } = require("../services/portalCacheRefresh");
+const { getPool } = require("../db/index");
 
 function includeClassroomSync() {
   const raw = process.env.HOURLY_CACHE_INCLUDE_CLASSROOM;
@@ -72,28 +72,24 @@ async function main() {
 
   await runMigrations();
 
-  const mirrorResult = await mirrorPeopleAndDingFromSheets();
-  console.log("[sync-hourly-cache] mirror result:", mirrorResult);
+  const result = await refreshPortalCaches({ includeClassroom: withClassroom });
+  if (result.mirror) {
+    console.log("[sync-hourly-cache] mirror result:", result.mirror);
+  }
+  if (result.classroom) {
+    const s = result.classroom;
+    console.log(
+      `[sync-hourly-cache] classroom: ${s.courses} course(s), ${s.teachers} teacher(s), ` +
+        `${s.students} student(s), ${s.gradeRows} grade row(s).`,
+    );
+  }
   await printApplicantsDriveStats();
 
-  if (!withClassroom) {
-    return { mirror: mirrorResult, classroom: null };
-  }
-
-  console.log("[sync-hourly-cache] running Classroom sync (HOURLY_CACHE_INCLUDE_CLASSROOM=true)...");
-  const classroomSummary = await runClassroomSync();
-  return { mirror: mirrorResult, classroom: classroomSummary };
+  return result;
 }
 
 main()
-  .then((result) => {
-    if (result.classroom) {
-      const s = result.classroom;
-      console.log(
-        `[sync-hourly-cache] classroom: ${s.courses} course(s), ${s.teachers} teacher(s), ` +
-          `${s.students} student(s), ${s.gradeRows} grade row(s).`,
-      );
-    }
+  .then(() => {
     console.log("[sync-hourly-cache] done.");
     process.exit(0);
   })
