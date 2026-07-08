@@ -93,6 +93,8 @@ bash scripts/schedule-classroom-sync.sh
 
 **People vs Classroom:** the hourly job owns the `people` table (from the **People** sheet). Classroom sync only writes `courses`, enrollments, and grades, and links them to emails that already exist in `people`. It does **not** create people rows for Classroom-only emails without a People sheet row. Run `sync:hourly-cache` before `sync:classroom` when both are due.
 
+**Shared emails:** siblings or friends on one email are stored as separate `people` rows when names differ (unique on email + name). Same email + same name duplicates collapse to the last sheet row.
+
 ### Monitor cache age
 
 ```

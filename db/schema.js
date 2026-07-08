@@ -47,7 +47,6 @@ const people = pgTable(
   },
   (table) => ({
     aesopIdUnique: unique("people_aesop_id_unique").on(table.aesopId),
-    emailUnique: unique("people_email_unique").on(table.email),
     aesopIdIdx: index("people_aesop_id_idx").on(table.aesopId),
     emailIdx: index("people_email_idx").on(table.email),
   }),

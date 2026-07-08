@@ -19,7 +19,8 @@ const {
 } = require("./voiceMemoSync");
 const { scanVoiceMemoFolder, resolveVoiceMemoDurationsMap } = require("./googleDrive");
 
-const UPSERT_PERSON_FROM_SHEET_SQL = `
+
+const INSERT_PERSON_FROM_SHEET_SQL = `
   INSERT INTO people (
     aesop_id, email, name, phone, portal_role, reviewer_role,
     people_type, admin_role, people_status, last_login, past_ding, sheet_row, synced_at
@@ -34,41 +35,145 @@ const UPSERT_PERSON_FROM_SHEET_SQL = `
       ELSE trim($1::text)
     END,
     $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb, $13
-  ON CONFLICT (email) DO UPDATE SET
+  RETURNING *
+`;
+
+const UPDATE_PERSON_FROM_SHEET_SQL = `
+  UPDATE people SET
     aesop_id = CASE
-      WHEN NULLIF(trim(EXCLUDED.aesop_id), '') IS NULL THEN people.aesop_id
+      WHEN NULLIF(trim($1::text), '') IS NULL THEN people.aesop_id
       WHEN people.aesop_id IS NOT NULL
-        AND lower(people.aesop_id) = lower(trim(EXCLUDED.aesop_id)) THEN people.aesop_id
+        AND lower(people.aesop_id) = lower(trim($1::text)) THEN people.aesop_id
       WHEN EXISTS (
         SELECT 1 FROM people p
         WHERE p.id <> people.id
           AND p.aesop_id IS NOT NULL
-          AND lower(p.aesop_id) = lower(trim(EXCLUDED.aesop_id))
+          AND lower(p.aesop_id) = lower(trim($1::text))
       ) THEN people.aesop_id
-      ELSE trim(EXCLUDED.aesop_id)
+      ELSE trim($1::text)
     END,
-    name = COALESCE(EXCLUDED.name, people.name),
-    phone = COALESCE(EXCLUDED.phone, people.phone),
-    portal_role = EXCLUDED.portal_role,
-    reviewer_role = EXCLUDED.reviewer_role,
-    people_type = EXCLUDED.people_type,
-    admin_role = EXCLUDED.admin_role,
-    people_status = EXCLUDED.people_status,
-    last_login = EXCLUDED.last_login,
-    past_ding = EXCLUDED.past_ding,
-    sheet_row = EXCLUDED.sheet_row,
-    synced_at = EXCLUDED.synced_at
+    email = $2,
+    name = $3,
+    phone = COALESCE($4, people.phone),
+    portal_role = $5,
+    reviewer_role = $6,
+    people_type = $7,
+    admin_role = $8,
+    people_status = $9,
+    last_login = $10,
+    past_ding = $11,
+    sheet_row = $12::jsonb,
+    synced_at = $13
+  WHERE id = $14
   RETURNING *
 `;
 
-const INSERT_PERSON_FROM_SHEET_SQL = `
-  INSERT INTO people (
-    aesop_id, email, name, phone, portal_role, reviewer_role,
-    people_type, admin_role, people_status, last_login, past_ding, sheet_row, synced_at
-  )
-  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb, $13)
-  RETURNING *
-`;
+function normalizePersonName(name) {
+  return String(name || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+}
+
+/**
+ * Sheet identity: AESOP ID when present, otherwise normalized email + name.
+ * @param {{ id?: string, email?: string, name?: string }} profile
+ */
+function personSheetIdentityKey(profile) {
+  const aesopId = profile?.id ? String(profile.id).trim().toLowerCase() : "";
+  if (aesopId) {
+    return `id:${aesopId}`;
+  }
+  const email = String(profile.email || "").trim().toLowerCase();
+  const nameKey = normalizePersonName(profile.name);
+  return `email:${email}|${nameKey}`;
+}
+
+/**
+ * Collapse only same email + same name duplicates (keep last row).
+ * Different names on the same email are kept (shared family accounts).
+ * @param {Array<object>} rows
+ */
+function preparePeopleRowsForMirror(rows) {
+  const byEmailName = new Map();
+  let sameEmailSameNameCollapsed = 0;
+
+  for (const row of rows) {
+    const email = String(row.email || "").trim().toLowerCase();
+    if (!email) {
+      continue;
+    }
+    const key = `${email}\0${normalizePersonName(row.name)}`;
+    if (byEmailName.has(key)) {
+      sameEmailSameNameCollapsed += 1;
+    }
+    byEmailName.set(key, { ...row, email });
+  }
+
+  const prepared = [...byEmailName.values()];
+  const rowsByEmail = new Map();
+  for (const row of prepared) {
+    rowsByEmail.set(row.email, (rowsByEmail.get(row.email) || 0) + 1);
+  }
+  let sharedEmailRows = 0;
+  let sharedEmailAddresses = 0;
+  for (const count of rowsByEmail.values()) {
+    if (count > 1) {
+      sharedEmailAddresses += 1;
+      sharedEmailRows += count;
+    }
+  }
+
+  return {
+    rows: prepared,
+    sameEmailSameNameCollapsed,
+    sharedEmailRows,
+    sharedEmailAddresses,
+  };
+}
+
+function logPeopleMirrorDedupeStats(stats) {
+  if (stats.sharedEmailRows > 0) {
+    console.log(
+      `[people-mirror] ${stats.sharedEmailRows} row(s) across ${stats.sharedEmailAddresses} shared email(s) kept (distinct names).`,
+    );
+  }
+  if (stats.sameEmailSameNameCollapsed > 0) {
+    console.warn(
+      `[people-mirror] ${stats.sameEmailSameNameCollapsed} same email+name duplicate(s) collapsed (kept last row).`,
+    );
+  }
+}
+
+/**
+ * @param {import("pg").Pool | import("pg").PoolClient} runner
+ * @param {object} profile
+ */
+async function findExistingPersonId(runner, profile) {
+  const aesopId = profile.id ? String(profile.id).trim() : "";
+  if (aesopId) {
+    const byId = await runner.query(
+      `SELECT id FROM people
+       WHERE aesop_id IS NOT NULL AND lower(trim(aesop_id)) = lower(trim($1))
+       LIMIT 1`,
+      [aesopId],
+    );
+    if (byId.rows[0]?.id) {
+      return byId.rows[0].id;
+    }
+  }
+
+  const email = String(profile.email || "").trim().toLowerCase();
+  const nameKey = normalizePersonName(profile.name);
+  const byEmailName = await runner.query(
+    `SELECT id FROM people
+     WHERE lower(btrim(email)) = $1
+       AND lower(btrim(coalesce(name, ''))) = $2
+     LIMIT 1`,
+    [email, nameKey],
+  );
+  return byEmailName.rows[0]?.id || null;
+}
 
 /**
  * @param {object} profile
@@ -104,75 +209,72 @@ function buildPersonInsertParams(profile, syncedAt, applicantIdSet) {
  */
 async function upsertPersonFromSheetProfile(profile, syncedAt = new Date(), applicantIdSet, options = {}) {
   const pool = getPool();
-  if ((!pool && !options.client) || !profile?.email) {
+  const runner = options.client || pool;
+  if (!runner || !profile?.email) {
     return null;
   }
   const params = buildPersonInsertParams(profile, syncedAt, applicantIdSet);
-  const sqlText = options.insertOnly ? INSERT_PERSON_FROM_SHEET_SQL : UPSERT_PERSON_FROM_SHEET_SQL;
-  if (options.client) {
-    const result = await options.client.query(sqlText, params);
+
+  if (options.insertOnly) {
+    const result = await runner.query(INSERT_PERSON_FROM_SHEET_SQL, params);
     return result.rows[0] || null;
   }
-  const result = await pool.query(sqlText, params);
+
+  const existingId = await findExistingPersonId(runner, profile);
+  if (existingId) {
+    const result = await runner.query(UPDATE_PERSON_FROM_SHEET_SQL, [...params, existingId]);
+    return result.rows[0] || null;
+  }
+
+  const result = await runner.query(INSERT_PERSON_FROM_SHEET_SQL, params);
   return result.rows[0] || null;
 }
 
 /**
- * @param {string[]} emails
+ * @param {Array<object>} sheetRows
  * @param {import("pg").PoolClient} [client]
  */
-async function prunePeopleNotOnSheet(emails, client) {
-  if (!emails.length) {
+async function prunePeopleNotOnSheet(sheetRows, client) {
+  if (!sheetRows.length) {
     return 0;
   }
   const runner = client || getPool();
   if (!runner) {
     return 0;
   }
-  const result = await runner.query(
-    `DELETE FROM people
-     WHERE lower(trim(email)) NOT IN (SELECT unnest($1::text[]))`,
-    [emails],
-  );
-  return result.rowCount || 0;
-}
 
-/**
- * People sheet can contain duplicate emails; DB email is UNIQUE — keep last row per email.
- * @param {Array<object>} rows
- * @returns {{ rows: Array<object>, duplicateCount: number }}
- */
-function dedupePeopleRowsByEmail(rows) {
-  const byEmail = new Map();
-  let duplicateCount = 0;
-  for (const row of rows) {
-    const email = String(row.email || "").trim().toLowerCase();
-    if (!email) {
-      continue;
+  const sheetKeys = new Set(sheetRows.map((row) => personSheetIdentityKey(row)));
+  const existing = await runner.query(`SELECT id, aesop_id, email, name FROM people`);
+  const toDelete = [];
+  for (const row of existing.rows) {
+    const key = personSheetIdentityKey({
+      id: row.aesop_id,
+      email: row.email,
+      name: row.name,
+    });
+    if (!sheetKeys.has(key)) {
+      toDelete.push(row.id);
     }
-    if (byEmail.has(email)) {
-      duplicateCount += 1;
-    }
-    byEmail.set(email, { ...row, email });
   }
-  return { rows: [...byEmail.values()], duplicateCount };
+  if (toDelete.length === 0) {
+    return 0;
+  }
+  const result = await runner.query(`DELETE FROM people WHERE id = ANY($1::int[])`, [toDelete]);
+  return result.rowCount || 0;
 }
 
 async function mirrorAllPeopleFromSheets(options = {}) {
   if (!isDatabaseEnabled()) {
-    return { mirrored: 0, pruned: 0, duplicateEmails: 0 };
+    return { mirrored: 0, pruned: 0, sharedEmailRows: 0, sameEmailSameNameCollapsed: 0 };
   }
 
   const [rawRows, applicantIdSet] = await Promise.all([
     loadAllPeopleRowsFromSheets(),
     loadApplicantAesopIdSetFromSheets(),
   ]);
-  const { rows, duplicateCount } = dedupePeopleRowsByEmail(rawRows);
-  if (duplicateCount > 0) {
-    console.warn(
-      `[people-mirror] ${duplicateCount} duplicate People sheet email(s); keeping last row per email.`,
-    );
-  }
+  const prepared = preparePeopleRowsForMirror(rawRows);
+  logPeopleMirrorDedupeStats(prepared);
+  const { rows } = prepared;
   const syncedAt = new Date();
   let mirrored = 0;
 
@@ -185,12 +287,15 @@ async function mirrorAllPeopleFromSheets(options = {}) {
 
   let pruned = 0;
   if (options.pruneMissing !== false) {
-    pruned = await prunePeopleNotOnSheet(
-      rows.map((row) => row.email),
-    );
+    pruned = await prunePeopleNotOnSheet(rows);
   }
 
-  return { mirrored, pruned, duplicateEmails: duplicateCount };
+  return {
+    mirrored,
+    pruned,
+    sharedEmailRows: prepared.sharedEmailRows,
+    sameEmailSameNameCollapsed: prepared.sameEmailSameNameCollapsed,
+  };
 }
 
 /**
@@ -206,28 +311,27 @@ async function rebuildPeopleTableFromSheets(options = {}) {
     loadAllPeopleRowsFromSheets(),
     loadApplicantAesopIdSetFromSheets(),
   ]);
-  const { rows, duplicateCount } = dedupePeopleRowsByEmail(rawRows);
+  const prepared = preparePeopleRowsForMirror(rawRows);
 
   if (options.dryRun) {
     return {
       dryRun: true,
       sheetRows: rawRows.length,
-      uniqueEmails: rows.length,
-      duplicateEmails: duplicateCount,
+      mirrorRows: prepared.rows.length,
+      sharedEmailRows: prepared.sharedEmailRows,
+      sharedEmailAddresses: prepared.sharedEmailAddresses,
+      sameEmailSameNameCollapsed: prepared.sameEmailSameNameCollapsed,
       wouldTruncate: true,
-      sampleHeaders: rows[0]?.sheetRow ? Object.keys(rows[0].sheetRow).slice(0, 12) : [],
+      sampleHeaders: prepared.rows[0]?.sheetRow ? Object.keys(prepared.rows[0].sheetRow).slice(0, 12) : [],
     };
   }
 
-  if (rows.length === 0) {
+  if (prepared.rows.length === 0) {
     throw new Error("People sheet returned zero rows — aborting rebuild.");
   }
 
-  if (duplicateCount > 0) {
-    console.warn(
-      `[people-mirror] ${duplicateCount} duplicate People sheet email(s); keeping last row per email.`,
-    );
-  }
+  logPeopleMirrorDedupeStats(prepared);
+  const { rows } = prepared;
 
   const pool = getPool();
   const client = await pool.connect();
@@ -254,7 +358,13 @@ async function rebuildPeopleTableFromSheets(options = {}) {
     client.release();
   }
 
-  return { inserted, sheetRows: rawRows.length, uniqueEmails: rows.length, duplicateEmails: duplicateCount };
+  return {
+    inserted,
+    sheetRows: rawRows.length,
+    mirrorRows: rows.length,
+    sharedEmailRows: prepared.sharedEmailRows,
+    sameEmailSameNameCollapsed: prepared.sameEmailSameNameCollapsed,
+  };
 }
 
 async function mirrorDingNumbersFromSheets(applicantIdSet) {
@@ -497,6 +607,9 @@ async function getPersonIdByAesopId(aesopId) {
 module.exports = {
   mirrorAllPeopleFromSheets,
   rebuildPeopleTableFromSheets,
+  preparePeopleRowsForMirror,
+  personSheetIdentityKey,
+  normalizePersonName,
   mirrorDingNumbersFromSheets,
   mirrorDingHistoryFromSheets,
   mirrorApplicantsAndDriveFromSheets,
