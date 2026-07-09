@@ -76,7 +76,7 @@ const TRANSLATIONS = {
       'Your student ID should be either 10 or 11 numbers and looks like: 2617391637',
     'hub.readFaqs': 'Read FAQs',
 
-    'applicationStatus.accepted': 'Accepted to Round 1 Selection',
+    'applicationStatus.accepted': 'Accepted to Round 2 Selection',
     'applicationStatus.rejected': 'Not selected to advance',
     'applicationStatus.pending': 'Pending',
 
@@ -347,7 +347,7 @@ const TRANSLATIONS = {
       'شناسه محصلی شما باید ۱۰ یا ۱۱ رقم باشد و مانند این است: 2617391637',
     'hub.readFaqs': 'خواندن سوالات متداول',
 
-    'applicationStatus.accepted': 'پذیرفته‌شده به مرحلهٔ انتخاب دور اول',
+    'applicationStatus.accepted': 'پذیرفته‌شده به مرحلهٔ انتخاب دور دوم',
     'applicationStatus.rejected': 'برای مرحلهٔ بعدی انتخاب نشد',
     'applicationStatus.pending': 'در انتظار',
 
