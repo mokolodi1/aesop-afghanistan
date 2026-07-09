@@ -90,14 +90,20 @@ const TRANSLATIONS = {
     'voiceMemo.notSubmitted': 'Not submitted yet',
     'voiceMemo.noneTitle': 'No voice note submitted',
     'voiceMemo.noneLead':
-      'You still need to submit your Round 2 voice note. Please do this as soon as possible using the instructions you received by email.',
+      'You still need to submit your Round 2 voice note. Please do this as soon as possible using the instructions you received by email, or the instructions below.',
     'voiceMemo.whyTitle': 'Why we haven\'t received your voice note:',
     'voiceMemo.why1':
       'You get ONE voice note, and we\'ll take the longest and most recent one you send.',
     'voiceMemo.why2': 'You can submit again if you would like to change your voice note.',
     'voiceMemo.why3': 'If it\'s less than 30 seconds, it\'s TOO SHORT and will be rejected.',
-    'voiceMemo.why4': 'If you send another one, we\'ll update it within 48 hours.',
+    'voiceMemo.why4': 'If you send another one, we\'ll update it within 3 days.',
     'voiceMemo.whyTitle2': 'Good to know:',
+    'voiceMemo.goodToKnow1':
+      'Please submit **ONE** voice note for your application. We will review the most recent and longest voice note you send.',
+    'voiceMemo.goodToKnow2':
+      'Voice notes must be at least **30 seconds** long. Submissions shorter than **30 seconds** may not be accepted.',
+    'voiceMemo.goodToKnow3':
+      'If you send a new voice note later, your submission will be updated within **3 days**.',
     'voiceMemo.durationWithin': 'This is within the required range of 30 seconds to 2 minutes.',
     'voiceMemo.durationExceeding': 'You\'re exceeding expectations!',
     'voiceMemo.resubmitButton': 'Resubmit on Signal',
@@ -118,13 +124,13 @@ const TRANSLATIONS = {
       'A voice note in your own best English answering the prompt from your Round 2 email. It must be between 30 seconds and 2 minutes. Do NOT use ChatGPT or grammar checkers. Anything under 30 seconds is too short and will be rejected.',
     'voiceMemo.instrStep3Title': '3. Check your status here',
     'voiceMemo.instrStep3Body':
-      'This page updates automatically — you will not get a reply on Signal, and all updates come by email. A new voice note can take up to 48 hours to appear here.',
+      'This page updates automatically — you will not get a reply on Signal, and all updates come by email. A new voice note can take up to 3 days to appear here.',
     'voiceMemo.doneTitle': 'You\'re all set!',
     'voiceMemo.doneLead':
       'We\'ve received your Round 2 voice note, so there\'s nothing more you need to do right now. We will email you with your result.',
-    'voiceMemo.resubmitSummary': 'Need to resubmit your voice note? Here\'s how',
+    'voiceMemo.resubmitSummary': 'Click here to learn how',
     'voiceMemo.pendingNote':
-      'Your voice note can take up to 48 hours to appear on the AESOP Portal after you send it.',
+      'Your voice note can take up to 3 days to appear on the AESOP Portal after you send it.',
     'voiceMemo.label': 'Voice memo',
     'voiceMemo.submittedOn': 'Submitted on',
     'voiceMemo.recordingLength': 'Recording length',
@@ -133,7 +139,7 @@ const TRANSLATIONS = {
     'voiceMemo.audioPlayError':
       'Could not play your voice memo. Please try again or contact support.',
     'voiceMemo.instructionsParagraph':
-      'Submit your Round 2 voice memo using the instructions you received by email. Once it is received, this page will show Submitted and you can listen to your recording here. Your voice note can take up to 48 hours to appear on the AESOP Portal after you send it. You may submit your voice notes as many times as you\'d like, but only ONE voice notes will be saved.',
+      'Submit your Round 2 voice memo using the instructions you received by email. Once it is received, this page will show Submitted and you can listen to your recording here. Your voice note can take up to 3 days to appear on the AESOP Portal after you send it. You may submit your voice notes as many times as you\'d like, but only ONE voice notes will be saved.',
     'voiceMemo.loadError': 'Could not load voice memo status.',
     'voiceMemo.networkError': 'Network error. Please try again.',
     'voiceMemo.sectionAria': 'Round 2 voice memo',
@@ -166,7 +172,7 @@ const TRANSLATIONS = {
     'calendar.note.round2Results':
       'More information about Round 3 Interviews will be shared with an email if you are selected.',
     'calendar.note.round2VoiceResubmit':
-      'You may resubmit voice notes up to 11:59 pm on the deadline. Note that it can take up to 72 hours for your voice note to update on the Portal.',
+      'You may resubmit voice notes up to 11:59 pm on the deadline. Note that it can take up to 3 days for your voice note to update on the Portal.',
     'calendar.note.round3Decision':
       'You will receive an email if you are accepted to the Fall 2026 AESOP Classes.',
     'calendar.note.voiceCompleted':
@@ -355,14 +361,20 @@ const TRANSLATIONS = {
     'voiceMemo.notSubmitted': 'هنوز ثبت نشده',
     'voiceMemo.noneTitle': 'هیچ یادداشت صوتی ثبت نشده است',
     'voiceMemo.noneLead':
-      'شما هنوز باید یادداشت صوتی دور دوم خود را ارسال کنید. لطفاً هرچه زودتر با استفاده از دستورالعمل‌هایی که از طریق ایمیل دریافت کرده‌اید این کار را انجام دهید.',
+      'شما هنوز باید یادداشت صوتی دور دوم خود را ارسال کنید. لطفاً هرچه زودتر با استفاده از دستورالعمل‌هایی که از طریق ایمیل دریافت کرده‌اید، یا دستورالعمل‌های زیر، این کار را انجام دهید.',
     'voiceMemo.whyTitle': 'چرا یادداشت صوتی شما را دریافت نکرده‌ایم:',
     'voiceMemo.why1':
       'شما فقط یک یادداشت صوتی دارید و طولانی‌ترین و جدیدترین موردی را که می‌فرستید در نظر می‌گیریم.',
     'voiceMemo.why2': 'اگر بخواهید یادداشت صوتی خود را تغییر دهید، می‌توانید دوباره ارسال کنید.',
     'voiceMemo.why3': 'اگر کمتر از ۳۰ ثانیه باشد، بسیار کوتاه است و رد خواهد شد.',
-    'voiceMemo.why4': 'اگر مورد دیگری بفرستید، ظرف ۴۸ ساعت آن را به‌روزرسانی می‌کنیم.',
+    'voiceMemo.why4': 'اگر مورد دیگری بفرستید، ظرف ۳ روز آن را به‌روزرسانی می‌کنیم.',
     'voiceMemo.whyTitle2': 'خوب است بدانید:',
+    'voiceMemo.goodToKnow1':
+      'لطفاً **یک** یادداشت صوتی برای درخواست خود ارسال کنید. ما جدیدترین و طولانی‌ترین یادداشت صوتی را که می‌فرستید بررسی می‌کنیم.',
+    'voiceMemo.goodToKnow2':
+      'یادداشت‌های صوتی باید حداقل **۳۰ ثانیه** باشند. ارسال‌های کوتاه‌تر از **۳۰ ثانیه** ممکن است پذیرفته نشوند.',
+    'voiceMemo.goodToKnow3':
+      'اگر بعداً یادداشت صوتی جدیدی بفرستید، ارسال شما ظرف **۳ روز** به‌روزرسانی می‌شود.',
     'voiceMemo.durationWithin': 'این مدت در محدودهٔ لازم، یعنی بین ۳۰ ثانیه تا ۲ دقیقه است.',
     'voiceMemo.durationExceeding': 'شما فراتر از انتظار عمل کردید!',
     'voiceMemo.resubmitButton': 'ارسال دوباره در Signal',
@@ -383,13 +395,13 @@ const TRANSLATIONS = {
       'یک پیام صوتی به بهترین زبان انگلیسی خودتان در پاسخ به موضوع ایمیل مرحلهٔ دوم. باید بین ۳۰ ثانیه تا ۲ دقیقه باشد. از ChatGPT یا برنامه‌های تصحیح گرامر استفاده نکنید. هر پیام کوتاه‌تر از ۳۰ ثانیه بسیار کوتاه است و رد خواهد شد.',
     'voiceMemo.instrStep3Title': '۳. وضعیت خود را همین‌جا بررسی کنید',
     'voiceMemo.instrStep3Body':
-      'این صفحه به‌طور خودکار به‌روزرسانی می‌شود؛ در Signal پاسخی دریافت نخواهید کرد و همهٔ به‌روزرسانی‌ها از طریق ایمیل ارسال می‌شود. ممکن است تا ۴۸ ساعت طول بکشد تا یادداشت صوتی جدید این‌جا نمایش داده شود.',
+      'این صفحه به‌طور خودکار به‌روزرسانی می‌شود؛ در Signal پاسخی دریافت نخواهید کرد و همهٔ به‌روزرسانی‌ها از طریق ایمیل ارسال می‌شود. ممکن است تا ۳ روز طول بکشد تا یادداشت صوتی جدید این‌جا نمایش داده شود.',
     'voiceMemo.doneTitle': 'کارتان تمام شد!',
     'voiceMemo.doneLead':
       'ما یادداشت صوتی مرحلهٔ دوم شما را دریافت کردیم، پس در حال حاضر کار دیگری لازم نیست انجام دهید. نتیجه را از طریق ایمیل برایتان خواهیم فرستاد.',
-    'voiceMemo.resubmitSummary': 'می‌خواهید یادداشت صوتی خود را دوباره ارسال کنید؟ طرز کار این‌جاست',
+    'voiceMemo.resubmitSummary': 'برای یادگیری نحوهٔ کار اینجا کلیک کنید',
     'voiceMemo.pendingNote':
-      'یادداشت صوتی شما ممکن است تا ۴۸ ساعت پس از ارسال در پورتال دانش‌آموز نمایان شود.',
+      'یادداشت صوتی شما ممکن است تا ۳ روز پس از ارسال در پورتال دانش‌آموز نمایان شود.',
     'voiceMemo.label': 'یادداشت صوتی',
     'voiceMemo.submittedOn': 'ثبت شده در',
     'voiceMemo.recordingLength': 'مدت ضبط',
@@ -398,7 +410,7 @@ const TRANSLATIONS = {
     'voiceMemo.audioPlayError':
       'پخش یادداشت صوتی ممکن نشد. لطفاً دوباره تلاش کنید یا با پشتیبانی تماس بگیرید.',
     'voiceMemo.instructionsParagraph':
-      'یادداشت صوتی دور دوم را طبق دستورالعمل ایمیل‌شده ارسال کنید. پس از دریافت، این صفحه «ثبت شده» را نشان می‌دهد و می‌توانید ضبط خود را بشنوید. یادداشت صوتی شما ممکن است تا ۴۸ ساعت پس از ارسال در پورتال AESOP نمایان شود. می‌توانید هر چند بار که بخواهید یادداشت صوتی بفرستید، اما فقط یک یادداشت صوتی ذخیره می‌شود.',
+      'یادداشت صوتی دور دوم را طبق دستورالعمل ایمیل‌شده ارسال کنید. پس از دریافت، این صفحه «ثبت شده» را نشان می‌دهد و می‌توانید ضبط خود را بشنوید. یادداشت صوتی شما ممکن است تا ۳ روز پس از ارسال در پورتال AESOP نمایان شود. می‌توانید هر چند بار که بخواهید یادداشت صوتی بفرستید، اما فقط یک یادداشت صوتی ذخیره می‌شود.',
     'voiceMemo.loadError': 'بارگذاری وضعیت یادداشت صوتی ممکن نشد.',
     'voiceMemo.networkError': 'خطای شبکه. لطفاً دوباره تلاش کنید.',
     'voiceMemo.sectionAria': 'یادداشت صوتی دور دوم',
@@ -431,7 +443,7 @@ const TRANSLATIONS = {
     'calendar.note.round2Results':
       'اگر انتخاب شوید، معلومات بیشتر دربارهٔ مصاحبه‌های دور سوم از طریق ایمیل با شما در میان گذاشته می‌شود.',
     'calendar.note.round2VoiceResubmit':
-      'می‌توانید تا ساعت ۱۱:۵۹ شب در روز مهلت، پیام صوتی خود را دوباره ارسال کنید. توجه داشته باشید که ممکن است تا ۷۲ ساعت طول بکشد تا پیام صوتی شما در پورتال به‌روزرسانی شود.',
+      'می‌توانید تا ساعت ۱۱:۵۹ شب در روز مهلت، پیام صوتی خود را دوباره ارسال کنید. توجه داشته باشید که ممکن است تا ۳ روز طول بکشد تا پیام صوتی شما در پورتال به‌روزرسانی شود.',
     'calendar.note.round3Decision':
       'اگر به صنف‌های خزان ۲۰۲۶ AESOP پذیرفته شوید، یک ایمیل دریافت خواهید کرد.',
     'calendar.note.voiceCompleted':

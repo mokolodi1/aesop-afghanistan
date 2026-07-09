@@ -389,6 +389,18 @@ function applicationStatusClassName(status) {
   return ' portal-application-status--pending';
 }
 
+/** Render plain text with **bold** markers as React nodes. */
+function renderPortalRichText(text) {
+  const source = String(text || '');
+  const parts = source.split(/(\*\*[^*]+\*\*)/g);
+  return parts.map((part, index) => {
+    if (part.startsWith('**') && part.endsWith('**') && part.length > 4) {
+      return <strong key={index}>{part.slice(2, -2)}</strong>;
+    }
+    return part;
+  });
+}
+
 function applyPortalSessionFromApi(data, options = {}) {
   if (typeof sessionStorage === 'undefined') {
     return;
@@ -2561,16 +2573,18 @@ function PortalVoiceMemoSection({ studentUserId, studentEmail, enabled }) {
                 ) : null}
               </p>
             ) : null}
-            <div className="portal-voice-memo-done">
-              <p className="portal-voice-memo-done-title">{t('voiceMemo.doneTitle')}</p>
-              <p className="portal-voice-memo-done-lead">{t('voiceMemo.doneLead')}</p>
-            </div>
+            {voiceMemoStatus.durationStatus !== 'too_short' ? (
+              <div className="portal-voice-memo-done">
+                <p className="portal-voice-memo-done-title">{t('voiceMemo.doneTitle')}</p>
+                <p className="portal-voice-memo-done-lead">{t('voiceMemo.doneLead')}</p>
+              </div>
+            ) : null}
             <div className="portal-voice-memo-why">
               <p className="portal-voice-memo-why-title">{t('voiceMemo.whyTitle2')}</p>
               <ul className="portal-voice-memo-why-list">
-                <li>{t('voiceMemo.why1')}</li>
-                <li>{t('voiceMemo.why3')}</li>
-                <li>{t('voiceMemo.why4')}</li>
+                <li>{renderPortalRichText(t('voiceMemo.goodToKnow1'))}</li>
+                <li>{renderPortalRichText(t('voiceMemo.goodToKnow2'))}</li>
+                <li>{renderPortalRichText(t('voiceMemo.goodToKnow3'))}</li>
               </ul>
             </div>
             <a
@@ -2597,12 +2611,11 @@ function PortalVoiceMemoSection({ studentUserId, studentEmail, enabled }) {
             <h4 className="portal-voice-memo-instructions-title">{t('voiceMemo.instrTitle')}</h4>
             <PortalVoiceMemoInstructions aesopId={studentUserId} />
             <div className="portal-voice-memo-why">
-              <p className="portal-voice-memo-why-title">{t('voiceMemo.whyTitle')}</p>
+              <p className="portal-voice-memo-why-title">{t('voiceMemo.whyTitle2')}</p>
               <ul className="portal-voice-memo-why-list">
-                <li>{t('voiceMemo.why1')}</li>
-                <li>{t('voiceMemo.why2')}</li>
-                <li>{t('voiceMemo.why3')}</li>
-                <li>{t('voiceMemo.why4')}</li>
+                <li>{renderPortalRichText(t('voiceMemo.goodToKnow1'))}</li>
+                <li>{renderPortalRichText(t('voiceMemo.goodToKnow2'))}</li>
+                <li>{renderPortalRichText(t('voiceMemo.goodToKnow3'))}</li>
               </ul>
             </div>
           </div>
