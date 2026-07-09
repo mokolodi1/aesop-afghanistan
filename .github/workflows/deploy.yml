@@ -9,6 +9,8 @@ on:
 jobs:
   deploy:
     name: Deploy app
+    # Only deploy from the mokolodi1 repo, not forks
+    if: github.repository_owner == 'mokolodi1'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
