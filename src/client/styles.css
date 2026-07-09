@@ -1878,6 +1878,55 @@ html[dir='rtl'] .portal-class-accordion-chevron {
   line-height: 1.45;
 }
 
+.portal-voice-memo-panel {
+  margin-top: 4px;
+}
+
+.portal-voice-memo-warning {
+  margin-top: 4px;
+  padding: 18px 20px;
+  border-radius: var(--aesop-radius-md);
+  color: #7f1d1d;
+  background: #fef2f2;
+  border: 1px solid #fca5a5;
+}
+
+.portal-voice-memo-warning-title {
+  margin: 0 0 10px;
+  font-family: Space Grotesk, ui-sans-serif, system-ui, sans-serif;
+  font-size: 1.25rem;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.portal-voice-memo-warning-lead {
+  margin: 0 0 14px;
+  font-size: 0.95rem;
+  line-height: 1.5;
+  color: #7f1d1d;
+}
+
+.portal-voice-memo-why-title {
+  margin: 0 0 8px;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #7f1d1d;
+}
+
+.portal-voice-memo-why-list {
+  margin: 0;
+  padding-inline-start: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.portal-voice-memo-why-list li {
+  font-size: 0.92rem;
+  line-height: 1.45;
+  color: #7f1d1d;
+}
+
 .portal-application-status {
   display: inline-block;
   padding: 4px 10px;

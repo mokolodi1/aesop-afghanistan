@@ -12,16 +12,18 @@
 const PORTAL_APPLICATION_CALENDAR_ENTRY_DEFS = [
   {
     processKey: "calendar.event.round2VoiceDeadline",
-    process: "Round 2 voice note submission deadline (11:59 pm)",
+    process: "Round 2 Voice Note Submission Deadline",
     date: "Wednesday, July 15, 2026",
     dynamicNote: "voiceCompleted",
+    noteKey: "calendar.note.round2VoiceResubmit",
+    note: "You may resubmit voice notes up to 11:59 pm on the deadline. Note that it can take up to 72 hours for your voice note to update on the Portal.",
   },
   {
     processKey: "calendar.event.round2Results",
     process: "Round 2 Results Shared by Email",
     date: "Friday, July 24, 2026",
     noteKey: "calendar.note.round2Results",
-    note: "we will share more information about Round 3 Interviews if you are selected.",
+    note: "More information about Round 3 Interviews will be shared with an email if you are selected.",
   },
   {
     processKey: "calendar.event.round3InterviewsBegin",
@@ -37,6 +39,8 @@ const PORTAL_APPLICATION_CALENDAR_ENTRY_DEFS = [
     processKey: "calendar.event.round3Decision",
     process: "Final Round 3 Admission Decision Shared",
     date: "Monday, August 17, 2026",
+    noteKey: "calendar.note.round3Decision",
+    note: "You will receive an email if you are accepted to the Fall 2026 AESOP Classes.",
   },
   {
     processKey: "calendar.event.openingCeremony",
@@ -45,12 +49,12 @@ const PORTAL_APPLICATION_CALENDAR_ENTRY_DEFS = [
   },
   {
     processKey: "calendar.event.classesStart",
-    process: "Classes start",
+    process: "Classes Start",
     date: "Wednesday, September 9, 2026",
   },
   {
     processKey: "calendar.event.classesEnd",
-    process: "Classes end",
+    process: "Classes End",
     date: "Wednesday, December 16, 2026",
   },
 ];

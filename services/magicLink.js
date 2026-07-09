@@ -280,7 +280,7 @@ async function sendMagicLinkEmail(email, token, { name = '', userId = '' } = {})
         ${safeLinkText}
       </p>
       <p style="margin:18px 0 0;font-size:13px;line-height:1.5;color:${muted};">
-        It expires in <strong>15 minutes</strong>. (Expires at ${expiryAcrossZones})
+        The login link expires in <strong>15 minutes</strong>. (Expires at ${expiryAcrossZones})
       </p>
       <p style="margin:12px 0 0;font-size:13px;line-height:1.5;color:${muted};">
         If you did not request this email, you may disregard it.
@@ -297,7 +297,7 @@ async function sendMagicLinkEmail(email, token, { name = '', userId = '' } = {})
     'Use this link to sign in on the device you would like to log in on:',
     magicLink,
     '',
-    `It expires in 15 minutes. (Expires at ${expiryAcrossZones})`,
+    `The login link expires in 15 minutes. (Expires at ${expiryAcrossZones})`,
     '',
     'If you did not request this email, you may disregard it.',
     '',
@@ -353,4 +353,5 @@ module.exports = {
   verifyMagicLink,
   sendMagicLinkEmail,
   resendMagicLinkByToken,
+  isFlyProduction,
 };

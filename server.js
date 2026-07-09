@@ -2,7 +2,7 @@ const express = require('express');
 const path = require('path');
 const config = require('./config/secrets');
 const { checkIdAndSendMagicLink } = require('./services/auth');
-const { verifyMagicLink, resendMagicLinkByToken } = require('./services/magicLink');
+const { verifyMagicLink, resendMagicLinkByToken, isFlyProduction } = require('./services/magicLink');
 const {
   findProfileByEmail,
   findProfileById,
@@ -1617,5 +1617,11 @@ app.listen(PORT, '0.0.0.0', async () => {
       console.error('[db] auto-migrate failed:', formatErrorForLog(error));
     }
   }
-  startEmailCampaignWorker();
+  // Never auto-send campaign batches from a dev machine; the worker polls the
+  // DB and pushes real Postmark sends. Opt in locally with EMAIL_CAMPAIGN_WORKER=true.
+  if (isFlyProduction() || process.env.EMAIL_CAMPAIGN_WORKER === 'true') {
+    startEmailCampaignWorker();
+  } else {
+    console.log('[email-campaigns] worker disabled outside Fly (set EMAIL_CAMPAIGN_WORKER=true to enable locally)');
+  }
 });

@@ -40,9 +40,6 @@ const TRANSLATIONS = {
     'hub.notSetYet': 'Not set yet',
     'hub.phoneOnFile': 'Phone on file',
     'hub.applicationStatus': 'Application Status',
-    'hub.nextSteps': 'Next steps',
-    'hub.nextStepsMessage':
-      'Dear Applicant, thank you for applying. If you want to be a successful candidate for this round of AESOP Applications, please check your emails regularly and follow the instructions shared with you there.',
     'hub.aboutPortal': 'About this portal',
     'hub.aboutApplicantPrefix':
       'This secure applicant portal is where you sign in with a login link—there is no password to remember on this site. Check your application status, Round 2 voice memo, and the application calendar here, and read',
@@ -62,10 +59,11 @@ const TRANSLATIONS = {
       'Sign in with your login link to update your Afghanistan Ding number, view history, or request help with a non-Afghan number.',
     'hub.faqLink': 'frequently asked questions',
     'hub.studentPortalTitle': 'AESOP Portal',
-    'hub.comingSoonTitle': 'Welcome {{name}}',
-    'hub.comingSoonTitleNoName': 'Welcome',
-    'hub.comingSoonMessage':
-      'Your profile page is coming soon! The developers here at AESOP are working hard on the portal, and we are prioritizing new student applications for the next week or so. Watch this space!',
+    'hub.comingSoonTitle': 'Welcome, {{name}}!',
+    'hub.comingSoonTitleNoName': 'Welcome!',
+    'hub.comingSoonMessage': 'Your profile page is coming soon!',
+    'hub.comingSoonMessage2':
+      'The developers here at AESOP are working hard on the portal, and we are prioritizing new student applications for the next week or so. Watch this space!',
     'hub.comingSoonSignoff': 'Your friendly developers, Teo and Farahnosh',
     'hub.reviewerLead':
       'Open Review Applications to score essays for applicants assigned to you.',
@@ -87,6 +85,15 @@ const TRANSLATIONS = {
     'voiceMemo.checking': 'Checking voice memo status…',
     'voiceMemo.submitted': 'Submitted',
     'voiceMemo.notSubmitted': 'Not submitted yet',
+    'voiceMemo.noneTitle': 'No voice note submitted',
+    'voiceMemo.noneLead':
+      'You still need to submit your Round 2 voice note. Please do this as soon as possible using the instructions you received by email.',
+    'voiceMemo.whyTitle': 'Why we haven\'t received your voice note:',
+    'voiceMemo.why1':
+      'You get ONE voice note, and we\'ll take the longest and most recent one you send.',
+    'voiceMemo.why2': 'You can submit again if you would like to change your voice note.',
+    'voiceMemo.why3': 'If it\'s less than 30 seconds, it\'s TOO SHORT and will be rejected.',
+    'voiceMemo.why4': 'If you send another one, we\'ll update it within 48 hours.',
     'voiceMemo.pendingNote':
       'Your voice note can take up to 48 hours to appear on the AESOP Portal after you send it.',
     'voiceMemo.label': 'Voice memo',
@@ -119,16 +126,20 @@ const TRANSLATIONS = {
     'calendar.sectionAria': 'Application calendar',
     'calendar.accordionAria': 'Calendar',
     'calendar.deadlineNote': 'All times are 11:59 PM Afghanistan Time.',
-    'calendar.event.round2VoiceDeadline': 'Round 2 voice note submission deadline (11:59 pm)',
+    'calendar.event.round2VoiceDeadline': 'Round 2 Voice Note Submission Deadline',
     'calendar.event.round2Results': 'Round 2 Results Shared by Email',
     'calendar.event.round3InterviewsBegin': 'Round 3 Interviews Begin',
     'calendar.event.round3InterviewsEnd': 'Round 3 Interviews End',
     'calendar.event.round3Decision': 'Final Round 3 Admission Decision Shared',
     'calendar.event.openingCeremony': 'Opening Ceremony',
-    'calendar.event.classesStart': 'Classes start',
-    'calendar.event.classesEnd': 'Classes end',
+    'calendar.event.classesStart': 'Classes Start',
+    'calendar.event.classesEnd': 'Classes End',
     'calendar.note.round2Results':
-      'we will share more information about Round 3 Interviews if you are selected.',
+      'More information about Round 3 Interviews will be shared with an email if you are selected.',
+    'calendar.note.round2VoiceResubmit':
+      'You may resubmit voice notes up to 11:59 pm on the deadline. Note that it can take up to 72 hours for your voice note to update on the Portal.',
+    'calendar.note.round3Decision':
+      'You will receive an email if you are accepted to the Fall 2026 AESOP Classes.',
     'calendar.note.voiceCompleted':
       'Thank you for successfully completing all the required steps. We will email you by Friday, July 24 with your result.',
 
@@ -261,9 +272,6 @@ const TRANSLATIONS = {
     'hub.notSetYet': 'هنوز ثبت نشده',
     'hub.phoneOnFile': 'شماره تماس ثبت‌شده',
     'hub.applicationStatus': 'وضعیت درخواست',
-    'hub.nextSteps': 'گام‌های بعدی',
-    'hub.nextStepsMessage':
-      'متقاضی گرامی، از درخواست شما سپاسگزاریم. اگر می‌خواهید در این دور از درخواست‌های AESOP نامزد موفق باشید، لطفاً به‌طور منظم ایمیل‌های خود را بررسی کنید و دستورالعمل‌هایی را که در آنجا با شما به اشتراک گذاشته شده است دنبال کنید.',
     'hub.aboutPortal': 'درباره این پورتال',
     'hub.aboutApplicantPrefix':
       'این پورتال امن متقاضیان است که با لینک ورود وارد می‌شوید — در این سایت رمز عبور وجود ندارد. وضعیت درخواست، یادداشت صوتی دور دوم و تقویم درخواست را اینجا ببینید و',
@@ -283,10 +291,11 @@ const TRANSLATIONS = {
       'با لینک ورود وارد شوید تا شماره Ding افغانستان خود را به‌روز کنید، سابقه را ببینید یا در مورد شماره غیرافغانی درخواست کمک کنید.',
     'hub.faqLink': 'سوالات متداول',
     'hub.studentPortalTitle': 'پورتال AESOP',
-    'hub.comingSoonTitle': 'خوش آمدید {{name}}',
-    'hub.comingSoonTitleNoName': 'خوش آمدید',
-    'hub.comingSoonMessage':
-      'صفحه پروفایل شما به‌زودی آماده می‌شود! توسعه‌دهندگان AESOP سخت روی پورتال کار می‌کنند و در یک هفته آینده اولویت را به درخواست‌های جدید محصلان می‌دهیم. منتظر باشید!',
+    'hub.comingSoonTitle': 'خوش آمدید، {{name}}!',
+    'hub.comingSoonTitleNoName': 'خوش آمدید!',
+    'hub.comingSoonMessage': 'صفحه پروفایل شما به‌زودی آماده می‌شود!',
+    'hub.comingSoonMessage2':
+      'توسعه‌دهندگان AESOP سخت روی پورتال کار می‌کنند و در یک هفته آینده اولویت را به درخواست‌های جدید محصلان می‌دهیم. منتظر باشید!',
     'hub.comingSoonSignoff': 'توسعه‌دهندگان دوست شما، Teo و Farahnosh',
     'hub.reviewerLead':
       'برای نمره‌دهی به مقاله‌های متقاضیانِ اختصاص‌داده‌شده به شما، «بررسی درخواست‌ها» را باز کنید.',
@@ -308,6 +317,15 @@ const TRANSLATIONS = {
     'voiceMemo.checking': 'در حال بررسی یادداشت صوتی…',
     'voiceMemo.submitted': 'ثبت شده',
     'voiceMemo.notSubmitted': 'هنوز ثبت نشده',
+    'voiceMemo.noneTitle': 'هیچ یادداشت صوتی ثبت نشده است',
+    'voiceMemo.noneLead':
+      'شما هنوز باید یادداشت صوتی دور دوم خود را ارسال کنید. لطفاً هرچه زودتر با استفاده از دستورالعمل‌هایی که از طریق ایمیل دریافت کرده‌اید این کار را انجام دهید.',
+    'voiceMemo.whyTitle': 'چرا یادداشت صوتی شما را دریافت نکرده‌ایم:',
+    'voiceMemo.why1':
+      'شما فقط یک یادداشت صوتی دارید و طولانی‌ترین و جدیدترین موردی را که می‌فرستید در نظر می‌گیریم.',
+    'voiceMemo.why2': 'اگر بخواهید یادداشت صوتی خود را تغییر دهید، می‌توانید دوباره ارسال کنید.',
+    'voiceMemo.why3': 'اگر کمتر از ۳۰ ثانیه باشد، بسیار کوتاه است و رد خواهد شد.',
+    'voiceMemo.why4': 'اگر مورد دیگری بفرستید، ظرف ۴۸ ساعت آن را به‌روزرسانی می‌کنیم.',
     'voiceMemo.pendingNote':
       'یادداشت صوتی شما ممکن است تا ۴۸ ساعت پس از ارسال در پورتال دانش‌آموز نمایان شود.',
     'voiceMemo.label': 'یادداشت صوتی',
@@ -340,7 +358,7 @@ const TRANSLATIONS = {
     'calendar.sectionAria': 'تقویم درخواست',
     'calendar.accordionAria': 'تقویم',
     'calendar.deadlineNote': 'همه ساعت‌ها ۱۱:۵۹ شب به وقت افغانستان است.',
-    'calendar.event.round2VoiceDeadline': 'مهلت ارسال پیام صوتی دور دوم (۱۱:۵۹ شب)',
+    'calendar.event.round2VoiceDeadline': 'مهلت ارسال پیام صوتی دور دوم',
     'calendar.event.round2Results': 'نتایج دور دوم از طریق ایمیل اعلام می‌شود',
     'calendar.event.round3InterviewsBegin': 'آغاز مصاحبه‌های دور سوم',
     'calendar.event.round3InterviewsEnd': 'پایان مصاحبه‌های دور سوم',
@@ -349,7 +367,11 @@ const TRANSLATIONS = {
     'calendar.event.classesStart': 'شروع صنف‌ها',
     'calendar.event.classesEnd': 'پایان صنف‌ها',
     'calendar.note.round2Results':
-      'اگر انتخاب شوید، معلومات بیشتری دربارهٔ مصاحبه‌های دور سوم با شما در میان می‌گذاریم.',
+      'اگر انتخاب شوید، معلومات بیشتر دربارهٔ مصاحبه‌های دور سوم از طریق ایمیل با شما در میان گذاشته می‌شود.',
+    'calendar.note.round2VoiceResubmit':
+      'می‌توانید تا ساعت ۱۱:۵۹ شب در روز مهلت، پیام صوتی خود را دوباره ارسال کنید. توجه داشته باشید که ممکن است تا ۷۲ ساعت طول بکشد تا پیام صوتی شما در پورتال به‌روزرسانی شود.',
+    'calendar.note.round3Decision':
+      'اگر به صنف‌های خزان ۲۰۲۶ AESOP پذیرفته شوید، یک ایمیل دریافت خواهید کرد.',
     'calendar.note.voiceCompleted':
       'از اینکه همه مراحل لازم را با موفقیت تکمیل کردید سپاسگزاریم. تا جمعه، ۲۴ جولای نتیجهٔ شما را از طریق ایمیل به شما اطلاع می‌دهیم.',
 

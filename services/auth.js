@@ -1,5 +1,5 @@
 const { findProfileById } = require('./googleSheets');
-const { generateAndStoreMagicLink, sendMagicLinkEmail } = require('./magicLink');
+const { generateAndStoreMagicLink, sendMagicLinkEmail, isFlyProduction } = require('./magicLink');
 const { sanitizeEmail, sanitizeIdentifier } = require('../utils/validation');
 const { formatErrorForLog } = require('../utils/errorLogging');
 
@@ -11,9 +11,28 @@ const { formatErrorForLog } = require('../utils/errorLogging');
 async function checkIdAndSendMagicLink(userId) {
   try {
     const sanitizedId = sanitizeIdentifier(userId);
-    const profile = await findProfileById(sanitizedId);
+
+    let profile;
+    try {
+      profile = await findProfileById(sanitizedId);
+    } catch (error) {
+      if (isFlyProduction()) {
+        throw error;
+      }
+      // Local dev: profile lookups routinely fail (no Postgres, no Google
+      // credentials). Don't block sign-in on that — issue a link anyway.
+      // Off Fly the link is only logged to the console, never emailed.
+      console.warn(
+        '[magic-link] profile lookup failed (local dev); logging a sign-in link anyway:',
+        error.message
+      );
+      profile = { email: `dev+${sanitizedId || 'unknown'}@localhost`, name: '' };
+    }
 
     if (!profile?.email) {
+      if (!isFlyProduction()) {
+        console.log(`[magic-link] no profile found for "${sanitizedId}"; no link issued.`);
+      }
       return { success: true, userFound: false };
     }
 
