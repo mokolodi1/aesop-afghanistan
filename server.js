@@ -17,6 +17,8 @@ const {
   getClassGradeByEmail,
   resolvePeopleStatus,
   isAppliedPeopleStatus,
+  isPeopleSheetAdminRole,
+  isPeopleSheetAdminByIdentity,
 } = require('./services/googleSheets');
 const { getTeacherRoster, getStudentGrades } = require('./services/classroomSync');
 const { isDatabaseEnabled, checkDatabaseHealth } = require('./db/index');
@@ -505,6 +507,12 @@ app.post('/api/verify-magic-link', verifyRateLimiter, async (req, res) => {
               profile.id || result.userId,
               profile.peopleStatus,
             );
+            if (
+              !isPeopleSheetAdminRole(profile.portalRole) &&
+              (await isPeopleSheetAdminByIdentity(profile.id || result.userId, profile.email))
+            ) {
+              profile.portalRole = 'Admin';
+            }
           }
         } catch (dbError) {
           console.warn('Profile DB lookup failed during verify:', formatErrorForLog(dbError));

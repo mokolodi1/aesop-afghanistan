@@ -1927,6 +1927,136 @@ html[dir='rtl'] .portal-class-accordion-chevron {
   color: #7f1d1d;
 }
 
+.portal-voice-memo-instructions-title {
+  margin: 14px 0 4px;
+  font-family: Space Grotesk, ui-sans-serif, system-ui, sans-serif;
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--aesop-ink);
+}
+
+.portal-voice-memo-instructions-deadline {
+  margin: 0 0 14px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--aesop-ink);
+}
+
+.portal-voice-memo-steps {
+  margin: 0;
+  padding-inline-start: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.portal-voice-memo-step-title {
+  margin: 0 0 4px;
+  font-size: 0.98rem;
+  font-weight: 700;
+  color: var(--aesop-ink);
+}
+
+.portal-voice-memo-step-body {
+  margin: 0 0 6px;
+  font-size: 0.92rem;
+  line-height: 1.5;
+  color: var(--aesop-ink-soft);
+}
+
+.portal-voice-memo-step-help {
+  margin: 0;
+  font-size: 0.88rem;
+  line-height: 1.5;
+  color: var(--aesop-text-muted);
+}
+
+.portal-voice-memo-substeps {
+  margin: 6px 0 0;
+  padding-inline-start: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.92rem;
+  line-height: 1.5;
+  color: var(--aesop-ink-soft);
+}
+
+.portal-voice-memo-why {
+  margin-top: 6px;
+  padding: 14px 16px;
+  border-radius: var(--aesop-radius-md);
+  background: var(--aesop-surface-muted, #f8fafc);
+  border: 1px solid var(--aesop-border, #e2e8f0);
+}
+
+.portal-voice-memo-why .portal-voice-memo-why-title,
+.portal-voice-memo-why .portal-voice-memo-why-list li {
+  color: var(--aesop-ink-soft);
+}
+
+.portal-voice-memo-done {
+  margin-top: 4px;
+  padding: 14px 16px;
+  border-radius: var(--aesop-radius-md);
+  color: #14532d;
+  background: #dcfce7;
+  border: 1px solid #86efac;
+}
+
+.portal-voice-memo-done-title {
+  margin: 0 0 6px;
+  font-family: Space Grotesk, ui-sans-serif, system-ui, sans-serif;
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: #14532d;
+}
+
+.portal-voice-memo-done-lead {
+  margin: 0;
+  font-size: 0.92rem;
+  line-height: 1.5;
+  color: #14532d;
+}
+
+.portal-voice-memo-resubmit {
+  margin-top: 4px;
+  font-size: 0.92rem;
+}
+
+.portal-voice-memo-resubmit > summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--aesop-ink);
+}
+
+.portal-voice-memo-resubmit[open] > summary {
+  margin-bottom: 10px;
+}
+
+.portal-voice-memo-duration-ok {
+  color: #15803d;
+  font-weight: 600;
+}
+
+.portal-voice-memo-resubmit-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  justify-self: start;
+  padding: 10px 18px;
+  border-radius: 999px;
+  background: #3a76f0;
+  color: #fff;
+  font-weight: 600;
+  font-size: 0.95rem;
+  text-decoration: none;
+}
+
+.portal-voice-memo-resubmit-btn:hover {
+  background: #2f63cf;
+}
+
 .portal-application-status {
   display: inline-block;
   padding: 4px 10px;
@@ -2108,6 +2238,66 @@ html[dir='rtl'] .portal-class-accordion-chevron {
 .portal-calendar-deadline-note {
   margin-top: 14px;
   margin-bottom: 0;
+}
+
+/* On narrow screens the 3-column table gets cut off and horizontal scroll is
+   easy to miss, so stack each row as a labelled card instead. */
+@media (max-width: 640px) {
+  .portal-calendar-scroll {
+    overflow-x: visible;
+  }
+
+  .portal-calendar-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+
+  .portal-calendar-table,
+  .portal-calendar-table tbody,
+  .portal-calendar-table tr,
+  .portal-calendar-table td {
+    display: block;
+    width: 100%;
+  }
+
+  .portal-calendar-table tr {
+    margin-bottom: 12px;
+    padding: 12px 14px;
+    border: 1px solid hsla(11.73, 82.49%, 57.45%, 0.25);
+    border-radius: var(--aesop-radius-md);
+  }
+
+  .portal-calendar-table tbody tr:last-child {
+    margin-bottom: 0;
+  }
+
+  .portal-calendar-table td {
+    padding: 4px 0;
+    border-bottom: none;
+  }
+
+  .portal-calendar-table td:empty {
+    display: none;
+  }
+
+  .portal-calendar-table td::before {
+    content: attr(data-label);
+    display: block;
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--aesop-text-muted);
+    margin-bottom: 2px;
+  }
+
+  .portal-calendar-note-cell {
+    min-width: 0;
+  }
 }
 
 .portal-admin-stat-row--section dt {

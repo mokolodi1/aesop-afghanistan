@@ -623,19 +623,105 @@ function isPeopleSheetReviewerRole(role) {
 }
 
 /** @param {string} role */
+// Admin is controlled entirely by the People sheet "Admins" column (S). Because
+// that column exists only to flag admins, treat ANY non-empty value as admin
+// unless it is an explicit negative. This means "Admin", "yes", "TRUE", "1", "x",
+// a name, etc. all grant access, while blanks / "no" / "false" / "0" do not.
+const PEOPLE_ADMIN_NEGATIVE_VALUES = new Set([
+  "no",
+  "n",
+  "false",
+  "f",
+  "0",
+  "off",
+  "none",
+  "-",
+  "na",
+  "n/a",
+]);
+
 function isPeopleSheetAdminRole(role) {
   const normalized = String(role || "").trim().toLowerCase();
   if (!normalized) {
     return false;
   }
-  return (
-    normalized === "admin" ||
-    normalized === "admins" ||
-    normalized === "yes" ||
-    normalized === "y" ||
-    normalized === "true" ||
-    normalized === "1"
-  );
+  return !PEOPLE_ADMIN_NEGATIVE_VALUES.has(normalized);
+}
+
+const PEOPLE_ADMIN_SET_TTL_MS = 5 * 60 * 1000;
+/** @type {{ at: number, ids: Set<string>|null, emails: Set<string>|null }} */
+let peopleAdminSetCache = { at: 0, ids: null, emails: null };
+
+/**
+ * Read the People sheet and collect the AESOP IDs / emails whose "Admins" column
+ * (column S) marks them as an admin. Cached briefly so admin status can be
+ * consulted on hot paths (and even when the DB mirror is stale) without
+ * re-reading the whole sheet each time.
+ * @returns {Promise<{ ids: Set<string>, emails: Set<string> }>}
+ */
+async function loadPeopleSheetAdminSets() {
+  if (peopleAdminSetCache.ids && Date.now() - peopleAdminSetCache.at < PEOPLE_ADMIN_SET_TTL_MS) {
+    return { ids: peopleAdminSetCache.ids, emails: peopleAdminSetCache.emails };
+  }
+  const ids = new Set();
+  const emails = new Set();
+  try {
+    const sheet = await initGoogleSheets();
+    const sheetName = config.googleSheets.sheetName || "People";
+    const worksheet = sheet.sheetsByTitle[sheetName];
+    if (worksheet) {
+      await preparePeopleWorksheet(worksheet);
+      const rows = await worksheet.getRows();
+      const idColumnIndex = resolveColumnIndex(config.googleSheets.idColumn || "B");
+      const emailColumnIndex = resolveColumnIndex(config.googleSheets.emailColumn || "D");
+      const roleColumnIndex = resolvePeopleRoleColumnIndex();
+      for (const row of rows) {
+        const rowData = Array.isArray(row._rawData) ? row._rawData : [];
+        const adminRole = readPeoplePortalRoleFromRow(row, rowData, roleColumnIndex);
+        if (!isPeopleSheetAdminRole(adminRole)) {
+          continue;
+        }
+        const id = String(rowData[idColumnIndex] || "").trim().toLowerCase();
+        const email = String(rowData[emailColumnIndex] || "").trim().toLowerCase();
+        if (id) {
+          ids.add(id);
+        }
+        if (email) {
+          emails.add(email);
+        }
+      }
+    }
+    peopleAdminSetCache = { at: Date.now(), ids, emails };
+    return { ids, emails };
+  } catch (error) {
+    console.warn("loadPeopleSheetAdminSets:", formatGoogleSheetsOperationError(error));
+    if (peopleAdminSetCache.ids) {
+      return { ids: peopleAdminSetCache.ids, emails: peopleAdminSetCache.emails };
+    }
+    return { ids, emails };
+  }
+}
+
+/**
+ * Authoritative admin check straight from People column S, by AESOP ID or email.
+ * @param {string} userId
+ * @param {string} email
+ * @returns {Promise<boolean>}
+ */
+async function isPeopleSheetAdminByIdentity(userId, email) {
+  const idKey = String(userId || "").trim().toLowerCase();
+  const emailKey = String(email || "").trim().toLowerCase();
+  if (!idKey && !emailKey) {
+    return false;
+  }
+  const { ids, emails } = await loadPeopleSheetAdminSets();
+  if (idKey && ids.has(idKey)) {
+    return true;
+  }
+  if (emailKey && emails.has(emailKey)) {
+    return true;
+  }
+  return false;
 }
 
 /** Match portal Ding history: 12-hour + comma after date (stored value is still a serial number). */
@@ -678,6 +764,15 @@ async function findProfileById(userId) {
       if (person?.email && isPeopleIdentityFresh(person)) {
         const profile = personRowToProfile(person);
         profile.peopleStatus = resolvePeopleStatus(profile.id, profile.peopleStatus);
+        // Admin status lives in People column S and is authoritative there. A
+        // stale DB mirror must never strip admin access, so upgrade from the
+        // sheet when the column says admin (never downgrade).
+        if (
+          !isPeopleSheetAdminRole(profile.portalRole) &&
+          (await isPeopleSheetAdminByIdentity(profile.id, profile.email))
+        ) {
+          profile.portalRole = "Admin";
+        }
         return profile;
       }
     } catch (error) {
@@ -2663,6 +2758,8 @@ module.exports = {
   getPortalTeacherByUserId,
   getRoleByEmail,
   isPeopleSheetAdminRole,
+  isPeopleSheetAdminByIdentity,
+  loadPeopleSheetAdminSets,
   isPeopleSheetReviewerRole,
   parsePortalRoleFromPeopleType,
   resolvePortalRoleFromPeopleSheet,

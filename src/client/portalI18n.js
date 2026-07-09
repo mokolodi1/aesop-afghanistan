@@ -62,10 +62,11 @@ const TRANSLATIONS = {
     'hub.studentPortalTitle': 'AESOP Portal',
     'hub.comingSoonTitle': 'Welcome, {{name}}!',
     'hub.comingSoonTitleNoName': 'Welcome!',
-    'hub.comingSoonMessage': 'Your profile page is coming soon!',
+    'hub.comingSoonMessage': 'Your profile page is coming soon.',
     'hub.comingSoonMessage2':
       'The developers here at AESOP are working hard on the portal, and we are prioritizing new student applications for the next week or so. Watch this space!',
-    'hub.comingSoonSignoff': 'Your friendly developers, Teo and Farahnosh',
+    'hub.comingSoonSignoff': 'Your friendly developers,',
+    'hub.comingSoonSignoffNames': 'Teo and Farahnosh',
     'hub.reviewerLead':
       'Open Review Applications to score essays for applicants assigned to you.',
     'hub.signInHeading': 'Log in with your AESOP ID',
@@ -96,6 +97,32 @@ const TRANSLATIONS = {
     'voiceMemo.why2': 'You can submit again if you would like to change your voice note.',
     'voiceMemo.why3': 'If it\'s less than 30 seconds, it\'s TOO SHORT and will be rejected.',
     'voiceMemo.why4': 'If you send another one, we\'ll update it within 48 hours.',
+    'voiceMemo.whyTitle2': 'Good to know:',
+    'voiceMemo.durationWithin': 'This is within the required range of 30 seconds to 2 minutes.',
+    'voiceMemo.durationExceeding': 'You\'re exceeding expectations!',
+    'voiceMemo.resubmitButton': 'Resubmit on Signal',
+    'voiceMemo.instrTitle': 'How to submit your Round 2 voice note',
+    'voiceMemo.instrDeadline':
+      'Complete every step by 11:59 pm Afghanistan time on Wednesday, July 15, 2026.',
+    'voiceMemo.instrStep1Title': '1. Create a Signal account',
+    'voiceMemo.instrStep1Body': 'Download the Signal app from',
+    'voiceMemo.instrStep1Help': 'New to Signal? Watch how to set up an account:',
+    'voiceMemo.instrVideo1': 'Video 1',
+    'voiceMemo.instrVideo2': 'Video 2',
+    'voiceMemo.instrStep2Title': '2. Send two messages to noreplyaesop.55 on Signal',
+    'voiceMemo.instrStep2Open': 'Open this link to start the chat:',
+    'voiceMemo.instrStep2Link': 'Message noreplyaesop.55',
+    'voiceMemo.instrStep2Intro': 'Then send these two messages:',
+    'voiceMemo.instrStep2Id': 'Your AESOP ID number:',
+    'voiceMemo.instrStep2Voice':
+      'A voice note in your own best English answering the prompt from your Round 2 email. It must be between 30 seconds and 2 minutes. Do NOT use ChatGPT or grammar checkers. Anything under 30 seconds is too short and will be rejected.',
+    'voiceMemo.instrStep3Title': '3. Check your status here',
+    'voiceMemo.instrStep3Body':
+      'This page updates automatically — you will not get a reply on Signal, and all updates come by email. A new voice note can take up to 48 hours to appear here.',
+    'voiceMemo.doneTitle': 'You\'re all set!',
+    'voiceMemo.doneLead':
+      'We\'ve received your Round 2 voice note, so there\'s nothing more you need to do right now. We will email you with your result.',
+    'voiceMemo.resubmitSummary': 'Need to resubmit your voice note? Here\'s how',
     'voiceMemo.pendingNote':
       'Your voice note can take up to 48 hours to appear on the AESOP Portal after you send it.',
     'voiceMemo.label': 'Voice memo',
@@ -300,10 +327,11 @@ const TRANSLATIONS = {
     'hub.studentPortalTitle': 'پورتال AESOP',
     'hub.comingSoonTitle': 'خوش آمدید، {{name}}!',
     'hub.comingSoonTitleNoName': 'خوش آمدید!',
-    'hub.comingSoonMessage': 'صفحه پروفایل شما به‌زودی آماده می‌شود!',
+    'hub.comingSoonMessage': 'صفحه پروفایل شما به‌زودی آماده می‌شود.',
     'hub.comingSoonMessage2':
       'توسعه‌دهندگان AESOP سخت روی پورتال کار می‌کنند و در یک هفته آینده اولویت را به درخواست‌های جدید محصلان می‌دهیم. منتظر باشید!',
-    'hub.comingSoonSignoff': 'توسعه‌دهندگان دوست شما، Teo و Farahnosh',
+    'hub.comingSoonSignoff': 'توسعه‌دهندگان دوست شما،',
+    'hub.comingSoonSignoffNames': 'Teo و Farahnosh',
     'hub.reviewerLead':
       'برای نمره‌دهی به مقاله‌های متقاضیانِ اختصاص‌داده‌شده به شما، «بررسی درخواست‌ها» را باز کنید.',
     'hub.signInHeading': 'با AESOP ID خود وارد شوید',
@@ -334,6 +362,32 @@ const TRANSLATIONS = {
     'voiceMemo.why2': 'اگر بخواهید یادداشت صوتی خود را تغییر دهید، می‌توانید دوباره ارسال کنید.',
     'voiceMemo.why3': 'اگر کمتر از ۳۰ ثانیه باشد، بسیار کوتاه است و رد خواهد شد.',
     'voiceMemo.why4': 'اگر مورد دیگری بفرستید، ظرف ۴۸ ساعت آن را به‌روزرسانی می‌کنیم.',
+    'voiceMemo.whyTitle2': 'خوب است بدانید:',
+    'voiceMemo.durationWithin': 'این مدت در محدودهٔ لازم، یعنی بین ۳۰ ثانیه تا ۲ دقیقه است.',
+    'voiceMemo.durationExceeding': 'شما فراتر از انتظار عمل کردید!',
+    'voiceMemo.resubmitButton': 'ارسال دوباره در Signal',
+    'voiceMemo.instrTitle': 'چگونه یادداشت صوتی مرحلهٔ دوم خود را ارسال کنید',
+    'voiceMemo.instrDeadline':
+      'تمام مراحل را تا ساعت ۱۱:۵۹ شب به وقت افغانستان، روز چهارشنبه ۱۵ جولای ۲۰۲۶ تکمیل کنید.',
+    'voiceMemo.instrStep1Title': '۱. یک حساب Signal بسازید',
+    'voiceMemo.instrStep1Body': 'اپلیکیشن Signal را از این آدرس دانلود کنید:',
+    'voiceMemo.instrStep1Help': 'با Signal آشنا نیستید؟ طرز ساختن حساب را ببینید:',
+    'voiceMemo.instrVideo1': 'ویدیوی ۱',
+    'voiceMemo.instrVideo2': 'ویدیوی ۲',
+    'voiceMemo.instrStep2Title': '۲. در Signal دو پیام به noreplyaesop.55 بفرستید',
+    'voiceMemo.instrStep2Open': 'برای شروع گفتگو این لینک را باز کنید:',
+    'voiceMemo.instrStep2Link': 'پیام به noreplyaesop.55',
+    'voiceMemo.instrStep2Intro': 'سپس این دو پیام را بفرستید:',
+    'voiceMemo.instrStep2Id': 'شمارهٔ شناسایی ایساپ شما:',
+    'voiceMemo.instrStep2Voice':
+      'یک پیام صوتی به بهترین زبان انگلیسی خودتان در پاسخ به موضوع ایمیل مرحلهٔ دوم. باید بین ۳۰ ثانیه تا ۲ دقیقه باشد. از ChatGPT یا برنامه‌های تصحیح گرامر استفاده نکنید. هر پیام کوتاه‌تر از ۳۰ ثانیه بسیار کوتاه است و رد خواهد شد.',
+    'voiceMemo.instrStep3Title': '۳. وضعیت خود را همین‌جا بررسی کنید',
+    'voiceMemo.instrStep3Body':
+      'این صفحه به‌طور خودکار به‌روزرسانی می‌شود؛ در Signal پاسخی دریافت نخواهید کرد و همهٔ به‌روزرسانی‌ها از طریق ایمیل ارسال می‌شود. ممکن است تا ۴۸ ساعت طول بکشد تا یادداشت صوتی جدید این‌جا نمایش داده شود.',
+    'voiceMemo.doneTitle': 'کارتان تمام شد!',
+    'voiceMemo.doneLead':
+      'ما یادداشت صوتی مرحلهٔ دوم شما را دریافت کردیم، پس در حال حاضر کار دیگری لازم نیست انجام دهید. نتیجه را از طریق ایمیل برایتان خواهیم فرستاد.',
+    'voiceMemo.resubmitSummary': 'می‌خواهید یادداشت صوتی خود را دوباره ارسال کنید؟ طرز کار این‌جاست',
     'voiceMemo.pendingNote':
       'یادداشت صوتی شما ممکن است تا ۴۸ ساعت پس از ارسال در پورتال دانش‌آموز نمایان شود.',
     'voiceMemo.label': 'یادداشت صوتی',

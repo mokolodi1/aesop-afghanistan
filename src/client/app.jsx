@@ -2374,6 +2374,68 @@ function usePortalStudentRecord() {
   };
 }
 
+const VOICE_MEMO_SIGNAL_INSTALL_URL = 'https://signal.org/install';
+const VOICE_MEMO_SIGNAL_VIDEO_1_URL = 'https://www.youtube.com/watch?v=VFB0edv7VgI';
+const VOICE_MEMO_SIGNAL_VIDEO_2_URL = 'https://youtu.be/OAfPYU2Ozs4';
+const VOICE_MEMO_SIGNAL_CONTACT_URL =
+  'https://signal.me/#eu/HQE6GTyq7KsEe7hRCzxDaZiySUygv1OcQG9_G1dFCi49lRW1BANKL4V7BS3DIdHf';
+
+function PortalVoiceMemoInstructions({ aesopId }) {
+  const { t } = usePortalI18n();
+  return (
+    <div className="portal-voice-memo-instructions">
+      <p className="portal-voice-memo-instructions-deadline">{t('voiceMemo.instrDeadline')}</p>
+      <ol className="portal-voice-memo-steps">
+        <li className="portal-voice-memo-step">
+          <p className="portal-voice-memo-step-title">{t('voiceMemo.instrStep1Title')}</p>
+          <p className="portal-voice-memo-step-body">
+            {t('voiceMemo.instrStep1Body')}{' '}
+            <a
+              className="portal-ltr"
+              href={VOICE_MEMO_SIGNAL_INSTALL_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              signal.org/install
+            </a>
+          </p>
+          <p className="portal-voice-memo-step-help">
+            {t('voiceMemo.instrStep1Help')}{' '}
+            <a href={VOICE_MEMO_SIGNAL_VIDEO_1_URL} target="_blank" rel="noopener noreferrer">
+              {t('voiceMemo.instrVideo1')}
+            </a>
+            <span aria-hidden="true"> · </span>
+            <a href={VOICE_MEMO_SIGNAL_VIDEO_2_URL} target="_blank" rel="noopener noreferrer">
+              {t('voiceMemo.instrVideo2')}
+            </a>
+          </p>
+        </li>
+        <li className="portal-voice-memo-step">
+          <p className="portal-voice-memo-step-title">{t('voiceMemo.instrStep2Title')}</p>
+          <p className="portal-voice-memo-step-body">
+            {t('voiceMemo.instrStep2Open')}{' '}
+            <a href={VOICE_MEMO_SIGNAL_CONTACT_URL} target="_blank" rel="noopener noreferrer">
+              {t('voiceMemo.instrStep2Link')}
+            </a>
+          </p>
+          <p className="portal-voice-memo-step-body">{t('voiceMemo.instrStep2Intro')}</p>
+          <ol className="portal-voice-memo-substeps">
+            <li>
+              {t('voiceMemo.instrStep2Id')}{' '}
+              <strong className="portal-ltr">{aesopId || '—'}</strong>
+            </li>
+            <li>{t('voiceMemo.instrStep2Voice')}</li>
+          </ol>
+        </li>
+        <li className="portal-voice-memo-step">
+          <p className="portal-voice-memo-step-title">{t('voiceMemo.instrStep3Title')}</p>
+          <p className="portal-voice-memo-step-body">{t('voiceMemo.instrStep3Body')}</p>
+        </li>
+      </ol>
+    </div>
+  );
+}
+
 function PortalVoiceMemoSection({ studentUserId, studentEmail, enabled }) {
   const { locale, t } = usePortalI18n();
   const [voiceMemoLoading, setVoiceMemoLoading] = useState(false);
@@ -2478,75 +2540,73 @@ function PortalVoiceMemoSection({ studentUserId, studentEmail, enabled }) {
                 {voiceMemoError}
               </p>
             ) : null}
-            {voiceMemoDurationWarning ? (
+            {voiceMemoDurationWarning && voiceMemoStatus.durationStatus === 'too_short' ? (
               <p className="portal-voice-memo-duration-warning" role="alert">
                 {voiceMemoDurationWarning}
-              </p>
-            ) : null}
-            {voiceMemoStatus.submittedAt ? (
-              <p className="portal-field-hint">
-                {t('voiceMemo.submittedOn')}{' '}
-                <strong>{voiceMemoStatus.submittedAt}</strong>
-                {voiceMemoStatus.fileName ? (
-                  <>
-                    {' '}
-                    (<span className="portal-admin-mono">{voiceMemoStatus.fileName}</span>)
-                  </>
-                ) : null}
               </p>
             ) : null}
             {voiceMemoStatus.durationLabel ? (
               <p className="portal-field-hint">
                 {t('voiceMemo.recordingLength')}: <strong>{voiceMemoStatus.durationLabel}</strong>
+                {voiceMemoStatus.durationStatus === 'too_long' ? (
+                  <span className="portal-voice-memo-duration-ok">
+                    {' '}
+                    {t('voiceMemo.durationExceeding')}
+                  </span>
+                ) : voiceMemoStatus.durationStatus === 'valid' ? (
+                  <span className="portal-voice-memo-duration-ok">
+                    {' '}
+                    {t('voiceMemo.durationWithin')}
+                  </span>
+                ) : null}
               </p>
             ) : null}
-            {voiceMemoStatus.hasRecording ? (
-              <>
-                {voiceMemoAudioError ? (
-                  <p className="portal-field-error" role="alert">
-                    {voiceMemoAudioError}
-                  </p>
-                ) : null}
-                {voiceMemoStreamSrc ? (
-                  <audio
-                    key={voiceMemoStreamSrc}
-                    className="portal-voice-memo-player"
-                    controls
-                    preload="metadata"
-                    src={voiceMemoStreamSrc}
-                    onError={() => {
-                      // A likely-expired token: refresh status once to mint
-                      // a fresh one before surfacing an error to the user.
-                      if (voiceMemoRetryCountRef.current < 1) {
-                        voiceMemoRetryCountRef.current += 1;
-                        setVoiceMemoAudioError('');
-                        setVoiceMemoReloadKey((key) => key + 1);
-                        return;
-                      }
-                      setVoiceMemoAudioError(t('voiceMemo.audioPlayError'));
-                    }}
-                  >
-                    {t('voiceMemo.audioUnsupported')}
-                  </audio>
-                ) : null}
-              </>
-            ) : (
-              <p className="portal-field-hint">{t('voiceMemo.audioUnavailable')}</p>
-            )}
+            <div className="portal-voice-memo-done">
+              <p className="portal-voice-memo-done-title">{t('voiceMemo.doneTitle')}</p>
+              <p className="portal-voice-memo-done-lead">{t('voiceMemo.doneLead')}</p>
+            </div>
+            <div className="portal-voice-memo-why">
+              <p className="portal-voice-memo-why-title">{t('voiceMemo.whyTitle2')}</p>
+              <ul className="portal-voice-memo-why-list">
+                <li>{t('voiceMemo.why1')}</li>
+                <li>{t('voiceMemo.why3')}</li>
+                <li>{t('voiceMemo.why4')}</li>
+              </ul>
+            </div>
+            <a
+              className="portal-voice-memo-resubmit-btn"
+              href={VOICE_MEMO_SIGNAL_CONTACT_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              {t('voiceMemo.resubmitButton')}
+            </a>
+            <details className="portal-voice-memo-resubmit">
+              <summary>{t('voiceMemo.resubmitSummary')}</summary>
+              <PortalVoiceMemoInstructions aesopId={studentUserId} />
+            </details>
           </div>
         </>
       ) : (
-        <div className="portal-voice-memo-warning" role="alert">
-          <p className="portal-voice-memo-warning-title">{t('voiceMemo.noneTitle')}</p>
-          <p className="portal-voice-memo-warning-lead">{t('voiceMemo.noneLead')}</p>
-          <p className="portal-voice-memo-why-title">{t('voiceMemo.whyTitle')}</p>
-          <ul className="portal-voice-memo-why-list">
-            <li>{t('voiceMemo.why1')}</li>
-            <li>{t('voiceMemo.why2')}</li>
-            <li>{t('voiceMemo.why3')}</li>
-            <li>{t('voiceMemo.why4')}</li>
-          </ul>
-        </div>
+        <>
+          <div className="portal-voice-memo-warning" role="alert">
+            <p className="portal-voice-memo-warning-title">{t('voiceMemo.noneTitle')}</p>
+            <p className="portal-voice-memo-warning-lead">{t('voiceMemo.noneLead')}</p>
+          </div>
+          <div className="portal-voice-memo-panel">
+            <h4 className="portal-voice-memo-instructions-title">{t('voiceMemo.instrTitle')}</h4>
+            <PortalVoiceMemoInstructions aesopId={studentUserId} />
+            <div className="portal-voice-memo-why">
+              <p className="portal-voice-memo-why-title">{t('voiceMemo.whyTitle')}</p>
+              <ul className="portal-voice-memo-why-list">
+                <li>{t('voiceMemo.why1')}</li>
+                <li>{t('voiceMemo.why2')}</li>
+                <li>{t('voiceMemo.why3')}</li>
+                <li>{t('voiceMemo.why4')}</li>
+              </ul>
+            </div>
+          </div>
+        </>
       )}
     </section>
   );
@@ -2614,16 +2674,19 @@ function PortalCalendarSection({ enabled, studentUserId, studentEmail }) {
               const note = resolveNote(entry);
               return (
                 <tr key={`${entry.process}-${entry.date}-${index}`}>
-                  <td>{entry.process}</td>
-                  <td className="portal-calendar-date-cell">{entry.date}</td>
-                  <td className="portal-calendar-note-cell">{note || null}</td>
+                  <td data-label={t('calendar.process')}>{entry.process}</td>
+                  <td className="portal-calendar-date-cell" data-label={t('calendar.date')}>
+                    {entry.date}
+                  </td>
+                  <td className="portal-calendar-note-cell" data-label={t('calendar.info')}>
+                    {note || null}
+                  </td>
                 </tr>
               );
             })}
           </tbody>
         </table>
       </div>
-      <p className="portal-field-hint portal-calendar-deadline-note">{t('calendar.deadlineNote')}</p>
     </section>
   );
 }
@@ -2718,7 +2781,11 @@ function PortalComingSoonContent() {
       <h2 className="portal-welcome">{title}</h2>
       <p className="portal-coming-soon-message">{t('hub.comingSoonMessage')}</p>
       <p className="portal-coming-soon-message">{t('hub.comingSoonMessage2')}</p>
-      <p className="portal-coming-soon-message">{t('hub.comingSoonSignoff')}</p>
+      <p className="portal-coming-soon-message">
+        {t('hub.comingSoonSignoff')}
+        <br />
+        {t('hub.comingSoonSignoffNames')}
+      </p>
     </div>
   );
 }
@@ -2776,7 +2843,7 @@ function PortalHubPage() {
                 isTeacher={showTeacherFields && isTeacher}
                 hasStudentCategory={showStudentFields && hasStudentCategory}
                 isAdmin={showAdminFeatures}
-                isApplied={isApplied}
+                isApplied={false}
                 className="portal-welcome-role"
               />
             </h2>
@@ -3351,9 +3418,9 @@ function PortalAdminPage() {
         <div className="portal-card portal-content portal-admin-card">
           <PortalSectionLinks current="admin" isAdmin={false} />
           <div className="portal-session-banner" role="status">
-            <p className="portal-session-banner-title">Access denied</p>
+            <p className="portal-session-banner-title">Admin access not detected</p>
             <p className="portal-session-banner-text">
-              Your account is not on the admin allowlist. Contact operations if you need access.
+              This account is not currently marked as an admin in the People sheet.
             </p>
           </div>
         </div>
@@ -5595,9 +5662,9 @@ function PortalAdminCampaignsPage() {
         <div className="portal-card portal-content portal-admin-card">
           <PortalSectionLinks current="admin-campaigns" isAdmin={false} />
           <div className="portal-session-banner" role="status">
-            <p className="portal-session-banner-title">Access denied</p>
+            <p className="portal-session-banner-title">Admin access not detected</p>
             <p className="portal-session-banner-text">
-              Your account is not on the admin allowlist. Contact operations if you need access.
+              This account is not currently marked as an admin in the People sheet.
             </p>
           </div>
         </div>
@@ -6109,9 +6176,9 @@ function PortalAdminEmailsPage() {
         <div className="portal-card portal-content portal-admin-card">
           <PortalSectionLinks current="admin-emails" isAdmin={false} />
           <div className="portal-session-banner" role="status">
-            <p className="portal-session-banner-title">Access denied</p>
+            <p className="portal-session-banner-title">Admin access not detected</p>
             <p className="portal-session-banner-text">
-              Your account is not on the admin allowlist. Contact operations if you need access.
+              This account is not currently marked as an admin in the People sheet.
             </p>
           </div>
         </div>
