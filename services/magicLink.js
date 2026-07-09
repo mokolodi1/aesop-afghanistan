@@ -1,4 +1,5 @@
 const crypto = require('crypto');
+const { DateTime } = require('luxon');
 const { eq, lt } = require('drizzle-orm');
 const { sendEmail } = require('./email');
 const { findProfileById } = require('./googleSheets');
@@ -17,6 +18,24 @@ const {
 const magicLinkStore = new Map();
 
 const MAGIC_LINK_EXPIRY_MS = 15 * 60 * 1000;
+
+// Time zones shown in the sign-in email so recipients can tell at a glance
+// when their link expires in their local wall-clock time.
+const EXPIRY_DISPLAY_ZONES = [
+  { label: 'Afghanistan', zone: 'Asia/Kabul' },
+  { label: 'Pakistan', zone: 'Asia/Karachi' },
+  { label: 'Iran', zone: 'Asia/Tehran' },
+  { label: 'East Coast USA', zone: 'America/New_York' },
+  { label: 'West Coast USA', zone: 'America/Los_Angeles' },
+  { label: 'China', zone: 'Asia/Shanghai' },
+];
+
+function formatExpiryAcrossZones(expiresAt) {
+  const expiry = DateTime.fromJSDate(expiresAt);
+  return EXPIRY_DISPLAY_ZONES.map(
+    ({ label, zone }) => `${expiry.setZone(zone).toFormat('h:mm a')} ${label}`
+  ).join(', ');
+}
 
 function magicLinkSiteOrigin() {
   const raw = (
@@ -227,15 +246,17 @@ async function sendMagicLinkEmail(email, token, { name = '', userId = '' } = {})
   // server — keeps it out of Fly/proxy access logs and Referer headers.
   const magicLink = `${origin}/verify.html#token=${token}`;
 
-  const emailSubject = 'Sign in to your AESOP portal';
+  const emailSubject = 'AESOP Portal Sign In Link';
   const { ink, muted, accent, accentDark, skyTint, line } = AESOP_EMAIL;
   const safeLinkText = escapeHtml(magicLink);
+  const expiresAt = new Date(Date.now() + MAGIC_LINK_EXPIRY_MS);
+  const expiryAcrossZones = formatExpiryAcrossZones(expiresAt);
   const innerHtml = `
       <p style="margin:0 0 16px;font-family:${FONT_HEADING};font-size:18px;font-weight:700;color:${ink};">
-        Sign in to the AESOP portal
+        Link to Sign In to the AESOP Portal
       </p>
       <p style="margin:0 0 12px;line-height:1.5;">
-        Hello ${greetingName},
+        Hello <strong>${greetingName}</strong>,
       </p>
       ${
         safeUserId
@@ -243,13 +264,13 @@ async function sendMagicLinkEmail(email, token, { name = '', userId = '' } = {})
           : ''
       }
       <p style="margin:0 0 18px;line-height:1.5;">
-        Use the login link below on the same device where you requested access. It expires in <strong>15 minutes</strong>.
+        Use the link below on the device you would like to log in on.
       </p>
       <table role="presentation" cellpadding="0" cellspacing="0">
         <tr>
           <td style="border-radius:12px;background-color:${accent};">
             <a href="${magicLink.replace(/&/g, '&amp;')}" style="display:inline-block;padding:12px 24px;font-family:${FONT_STACK};font-size:14px;font-weight:700;color:#ffffff;text-decoration:none;border-radius:12px;">
-              Open login link
+              Click to Sign In
             </a>
           </td>
         </tr>
@@ -259,6 +280,9 @@ async function sendMagicLinkEmail(email, token, { name = '', userId = '' } = {})
         ${safeLinkText}
       </p>
       <p style="margin:18px 0 0;font-size:13px;line-height:1.5;color:${muted};">
+        The login link expires in <strong>15 minutes</strong>. (Expires at ${expiryAcrossZones})
+      </p>
+      <p style="margin:12px 0 0;font-size:13px;line-height:1.5;color:${muted};">
         If you did not request this email, you may disregard it.
       </p>
   `;
@@ -270,8 +294,10 @@ async function sendMagicLinkEmail(email, token, { name = '', userId = '' } = {})
     safeName ? `Hello ${safeName},` : 'Hello,',
     safeUserId ? `Your AESOP ID: ${safeUserId}` : '',
     '',
-    'Use this login link to sign in (same device you used to request it). Expires in 15 minutes:',
+    'Use this link to sign in on the device you would like to log in on:',
     magicLink,
+    '',
+    `The login link expires in 15 minutes. (Expires at ${expiryAcrossZones})`,
     '',
     'If you did not request this email, you may disregard it.',
     '',
@@ -327,4 +353,5 @@ module.exports = {
   verifyMagicLink,
   sendMagicLinkEmail,
   resendMagicLinkByToken,
+  isFlyProduction,
 };

@@ -669,19 +669,10 @@ async function loadPortalClassGradeFromApi() {
       });
       const data = await response.json();
       if (!data.success) {
-        return {
-          classSection: '',
-          calculatedGrade: '',
-          classGrades: [],
-          isTeacher: false,
-          teacherClasses: '',
-          isAdmin: false,
-          isReviewer: false,
-          isApplied: false,
-          isApplicant: false,
-          peopleStatus: '',
-          applicationStatus: '',
-        };
+        // Transient failures (e.g. a 429 from the rate limiter) must NOT strip the
+        // user's role flags, otherwise an admin/reviewer loses their nav tabs until
+        // the next successful load. Signal failure so callers keep the session values.
+        return { failed: true };
       }
       const classSection = typeof data.classSection === 'string' ? data.classSection.trim() : '';
       const calculatedGrade =
@@ -752,19 +743,8 @@ async function loadPortalClassGradeFromApi() {
         applicationStatus,
       };
     } catch {
-      return {
-        classSection: '',
-        calculatedGrade: '',
-        classGrades: [],
-        isTeacher: false,
-        teacherClasses: '',
-        isAdmin: false,
-        isReviewer: false,
-        isApplied: false,
-        isApplicant: false,
-        peopleStatus: '',
-        applicationStatus: '',
-      };
+      // Network/parse error: preserve existing role flags instead of downgrading.
+      return { failed: true };
     } finally {
       portalClassGradeInFlight = null;
     }
@@ -797,6 +777,7 @@ function usePortalClassGrade() {
     let cancelled = false;
     loadPortalClassGradeFromApi().then(
       ({
+        failed,
         classSection,
         calculatedGrade,
         classGrades: grades,
@@ -810,6 +791,9 @@ function usePortalClassGrade() {
         applicationStatus: appStatus,
       }) => {
         if (cancelled) return;
+        // A failed load returns only { failed: true }; keep the session-derived
+        // role flags rather than wiping them (which would hide admin/reviewer nav).
+        if (failed) return;
         setStudentClass(classSection);
         setStudentGrade(calculatedGrade);
         setClassGrades(grades);
@@ -1744,14 +1728,10 @@ function PortalSignInOnlyContent({ inputId = 'portalMagicUserId' }) {
       <div id="portal-magic-link-form" className="portal-signin-panel">
         <h3 className="portal-signin-heading">{t('hub.signInHeading')}</h3>
         <p className="portal-signin-lead">{t('hub.signInLead')}</p>
+        <p className="portal-signin-id-hint">{t('hub.signInIdHint')}</p>
         <MagicLinkRequestForm inputId={inputId} />
       </div>
       <p className="portal-hub-footnote">
-        <a href="/faq">{t('hub.readFaqs')}</a>
-        <span className="portal-footer-sep" aria-hidden="true">
-          {' '}
-          ·{' '}
-        </span>
         <a href="https://aesopafghanistan.org/">aesopafghanistan.org</a>
       </p>
     </>
@@ -1773,7 +1753,7 @@ function RequestMagicLinkApp() {
       </div>
       <h1>AESOP Afghanistan</h1>
       <p className="subtitle">Enter your AESOP ID to receive a login link</p>
-      <MagicLinkRequestForm inputId="userId" submitLabel="Email me a login link" />
+      <MagicLinkRequestForm inputId="userId" submitLabel="Send Login Link" />
     </div>
   );
 }
@@ -2301,13 +2281,22 @@ function PortalLayout({ children }) {
 function PortalSectionLinks({ current, isAdmin, isReviewer, showEditDingLink = true }) {
   const { t } = usePortalI18n();
   const hubHref = portalHubHref();
-  const resolvedReviewer = isReviewer ?? readPortalIsReviewer();
+  const isApplicant = readPortalIsApplicant();
+  // Applicants never manage a Ding number, so the edit-Ding tab is always hidden for them.
+  const showEditDing = showEditDingLink && !isReviewer && !isApplicant;
+  // For applicants the only destination is "Profile", so drop the tab bar entirely and
+  // leave just the "Welcome" heading. Everyone else (students, reviewers, admins) keeps
+  // their nav so they never lose access to their tabs.
+  const hasExtraLinks = showEditDing || isReviewer || isAdmin;
+  if (isApplicant && !hasExtraLinks) {
+    return null;
+  }
   return (
     <nav className="portal-section-links" aria-label={t('nav.portalNav')}>
       <a href={hubHref} className={current === 'hub' ? 'is-current' : undefined}>
         {t('nav.profile')}
       </a>
-      {showEditDingLink && !resolvedReviewer ? (
+      {showEditDing ? (
         <>
           <span className="portal-section-links-sep" aria-hidden="true">
             ·
@@ -2384,7 +2373,6 @@ function usePortalStudentRecord() {
 
 function PortalVoiceMemoSection({ studentUserId, studentEmail, enabled }) {
   const { locale, t } = usePortalI18n();
-  const [voiceMemoOpen, setVoiceMemoOpen] = useState(false);
   const [voiceMemoLoading, setVoiceMemoLoading] = useState(false);
   const [voiceMemoError, setVoiceMemoError] = useState('');
   const [voiceMemoStatus, setVoiceMemoStatus] = useState(null);
@@ -2393,7 +2381,7 @@ function PortalVoiceMemoSection({ studentUserId, studentEmail, enabled }) {
   const voiceMemoRetryCountRef = useRef(0);
 
   const voiceMemoStreamSrc = useMemo(() => {
-    if (!voiceMemoOpen || !voiceMemoStatus?.hasRecording || !enabled) {
+    if (!voiceMemoStatus?.submitted || !voiceMemoStatus?.hasRecording || !enabled) {
       return '';
     }
     // The stream URL carries only a short-lived signed token (no userId/email).
@@ -2403,7 +2391,7 @@ function PortalVoiceMemoSection({ studentUserId, studentEmail, enabled }) {
     }
     const params = new URLSearchParams({ st: streamToken });
     return `/api/portal-voice-memo/stream?${params.toString()}`;
-  }, [voiceMemoOpen, voiceMemoStatus?.hasRecording, voiceMemoStatus?.streamToken, enabled]);
+  }, [voiceMemoStatus?.submitted, voiceMemoStatus?.hasRecording, voiceMemoStatus?.streamToken, enabled]);
 
   useEffect(() => {
     if (!enabled) {
@@ -2472,189 +2460,167 @@ function PortalVoiceMemoSection({ studentUserId, studentEmail, enabled }) {
 
   return (
     <section className="portal-voice-memo-section" aria-label={t('voiceMemo.sectionAria')}>
-      <div
-        className={`portal-voice-memo-status${
-          voiceMemoStatus.submitted
-            ? ' portal-voice-memo-status--submitted'
-            : ' portal-voice-memo-status--pending'
-        }`}
-        role="status"
-      >
-        {voiceMemoLoading
-          ? t('voiceMemo.checking')
-          : voiceMemoStatus.submitted
-            ? t('voiceMemo.submitted')
-            : t('voiceMemo.notSubmitted')}
-      </div>
-      {!voiceMemoLoading && !voiceMemoStatus.submitted ? (
-        <div className="portal-voice-memo-instructions">
-          <p className="portal-field-hint portal-voice-memo-instructions-text">
-            {t('voiceMemo.instructionsParagraph')}
-          </p>
+      {voiceMemoLoading ? (
+        <div className="portal-voice-memo-status portal-voice-memo-status--pending" role="status">
+          {t('voiceMemo.checking')}
         </div>
-      ) : null}
-
-      <div className="portal-ding-accordion portal-voice-memo-accordion" aria-label={t('voiceMemo.accordionAria')}>
-        <div className="portal-ding-accordion-item">
-          <button
-            type="button"
-            role="tab"
-            id="voice-memo-tab"
-            aria-selected={voiceMemoOpen}
-            aria-controls="voice-memo-panel"
-            aria-expanded={voiceMemoOpen}
-            className={`portal-ding-tab${voiceMemoOpen ? ' is-active' : ''}`}
-            onClick={() =>
-              setVoiceMemoOpen((open) => {
-                if (!open) {
-                  voiceMemoRetryCountRef.current = 0;
-                }
-                return !open;
-              })
-            }
-          >
-            <span className="portal-ding-tab-label">{t('voiceMemo.label')}</span>
-            <span className="portal-ding-tab-chevron" aria-hidden="true">
-              {voiceMemoOpen ? '▼' : '▶'}
-            </span>
-          </button>
-          {voiceMemoOpen ? (
-            <div
-              id="voice-memo-panel"
-              role="tabpanel"
-              aria-labelledby="voice-memo-tab"
-              className="portal-ding-tab-panel portal-voice-memo-panel"
-            >
-              {voiceMemoError ? (
-                <p className="portal-field-error" role="alert">
-                  {voiceMemoError}
-                </p>
-              ) : null}
-              {voiceMemoStatus.submitted ? (
-                <>
-                  {voiceMemoDurationWarning ? (
-                    <p className="portal-voice-memo-duration-warning" role="alert">
-                      {voiceMemoDurationWarning}
-                    </p>
-                  ) : null}
-                  {voiceMemoStatus.submittedAt ? (
-                    <p className="portal-field-hint">
-                      {t('voiceMemo.submittedOn')}{' '}
-                      <strong>{voiceMemoStatus.submittedAt}</strong>
-                      {voiceMemoStatus.fileName ? (
-                        <>
-                          {' '}
-                          (<span className="portal-admin-mono">{voiceMemoStatus.fileName}</span>)
-                        </>
-                      ) : null}
-                    </p>
-                  ) : null}
-                  {voiceMemoStatus.durationLabel ? (
-                    <p className="portal-field-hint">
-                      {t('voiceMemo.recordingLength')}: <strong>{voiceMemoStatus.durationLabel}</strong>
-                    </p>
-                  ) : null}
-                  {voiceMemoStatus.hasRecording ? (
-                    <>
-                      {voiceMemoAudioError ? (
-                        <p className="portal-field-error" role="alert">
-                          {voiceMemoAudioError}
-                        </p>
-                      ) : null}
-                      {voiceMemoStreamSrc ? (
-                        <audio
-                          key={voiceMemoStreamSrc}
-                          className="portal-voice-memo-player"
-                          controls
-                          preload="metadata"
-                          src={voiceMemoStreamSrc}
-                          onError={() => {
-                            // A likely-expired token: refresh status once to mint
-                            // a fresh one before surfacing an error to the user.
-                            if (voiceMemoRetryCountRef.current < 1) {
-                              voiceMemoRetryCountRef.current += 1;
-                              setVoiceMemoAudioError('');
-                              setVoiceMemoReloadKey((key) => key + 1);
-                              return;
-                            }
-                            setVoiceMemoAudioError(t('voiceMemo.audioPlayError'));
-                          }}
-                        >
-                          {t('voiceMemo.audioUnsupported')}
-                        </audio>
-                      ) : null}
-                    </>
-                  ) : (
-                    <p className="portal-field-hint">{t('voiceMemo.audioUnavailable')}</p>
-                  )}
-                </>
-              ) : null}
-            </div>
-          ) : null}
+      ) : voiceMemoStatus.submitted ? (
+        <>
+          <div className="portal-voice-memo-status portal-voice-memo-status--submitted" role="status">
+            {t('voiceMemo.submitted')}
+          </div>
+          <div className="portal-voice-memo-panel">
+            {voiceMemoError ? (
+              <p className="portal-field-error" role="alert">
+                {voiceMemoError}
+              </p>
+            ) : null}
+            {voiceMemoDurationWarning ? (
+              <p className="portal-voice-memo-duration-warning" role="alert">
+                {voiceMemoDurationWarning}
+              </p>
+            ) : null}
+            {voiceMemoStatus.submittedAt ? (
+              <p className="portal-field-hint">
+                {t('voiceMemo.submittedOn')}{' '}
+                <strong>{voiceMemoStatus.submittedAt}</strong>
+                {voiceMemoStatus.fileName ? (
+                  <>
+                    {' '}
+                    (<span className="portal-admin-mono">{voiceMemoStatus.fileName}</span>)
+                  </>
+                ) : null}
+              </p>
+            ) : null}
+            {voiceMemoStatus.durationLabel ? (
+              <p className="portal-field-hint">
+                {t('voiceMemo.recordingLength')}: <strong>{voiceMemoStatus.durationLabel}</strong>
+              </p>
+            ) : null}
+            {voiceMemoStatus.hasRecording ? (
+              <>
+                {voiceMemoAudioError ? (
+                  <p className="portal-field-error" role="alert">
+                    {voiceMemoAudioError}
+                  </p>
+                ) : null}
+                {voiceMemoStreamSrc ? (
+                  <audio
+                    key={voiceMemoStreamSrc}
+                    className="portal-voice-memo-player"
+                    controls
+                    preload="metadata"
+                    src={voiceMemoStreamSrc}
+                    onError={() => {
+                      // A likely-expired token: refresh status once to mint
+                      // a fresh one before surfacing an error to the user.
+                      if (voiceMemoRetryCountRef.current < 1) {
+                        voiceMemoRetryCountRef.current += 1;
+                        setVoiceMemoAudioError('');
+                        setVoiceMemoReloadKey((key) => key + 1);
+                        return;
+                      }
+                      setVoiceMemoAudioError(t('voiceMemo.audioPlayError'));
+                    }}
+                  >
+                    {t('voiceMemo.audioUnsupported')}
+                  </audio>
+                ) : null}
+              </>
+            ) : (
+              <p className="portal-field-hint">{t('voiceMemo.audioUnavailable')}</p>
+            )}
+          </div>
+        </>
+      ) : (
+        <div className="portal-voice-memo-warning" role="alert">
+          <p className="portal-voice-memo-warning-title">{t('voiceMemo.noneTitle')}</p>
+          <p className="portal-voice-memo-warning-lead">{t('voiceMemo.noneLead')}</p>
+          <p className="portal-voice-memo-why-title">{t('voiceMemo.whyTitle')}</p>
+          <ul className="portal-voice-memo-why-list">
+            <li>{t('voiceMemo.why1')}</li>
+            <li>{t('voiceMemo.why2')}</li>
+            <li>{t('voiceMemo.why3')}</li>
+            <li>{t('voiceMemo.why4')}</li>
+          </ul>
         </div>
-      </div>
+      )}
     </section>
   );
 }
 
-function PortalCalendarSection({ enabled }) {
+function PortalCalendarSection({ enabled, studentUserId, studentEmail }) {
   const { locale, t } = usePortalI18n();
-  const [calendarOpen, setCalendarOpen] = useState(false);
   const calendarEntries = useMemo(() => getPortalApplicationCalendarEntries(locale), [locale]);
+  const [voiceNoteSubmitted, setVoiceNoteSubmitted] = useState(false);
+
+  useEffect(() => {
+    if (!enabled || !studentUserId || !studentEmail) {
+      setVoiceNoteSubmitted(false);
+      return undefined;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const response = await fetch('/api/portal-voice-memo/status', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId: studentUserId, email: studentEmail }),
+        });
+        const data = await response.json();
+        if (cancelled) {
+          return;
+        }
+        setVoiceNoteSubmitted(response.ok && data?.submitted === true);
+      } catch {
+        if (!cancelled) {
+          setVoiceNoteSubmitted(false);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [enabled, studentUserId, studentEmail]);
 
   if (!enabled) {
     return null;
   }
 
+  const resolveNote = (entry) => {
+    if (entry.dynamicNote === 'voiceCompleted') {
+      return voiceNoteSubmitted ? t('calendar.note.voiceCompleted') : entry.note || '';
+    }
+    return entry.note || '';
+  };
+
   return (
     <section className="portal-calendar-section" aria-label={t('calendar.sectionAria')}>
-      <div className="portal-ding-accordion portal-calendar-accordion" aria-label={t('calendar.accordionAria')}>
-        <div className="portal-ding-accordion-item">
-          <button
-            type="button"
-            role="tab"
-            id="application-calendar-tab"
-            aria-selected={calendarOpen}
-            aria-controls="application-calendar-panel"
-            aria-expanded={calendarOpen}
-            className={`portal-ding-tab${calendarOpen ? ' is-active' : ''}`}
-            onClick={() => setCalendarOpen((open) => !open)}
-          >
-            <span className="portal-ding-tab-label">{t('calendar.label')}</span>
-            <span className="portal-ding-tab-chevron" aria-hidden="true">
-              {calendarOpen ? '▼' : '▶'}
-            </span>
-          </button>
-          {calendarOpen ? (
-            <div
-              id="application-calendar-panel"
-              role="tabpanel"
-              aria-labelledby="application-calendar-tab"
-              className="portal-ding-panel portal-calendar-panel"
-            >
-              <div className="portal-calendar-scroll">
-                <table className="portal-calendar-table">
-                  <thead>
-                    <tr>
-                      <th scope="col">{t('calendar.process')}</th>
-                      <th scope="col">{t('calendar.date')}</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {calendarEntries.map((entry, index) => (
-                      <tr key={`${entry.process}-${entry.date}-${index}`}>
-                        <td>{entry.process}</td>
-                        <td>{entry.date}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              <p className="portal-field-hint portal-calendar-deadline-note">{t('calendar.deadlineNote')}</p>
-            </div>
-          ) : null}
-        </div>
+      <h3 className="portal-calendar-heading">{t('calendar.label')}</h3>
+      <div className="portal-calendar-scroll">
+        <table className="portal-calendar-table">
+          <thead>
+            <tr>
+              <th scope="col">{t('calendar.process')}</th>
+              <th scope="col">{t('calendar.date')}</th>
+              <th scope="col">{t('calendar.info')}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {calendarEntries.map((entry, index) => {
+              const note = resolveNote(entry);
+              return (
+                <tr key={`${entry.process}-${entry.date}-${index}`}>
+                  <td>{entry.process}</td>
+                  <td className="portal-calendar-date-cell">{entry.date}</td>
+                  <td className="portal-calendar-note-cell">{note || null}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
       </div>
+      <p className="portal-field-hint portal-calendar-deadline-note">{t('calendar.deadlineNote')}</p>
     </section>
   );
 }
@@ -2697,19 +2663,66 @@ function PortalAdminImpersonateActions({ targetUserId, compact = false }) {
   );
 }
 
+function PortalRejectionLetter({ name }) {
+  const displayName = String(name || '').trim();
+  const enName = displayName || 'Applicant';
+  const faName = displayName || 'متقاضی';
+  const enParagraphs = [
+    `Dear ${enName},`,
+    'Thank you for your application to AESOP English classes in our 2026-2027 academic year.',
+    'We regret that your application was not selected to advance. We received over 9,000 applications this summer and we regret that we were not able to accept your application this time.',
+    'We admire your dedication to learning and encourage you to keep studying English with the help of AESOP\u2019s youtube channel where you can find English learning videos in English & Dari.',
+    'We hope you will apply again for AESOP\u2019s 2027-2028 academic year. Applications will open at AESOPAfghanistan.org in June, 2027.',
+    'Sincerely,',
+    'AESOP Admission Team',
+  ];
+  const faParagraphs = [
+    `${faName} عزیز،`,
+    'از شما سپاسگزاریم که برای صنف‌های انگلیسی AESOP در سال تعلیمی ۲۰۲۶–۲۰۲۷ درخواست فرستادید.',
+    'با تأسف باید به شما اطلاع بدهیم که درخواست شما برای مرحلهٔ بعدی انتخاب نشد. در تابستان امسال بیش از ۹۰۰۰ درخواست دریافت کردیم و متأسفانه نتوانستیم درخواست شما را در این دوره بپذیریم.',
+    'ما پشتکار و علاقهٔ شما را به یادگیری تحسین می‌کنیم و تشویقتان می‌کنیم که با استفاده از کانال یوتیوب AESOP به یادگیری زبان انگلیسی ادامه بدهید. در آن‌جا می‌توانید ویدیوهای آموزشی زبان انگلیسی به زبان انگلیسی و دری پیدا کنید.',
+    'امیدواریم برای سال تعلیمی ۲۰۲۷–۲۰۲۸ دوباره برای AESOP درخواست بدهید. درخواست‌ها در جون ۲۰۲۷ در AESOPAfghanistan.org باز خواهند شد.',
+    'با احترام،',
+    'تیم پذیرش AESOP',
+  ];
+  return (
+    <section className="portal-rejection-letter">
+      <div className="portal-rejection-letter-body" dir="ltr">
+        {enParagraphs.map((paragraph, index) => (
+          <p key={`en-${index}`} className="portal-rejection-letter-line">
+            {paragraph}
+          </p>
+        ))}
+      </div>
+      <div className="portal-rejection-letter-body portal-rejection-letter-body--fa" dir="rtl">
+        {faParagraphs.map((paragraph, index) => (
+          <p key={`fa-${index}`} className="portal-rejection-letter-line">
+            {paragraph}
+          </p>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function PortalComingSoonContent() {
   const { t } = usePortalI18n();
+  const { studentName } = usePortalStudentRecord();
+  const trimmedName = String(studentName || '').trim();
+  const title = trimmedName ? t('hub.comingSoonTitle', { name: trimmedName }) : t('hub.comingSoonTitleNoName');
   return (
     <div className="portal-coming-soon">
-      <h2 className="portal-welcome">{t('hub.comingSoonTitle')}</h2>
+      <h2 className="portal-welcome">{title}</h2>
       <p className="portal-coming-soon-message">{t('hub.comingSoonMessage')}</p>
+      <p className="portal-coming-soon-message">{t('hub.comingSoonMessage2')}</p>
+      <p className="portal-coming-soon-message">{t('hub.comingSoonSignoff')}</p>
     </div>
   );
 }
 
 function PortalHubPage() {
   const { locale, t } = usePortalI18n();
-  const { studentName, studentUserId, studentEmail, studentPhone, newDingNumber } = usePortalStudentRecord();
+  const { studentName, studentUserId, studentEmail, studentPhone } = usePortalStudentRecord();
   const {
     studentClass,
     studentGrade,
@@ -2733,6 +2746,8 @@ function PortalHubPage() {
     studentName.trim() || (isApplied ? t('hub.welcomeApplicant') : t('hub.welcomeStudent'));
   const isRound1Accepted =
     String(applicationStatus || '').trim().toLowerCase() === 'accepted';
+  const isRejected =
+    String(applicationStatus || '').trim().toLowerCase() === 'rejected';
 
   useEffect(() => {
     if (!signedIn && intent) {
@@ -2770,14 +2785,6 @@ function PortalHubPage() {
               <div className="portal-hub-meta-row">
                 <dt className="portal-hub-meta-label">{t('header.email')}</dt>
                 <dd className="portal-hub-meta-value portal-ltr">{studentEmail || '—'}</dd>
-              </div>
-              <div className="portal-hub-meta-row">
-                <dt className="portal-hub-meta-label">{t('hub.dingNumber')}</dt>
-                <dd
-                  className={`portal-hub-meta-value portal-hub-meta-mono portal-ltr${newDingNumber.trim() ? '' : ' portal-hub-meta-empty'}`}
-                >
-                  {newDingNumber.trim() ? newDingNumber.trim() : t('hub.notSetYet')}
-                </dd>
               </div>
               {showStudentFields ? (
                 <div className="portal-hub-meta-row">
@@ -2849,21 +2856,18 @@ function PortalHubPage() {
                   </dd>
                 </div>
               ) : null}
-              {isRound1Accepted ? (
-                <div className="portal-hub-meta-row portal-hub-meta-row--next-steps">
-                  <dt className="portal-hub-meta-label">{t('hub.nextSteps')}</dt>
-                  <dd className="portal-hub-meta-value portal-hub-meta-value--message">
-                    {t('hub.nextStepsMessage')}
-                  </dd>
-                </div>
-              ) : null}
             </dl>
+            {isRejected ? <PortalRejectionLetter name={studentName} /> : null}
             <PortalVoiceMemoSection
               studentUserId={studentUserId}
               studentEmail={studentEmail}
               enabled={signedIn && studentUserId.length > 0 && studentEmail.length > 0}
             />
-            <PortalCalendarSection enabled={signedIn && isRound1Accepted} />
+            <PortalCalendarSection
+              enabled={signedIn && isRound1Accepted}
+              studentUserId={studentUserId}
+              studentEmail={studentEmail}
+            />
             {isTeacher || showAdminFeatures ? (
               <PortalTeacherRoster
                 rosterEnabled={isTeacher || showAdminFeatures}
@@ -2873,12 +2877,15 @@ function PortalHubPage() {
             {showStudentFields && signedIn ? <PortalStudentGrades isStudent /> : null}
             </>
           ) : isReviewer ? (
-            <PortalSectionLinks
-              current="hub"
-              isAdmin={showAdminFeatures}
-              isReviewer={isReviewer}
-              showEditDingLink={false}
-            />
+            <>
+              <PortalSectionLinks
+                current="hub"
+                isAdmin={showAdminFeatures}
+                isReviewer={isReviewer}
+                showEditDingLink={false}
+              />
+              <PortalComingSoonContent />
+            </>
           ) : (
             <>
               {showAdminFeatures ? (

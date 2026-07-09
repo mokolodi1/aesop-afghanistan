@@ -11,3 +11,9 @@ scripts/.venv
 .vscode
 node_modules
 data/backups/
+
+# Generated client bundle (built by esbuild via `npm run dev` / `npm run build`)
+public/app.js
+public/app.css
+public/app.js.map
+public/app.css.map

@@ -315,7 +315,7 @@ async function resolveVoiceMemoRecordingFromApplicant(applicant, durationLimits,
 async function getPortalVoiceMemoStatus({ userId, email }) {
   const profile = await verifyPortalVoiceMemoSession({ userId, email });
   if (!profile) {
-    const error = new Error("Unable to load voice memo status. Please sign in again using your login link.");
+    const error = new Error("Unable to load voice memo status. Please sign in again from the login link.");
     error.statusCode = 403;
     throw error;
   }
@@ -414,7 +414,7 @@ async function streamVoiceMemoForUserId(userId, rangeHeader = "") {
 async function getPortalVoiceMemoStream({ userId, email, rangeHeader = "" }) {
   const profile = await verifyPortalVoiceMemoSession({ userId, email });
   if (!profile) {
-    const error = new Error("Unable to play voice memo. Please sign in again using your login link.");
+    const error = new Error("Unable to play voice memo. Please sign in again from the login link.");
     error.statusCode = 403;
     throw error;
   }

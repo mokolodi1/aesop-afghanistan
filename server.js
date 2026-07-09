@@ -2,7 +2,7 @@ const express = require('express');
 const path = require('path');
 const config = require('./config/secrets');
 const { checkIdAndSendMagicLink } = require('./services/auth');
-const { verifyMagicLink, resendMagicLinkByToken } = require('./services/magicLink');
+const { verifyMagicLink, resendMagicLinkByToken, isFlyProduction } = require('./services/magicLink');
 const {
   findProfileByEmail,
   findProfileById,
@@ -280,7 +280,7 @@ async function isPortalApplicantProfile(userId, profile) {
 async function requirePortalReviewer(res, body) {
   const profile = await verifyPortalSessionBody(body.userId, body.email);
   if (!profile) {
-    res.status(403).json({ error: 'Unable to continue. Please sign in again using your login link.' });
+    res.status(403).json({ error: 'Unable to continue. Please sign in again from the login link.' });
     return null;
   }
   if (!await resolvePortalReviewerAccess(profile)) {
@@ -298,7 +298,7 @@ async function requirePortalReviewer(res, body) {
 async function requirePortalAdmin(res, body) {
   const profile = await verifyPortalSessionBody(body.userId, body.email);
   if (!profile) {
-    res.status(403).json({ error: 'Unable to continue. Please sign in again using your login link.' });
+    res.status(403).json({ error: 'Unable to continue. Please sign in again from the login link.' });
     return null;
   }
   if (!isPortalAdmin(profile)) {
@@ -606,7 +606,7 @@ const portalStudentGradesRateLimiter = createRateLimiter({ name: 'portal-student
 const portalAdminRateLimiter = createRateLimiter({ name: 'portal-admin', windowMs: 15 * 60 * 1000, max: 200 });
 
 const MAGIC_LINK_REQUEST_ACK_MESSAGE =
-  'If that AESOP ID is registered, a login link has been sent to the email on file.';
+  'Please click the login link that has been sent to your email on file.';
 
 const portalVoiceMemoRateLimiter = createRateLimiter({ name: 'portal-voice-memo', windowMs: 15 * 60 * 1000, max: 40 });
 const portalVoiceMemoStreamRateLimiter = createRateLimiter({
@@ -657,11 +657,11 @@ app.post('/api/update-ding-number', dingUpdateRateLimiter, async (req, res) => {
 
     const profile = await findProfileById(userId);
     if (!profile) {
-      return res.status(403).json({ error: 'Unable to update. Please sign in again using your login link.' });
+      return res.status(403).json({ error: 'Unable to update. Please sign in again from the login link.' });
     }
 
     if (sanitizeEmail(profile.email) !== emailSan) {
-      return res.status(403).json({ error: 'Unable to update. Please sign in again using your login link.' });
+      return res.status(403).json({ error: 'Unable to update. Please sign in again from the login link.' });
     }
 
     if (await isPortalApplicantProfile(userId, profile)) {
@@ -751,11 +751,11 @@ app.post('/api/portal-request-ding-help', portalDingHelpRateLimiter, async (req,
 
     const profile = await findProfileById(userId);
     if (!profile) {
-      return res.status(403).json({ error: 'Unable to send request. Please sign in again using your login link.' });
+      return res.status(403).json({ error: 'Unable to send request. Please sign in again from the login link.' });
     }
 
     if (sanitizeEmail(profile.email) !== emailSan) {
-      return res.status(403).json({ error: 'Unable to send request. Please sign in again using your login link.' });
+      return res.status(403).json({ error: 'Unable to send request. Please sign in again from the login link.' });
     }
 
     if (await isPortalApplicantProfile(userId, profile)) {
@@ -814,11 +814,11 @@ app.post('/api/portal-ding-history', portalDingHistoryRateLimiter, async (req, r
 
     const profile = await findProfileById(userId);
     if (!profile) {
-      return res.status(403).json({ error: 'Unable to load history. Please sign in again using your login link.' });
+      return res.status(403).json({ error: 'Unable to load history. Please sign in again from the login link.' });
     }
 
     if (sanitizeEmail(profile.email) !== emailSan) {
-      return res.status(403).json({ error: 'Unable to load history. Please sign in again using your login link.' });
+      return res.status(403).json({ error: 'Unable to load history. Please sign in again from the login link.' });
     }
 
     if (await isPortalApplicantProfile(userId, profile)) {
@@ -854,14 +854,14 @@ app.post('/api/portal-class-grade', portalClassGradeRateLimiter, async (req, res
       recordPortalClassGradeFail(1);
       return res
         .status(403)
-        .json({ error: 'Unable to load class. Please sign in again using your login link.' });
+        .json({ error: 'Unable to load class. Please sign in again from the login link.' });
     }
 
     if (sanitizeEmail(profile.email) !== emailSan) {
       recordPortalClassGradeFail(1);
       return res
         .status(403)
-        .json({ error: 'Unable to load class. Please sign in again using your login link.' });
+        .json({ error: 'Unable to load class. Please sign in again from the login link.' });
     }
 
     const studentName = typeof profile.name === 'string' ? profile.name : '';
@@ -924,13 +924,13 @@ app.post('/api/portal-student-grades', portalStudentGradesRateLimiter, async (re
     if (!profile) {
       return res
         .status(403)
-        .json({ error: 'Unable to load grades. Please sign in again using your login link.' });
+        .json({ error: 'Unable to load grades. Please sign in again from the login link.' });
     }
 
     if (sanitizeEmail(profile.email) !== emailSan) {
       return res
         .status(403)
-        .json({ error: 'Unable to load grades. Please sign in again using your login link.' });
+        .json({ error: 'Unable to load grades. Please sign in again from the login link.' });
     }
 
     if (!config.classroom?.enabled) {
@@ -965,13 +965,13 @@ app.post('/api/portal-teacher-roster', portalTeacherRosterRateLimiter, async (re
     if (!profile) {
       return res
         .status(403)
-        .json({ error: 'Unable to load roster. Please sign in again using your login link.' });
+        .json({ error: 'Unable to load roster. Please sign in again from the login link.' });
     }
 
     if (sanitizeEmail(profile.email) !== emailSan) {
       return res
         .status(403)
-        .json({ error: 'Unable to load roster. Please sign in again using your login link.' });
+        .json({ error: 'Unable to load roster. Please sign in again from the login link.' });
     }
 
     if (!config.classroom?.enabled) {
@@ -1684,5 +1684,11 @@ app.listen(PORT, '0.0.0.0', async () => {
       console.error('[db] auto-migrate failed:', formatErrorForLog(error));
     }
   }
-  startEmailCampaignWorker();
+  // Never auto-send campaign batches from a dev machine; the worker polls the
+  // DB and pushes real Postmark sends. Opt in locally with EMAIL_CAMPAIGN_WORKER=true.
+  if (isFlyProduction() || process.env.EMAIL_CAMPAIGN_WORKER === 'true') {
+    startEmailCampaignWorker();
+  } else {
+    console.log('[email-campaigns] worker disabled outside Fly (set EMAIL_CAMPAIGN_WORKER=true to enable locally)');
+  }
 });
