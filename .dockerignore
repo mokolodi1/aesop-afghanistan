@@ -8,3 +8,8 @@ README.md
 .env.local
 .DS_Store
 config/secrets.json
+# Generated client bundle; rebuilt inside the image by `npm run build`
+public/app.js
+public/app.css
+public/app.js.map
+public/app.css.map
