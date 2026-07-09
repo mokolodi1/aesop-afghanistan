@@ -445,6 +445,7 @@ html[dir='rtl'] .portal-welcome,
 html[dir='rtl'] .portal-page-title,
 html[dir='rtl'] .portal-signin-heading,
 html[dir='rtl'] .portal-signin-lead,
+html[dir='rtl'] .portal-signin-id-hint,
 html[dir='rtl'] .portal-hub-intro,
 html[dir='rtl'] .portal-hub-purpose-text,
 html[dir='rtl'] .portal-intent-banner-text,
@@ -1178,6 +1179,13 @@ html[dir='rtl'] .portal-class-accordion-chevron {
 .portal-signin-lead {
   margin: 0 0 18px;
   font-size: 14px;
+  line-height: 1.5;
+  color: var(--aesop-muted);
+}
+
+.portal-signin-id-hint {
+  margin: 0 0 18px;
+  font-size: 13px;
   line-height: 1.5;
   color: var(--aesop-muted);
 }

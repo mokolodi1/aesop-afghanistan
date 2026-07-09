@@ -1721,14 +1721,10 @@ function PortalSignInOnlyContent({ inputId = 'portalMagicUserId' }) {
       <div id="portal-magic-link-form" className="portal-signin-panel">
         <h3 className="portal-signin-heading">{t('hub.signInHeading')}</h3>
         <p className="portal-signin-lead">{t('hub.signInLead')}</p>
+        <p className="portal-signin-id-hint">{t('hub.signInIdHint')}</p>
         <MagicLinkRequestForm inputId={inputId} />
       </div>
       <p className="portal-hub-footnote">
-        <a href="/faq">{t('hub.readFaqs')}</a>
-        <span className="portal-footer-sep" aria-hidden="true">
-          {' '}
-          ·{' '}
-        </span>
         <a href="https://aesopafghanistan.org/">aesopafghanistan.org</a>
       </p>
     </>

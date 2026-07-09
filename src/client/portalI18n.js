@@ -66,10 +66,11 @@ const TRANSLATIONS = {
     'hub.comingSoonMessage': 'Student/Teacher Feature will be visible soon.',
     'hub.reviewerLead':
       'Open Review Applications to score essays for applicants assigned to you.',
-    'hub.signInHeading': 'Connect with your AESOP ID',
+    'hub.signInHeading': 'Log in with your AESOP ID',
     'hub.signInLead':
-      'Enter the student ID AESOP gave you. We\'ll email a magic link; open it on this device to finish signing in.',
-    'hub.readFaqs': 'Read FAQs',
+      'Enter the ID AESOP provided you. We will email you a login link that will log you in to the AESOP Portal.',
+    'hub.signInIdHint':
+      'Your student ID should be either 10 or 11 numbers and looks like: 2617391637',
 
     'applicationStatus.accepted': 'Your application is accepted for Round 1 selection.',
     'applicationStatus.rejected':
@@ -132,7 +133,7 @@ const TRANSLATIONS = {
     'magicLink.invalidIdNotFound':
       'Your ID is invalid. Please enter a correct ID. Please enter the AESOP ID you received in your email.',
     'magicLink.linkSent':
-      'If that AESOP ID is registered, a sign-in link has been sent to the email on file. Please check your email.',
+      'Please click the login link that has been sent to your email on file.',
     'magicLink.sending': 'Checking your ID and sending a magic link...',
     'magicLink.networkError': 'Internal error. Please try again.',
 
@@ -279,10 +280,11 @@ const TRANSLATIONS = {
     'hub.comingSoonMessage': 'ویژگی‌های محصل/معلم به‌زودی در دسترس خواهد بود.',
     'hub.reviewerLead':
       'برای نمره‌دهی به مقاله‌های متقاضیانِ اختصاص‌داده‌شده به شما، «بررسی درخواست‌ها» را باز کنید.',
-    'hub.signInHeading': 'با AESOP ID خود وصل شوید',
+    'hub.signInHeading': 'با AESOP ID خود وارد شوید',
     'hub.signInLead':
-      'AESOP ID که AESOP به شما داده را وارد کنید. ما یک لینک جادویی ایمیل می‌کنیم؛ آن را روی همین دستگاه باز کنید تا وارد شوید.',
-    'hub.readFaqs': 'خواندن سوالات متداول',
+      'شناسه‌ای که AESOP به شما داده را وارد کنید. ما یک لینک ورود برای شما ایمیل می‌کنیم که شما را به پورتال AESOP وارد می‌کند.',
+    'hub.signInIdHint':
+      'شناسه محصلی شما باید ۱۰ یا ۱۱ رقم باشد و مانند این است: 2617391637',
 
     'applicationStatus.accepted': 'درخواست شما برای انتخاب دور اول پذیرفته شده است.',
     'applicationStatus.rejected':
@@ -345,7 +347,7 @@ const TRANSLATIONS = {
     'magicLink.invalidIdNotFound':
       'AESOP ID شما معتبر نیست. لطفاً AESOP ID درست را وارد کنید — همان شناسه‌ای که در ایمیل خود دریافت کرده‌اید.',
     'magicLink.linkSent':
-      'اگر این AESOP ID ثبت شده باشد، لینک ورود به ایمیل ثبت‌شده ارسال شده است. لطفاً ایمیل خود را بررسی کنید.',
+      'لطفاً روی لینک ورودی که به ایمیل ثبت‌شده شما ارسال شده کلیک کنید.',
     'magicLink.sending': 'در حال بررسی AESOP ID و ارسال لینک جادویی…',
     'magicLink.networkError': 'خطای داخلی. لطفاً دوباره تلاش کنید.',
 

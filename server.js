@@ -577,7 +577,7 @@ const portalStudentGradesRateLimiter = createRateLimiter({ name: 'portal-student
 const portalAdminRateLimiter = createRateLimiter({ name: 'portal-admin', windowMs: 15 * 60 * 1000, max: 200 });
 
 const MAGIC_LINK_REQUEST_ACK_MESSAGE =
-  'If that AESOP ID is registered, a sign-in link has been sent to the email on file.';
+  'Please click the login link that has been sent to your email on file.';
 
 const portalVoiceMemoRateLimiter = createRateLimiter({ name: 'portal-voice-memo', windowMs: 15 * 60 * 1000, max: 40 });
 const portalVoiceMemoStreamRateLimiter = createRateLimiter({
