@@ -3,29 +3,29 @@
 /** @type {PortalApplicationCalendarEntryDef[]} */
 const PORTAL_APPLICATION_CALENDAR_ENTRY_DEFS = [
   {
-    processKey: "calendar.event.signalVoice",
-    process: "Signal voice messages (students send in)",
-    date: "Saturday, June 27, 2026",
+    processKey: "calendar.event.voiceNoteDeadline",
+    process: "Round 2 voice note submission deadline (11:59 pm)",
+    date: "Wednesday, July 15, 2026",
   },
   {
-    processKey: "calendar.event.manualReview",
-    process: "Manual review (of signal + essay)",
-    date: "Saturday, July 11, 2026",
+    processKey: "calendar.event.round2Results",
+    process: "Round 2 Results Shared",
+    date: "Friday, July 24, 2026",
   },
   {
-    processKey: "calendar.event.interviews",
-    process: "Interviews",
-    date: "Saturday, July 18, 2026",
+    processKey: "calendar.event.interviewStart",
+    process: "Interview start",
+    date: "Saturday, July 25, 2026",
   },
   {
-    processKey: "calendar.event.decisions",
-    process: "Decisions",
-    date: "Saturday, August 8, 2026",
+    processKey: "calendar.event.interviewEnd",
+    process: "Interview end",
+    date: "Monday, August 10, 2026",
   },
   {
-    processKey: "calendar.event.studentsAdmitted",
-    process: "Students admitted",
-    date: "Saturday, August 15, 2026",
+    processKey: "calendar.event.round3Decision",
+    process: "Final Round 3 Admission Decision Shared",
+    date: "Monday, August 17, 2026",
   },
   {
     processKey: "calendar.event.openingCeremony",

@@ -89,6 +89,16 @@ const { securityHeaders } = require('./middleware/security');
 const { formatDingChangeTimestamp } = require('./utils/dingSheetTime');
 const { sendDingNumberUpdatedEmail, sendPortalDingHelpRequestEmail } = require('./services/email');
 const { formatErrorForLog, formatGoogleSheetsWriteErrorForLog, isGoogleSheetsForbidden, formatDbErrorMessage } = require('./utils/errorLogging');
+const {
+  createPortalMetricsMiddleware,
+  startPortalMetricsFlusher,
+  recordLoginSuccess,
+  recordLoginFailed,
+  recordVerifyError,
+  recordMagicLinkRequest,
+  recordPortalClassGradeFail,
+  getPortalStats,
+} = require('./services/portalMetrics');
 
 /** Value for Ding changes sheet column D when the student updates Ding via the portal (not their personal name). */
 const PORTAL_DING_CHANGE_SOURCE_LABEL = 'Student portal';
@@ -337,11 +347,25 @@ function isPortalRequestHost(req) {
   return host.startsWith('portal.');
 }
 
+app.use(
+  createPortalMetricsMiddleware({
+    isPortalHost: (req) => isPortalRequestHost(req),
+  }),
+);
+
 app.use((req, res, next) => {
   if (req.method !== 'GET') {
     return next();
   }
-  if (req.path === '/profile' || req.path === '/faq' || req.path === '/admin' || req.path === '/admin/emails' || req.path === '/admin/campaigns' || req.path === '/reviews') {
+  if (
+    req.path === '/profile' ||
+    req.path === '/faq' ||
+    req.path === '/admin' ||
+    req.path === '/admin/emails' ||
+    req.path === '/admin/campaigns' ||
+    req.path === '/admin/stats' ||
+    req.path === '/reviews'
+  ) {
     return res.sendFile(path.join(__dirname, 'public', 'portal.html'));
   }
   if (isPortalRequestHost(req) && req.path === '/') {
@@ -395,6 +419,7 @@ app.post('/api/request-magic-link', magicLinkRateLimiter, async (req, res) => {
     // Never reveal whether the ID exists (prevents AESOP ID enumeration).
     // Fire the lookup + send without awaiting so the response time is identical
     // whether or not the ID was found; errors are logged, not surfaced.
+    recordMagicLinkRequest(1);
     checkIdAndSendMagicLink(userId).catch((error) => {
       console.error('Error requesting magic link:', formatErrorForLog(error));
     });
@@ -529,6 +554,7 @@ app.post('/api/verify-magic-link', verifyRateLimiter, async (req, res) => {
         });
       }
 
+      recordLoginSuccess();
       res.json({
         success: true,
         email: emailFromSheet,
@@ -550,6 +576,7 @@ app.post('/api/verify-magic-link', verifyRateLimiter, async (req, res) => {
         message: 'Login link verified successfully',
       });
     } else {
+      recordLoginFailed();
       res.status(401).json({
         error: 'Invalid or expired login link.',
         canResend: result.canResend === true,
@@ -557,6 +584,7 @@ app.post('/api/verify-magic-link', verifyRateLimiter, async (req, res) => {
     }
   } catch (error) {
     // Log error but don't expose details to client
+    recordVerifyError(1);
     console.error('Error verifying magic link:', formatErrorForLog(error));
     res.status(500).json({ error: 'An error occurred verifying the link.' });
   }
@@ -810,23 +838,27 @@ app.post('/api/portal-class-grade', portalClassGradeRateLimiter, async (req, res
     let { userId, email } = req.body;
 
     if (!userId || typeof userId !== 'string' || !email || typeof email !== 'string') {
+      recordPortalClassGradeFail(1);
       return res.status(400).json({ error: 'ID and email are required.' });
     }
 
     userId = sanitizeIdentifier(userId);
     const emailSan = sanitizeEmail(email);
     if (!userId || !emailSan) {
+      recordPortalClassGradeFail(1);
       return res.status(400).json({ error: 'Invalid ID or email.' });
     }
 
     const profile = await findProfileById(userId);
     if (!profile) {
+      recordPortalClassGradeFail(1);
       return res
         .status(403)
         .json({ error: 'Unable to load class. Please sign in again using your login link.' });
     }
 
     if (sanitizeEmail(profile.email) !== emailSan) {
+      recordPortalClassGradeFail(1);
       return res
         .status(403)
         .json({ error: 'Unable to load class. Please sign in again using your login link.' });
@@ -868,6 +900,7 @@ app.post('/api/portal-class-grade', portalClassGradeRateLimiter, async (req, res
       peopleStatus,
     });
   } catch (error) {
+    recordPortalClassGradeFail(1);
     console.error('Error loading portal class/grade:', formatErrorForLog(error));
     res.status(500).json({ error: 'Could not load class or grade. Please try again later.' });
   }
@@ -961,6 +994,21 @@ app.post('/api/portal-teacher-roster', portalTeacherRosterRateLimiter, async (re
   } catch (error) {
     console.error('Error loading teacher roster:', formatErrorForLog(error));
     res.status(500).json({ error: 'Could not load your class roster. Please try again later.' });
+  }
+});
+
+app.post('/api/portal-admin/stats', portalAdminRateLimiter, async (req, res) => {
+  try {
+    const profile = await requirePortalAdmin(res, req.body);
+    if (!profile) {
+      return;
+    }
+    const windowKey = typeof req.body.window === 'string' ? req.body.window : '5m';
+    const stats = await getPortalStats(windowKey);
+    res.json({ success: true, ...stats });
+  } catch (error) {
+    console.error('Error loading portal admin stats:', formatErrorForLog(error));
+    res.status(500).json({ error: 'Could not load portal stats.' });
   }
 });
 
@@ -1626,6 +1674,7 @@ app.post('/api/postmark/webhook', postmarkWebhookRateLimiter, async (req, res) =
 
 app.listen(PORT, '0.0.0.0', async () => {
   console.log(`Server running on port ${PORT}`);
+  startPortalMetricsFlusher();
   if (process.env.DATABASE_AUTO_MIGRATE === 'true' && isDatabaseEnabled()) {
     try {
       const { runMigrations } = require('./db/migrate');

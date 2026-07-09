@@ -1,6 +1,8 @@
 // Simple in-memory rate limiter
 // For production, use Redis-based rate limiting
 
+const { recordRateLimitHit } = require('../services/portalMetrics');
+
 const rateLimitStore = new Map();
 
 // Clean up old entries every 5 minutes
@@ -48,6 +50,7 @@ function createRateLimiter({ windowMs = 15 * 60 * 1000, max = 5, name = 'default
 
     // Check if limit exceeded
     if (record.count >= max) {
+      recordRateLimitHit(name);
       return res.status(429).json({
         error: 'Too many requests. Please try again later.'
       });

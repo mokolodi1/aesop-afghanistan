@@ -21,6 +21,7 @@ const {
   getWorksheetByTitle,
   resolveColumnIndex,
 } = require("./googleSheets");
+const { recordSheetsApiCall, recordSheetsApiError } = require("./portalMetrics");
 const { isDatabaseEnabled } = require("../db/index");
 const { getApplicantRowByAesopIdFromDb } = require("./classroomDb");
 
@@ -117,11 +118,19 @@ async function loadApplicantsDataForStats() {
   const sheets = google.sheets({ version: "v4", auth });
   const startRow = cfg.headerRowNum + 1;
   const range = `${escapeSheetRangeName(cfg.sheetName)}!A${startRow}:ZZ`;
-  const response = await sheets.spreadsheets.values.get({
-    spreadsheetId: sheetId,
-    range,
-    majorDimension: "ROWS",
-  });
+  let response;
+  try {
+    response = await sheets.spreadsheets.values.get({
+      spreadsheetId: sheetId,
+      range,
+      majorDimension: "ROWS",
+    });
+    recordSheetsApiCall(1);
+  } catch (error) {
+    recordSheetsApiCall(1);
+    recordSheetsApiError(1);
+    throw error;
+  }
 
   return {
     headerValues,
