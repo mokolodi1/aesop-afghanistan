@@ -136,13 +136,14 @@ function initGmailJwtClient() {
   }
 
   const delegatedUser = config.email?.gmailServiceAccount?.delegatedUser;
-  const credentials = config.email?.gmailServiceAccount?.credentials;
+  const { getServiceAccountCredentials } = require("./googleAuth");
+  const credentials = getServiceAccountCredentials();
 
   if (!delegatedUser) {
     throw new Error('Missing email.gmailServiceAccount.delegatedUser in secrets config.');
   }
 
-  if (!credentials || !credentials.client_email || !credentials.private_key) {
+  if (!credentials) {
     throw new Error('Missing email.gmailServiceAccount.credentials with service account JSON details.');
   }
 

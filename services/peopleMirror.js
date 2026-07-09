@@ -495,6 +495,7 @@ async function mirrorApplicantsAndDriveFromSheets() {
   let mirrored = 0;
   const gs = config.googleSheets || {};
   const levelColumnIndex = resolveColumnIndex(gs.admissionsLevelColumn || "E");
+  const ageColumnIndex = resolveColumnIndex(gs.admissionsAgeColumn || "L");
   const essayColumnIndex = resolveColumnIndex(gs.admissionsEssayColumn || "K");
 
   for (const rowData of dataRows) {
@@ -506,6 +507,7 @@ async function mirrorApplicantsAndDriveFromSheets() {
     const email = String(rowData[cfg.emailColumnIndex] ?? "").trim();
     const name = String(rowData[cfg.nameColumnIndex] ?? "").trim();
     const appliedLevel = String(rowData[levelColumnIndex] ?? "").trim();
+    const age = String(rowData[ageColumnIndex] ?? "").trim();
     const essay = String(rowData[essayColumnIndex] ?? "").trim();
     const round1 = String(rowData[columns.round1] ?? "").trim();
     const round2 = String(rowData[columns.round2] ?? "").trim();
@@ -525,6 +527,7 @@ async function mirrorApplicantsAndDriveFromSheets() {
       email,
       name,
       appliedLevel,
+      age,
       essay,
       round1,
       round2,

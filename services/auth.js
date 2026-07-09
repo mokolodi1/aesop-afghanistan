@@ -2,6 +2,7 @@ const { findProfileById } = require('./googleSheets');
 const { generateAndStoreMagicLink, sendMagicLinkEmail, isFlyProduction } = require('./magicLink');
 const { sanitizeEmail, sanitizeIdentifier } = require('../utils/validation');
 const { formatErrorForLog } = require('../utils/errorLogging');
+const { recordMagicLinkUnknownId, recordMagicLinkSendFailed } = require('./portalMetrics');
 
 /**
  * Look up user by ID in Google Sheet and send magic link if found
@@ -30,6 +31,7 @@ async function checkIdAndSendMagicLink(userId) {
     }
 
     if (!profile?.email) {
+      recordMagicLinkUnknownId(1);
       if (!isFlyProduction()) {
         console.log(`[magic-link] no profile found for "${sanitizedId}"; no link issued.`);
       }
@@ -49,6 +51,7 @@ async function checkIdAndSendMagicLink(userId) {
     
     return { success: true, userFound: true };
   } catch (error) {
+    recordMagicLinkSendFailed(1);
     console.error('Error in checkIdAndSendMagicLink:', formatErrorForLog(error));
     throw error;
   }

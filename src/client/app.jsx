@@ -80,6 +80,7 @@ function getPortalRouteSegment() {
   if (pathname === '/profile' || pathname.startsWith('/profile/')) return 'profile';
   if (pathname === '/admin/emails') return 'admin-emails';
   if (pathname === '/admin/campaigns') return 'admin-campaigns';
+  if (pathname === '/admin/stats') return 'admin-stats';
   if (pathname === '/reviews') return 'reviews';
   if (pathname === '/admin' || pathname.startsWith('/admin/')) return 'admin';
   return 'hub';
@@ -104,6 +105,7 @@ function shouldMountPortalSpa() {
     p === '/admin' ||
     p === '/admin/emails' ||
     p === '/admin/campaigns' ||
+    p === '/admin/stats' ||
     p === '/reviews' ||
     p.startsWith('/profile/') ||
     p.startsWith('/faq/') ||
@@ -530,22 +532,43 @@ function stopPortalImpersonation() {
   window.location.assign('/admin');
 }
 
-async function portalApiPost(path, body = {}) {
+async function portalApiPost(path, body = {}, options = {}) {
   const userId = readSessionField('studentPortalUserId');
   const email = readSessionField('studentPortalEmail');
-  const response = await fetch(path, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ userId, email, ...body }),
-  });
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error((data && data.error) || `Request failed (HTTP ${response.status}).`);
+  const timeoutMs = Number(options.timeoutMs) > 0 ? Number(options.timeoutMs) : 0;
+  const controller = timeoutMs > 0 ? new AbortController() : null;
+  const timeoutId =
+    controller != null
+      ? window.setTimeout(() => {
+          controller.abort();
+        }, timeoutMs)
+      : null;
+
+  try {
+    const response = await fetch(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId, email, ...body }),
+      signal: controller?.signal,
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error((data && data.error) || `Request failed (HTTP ${response.status}).`);
+    }
+    if (data.success !== true) {
+      throw new Error((data && data.error) || 'Request failed.');
+    }
+    return data;
+  } catch (error) {
+    if (error && error.name === 'AbortError') {
+      throw new Error('Request timed out. Please try again.');
+    }
+    throw error;
+  } finally {
+    if (timeoutId != null) {
+      window.clearTimeout(timeoutId);
+    }
   }
-  if (data.success !== true) {
-    throw new Error((data && data.error) || 'Request failed.');
-  }
-  return data;
 }
 
 async function adminApiPost(path, body = {}) {
@@ -2255,16 +2278,19 @@ function PortalLayout({ children }) {
   );
 }
 
-function PortalSectionLinks({ current, isAdmin, isReviewer = false, showEditDingLink = true }) {
+function PortalSectionLinks({ current, isAdmin, isReviewer, showEditDingLink = true }) {
   const { t } = usePortalI18n();
   const hubHref = portalHubHref();
   const isApplicant = readPortalIsApplicant();
-  // Applicants never manage a Ding number, so the edit-Ding tab is always hidden for them.
-  const showEditDing = showEditDingLink && !isReviewer && !isApplicant;
+  // Fall back to session when callers (admin pages) omit isReviewer.
+  const resolvedReviewer = isReviewer === true || readPortalIsReviewer();
+  // Admins/reviewers use Review Applications instead of Edit Ding; applicants never manage Ding.
+  const showEditDing = showEditDingLink && !resolvedReviewer && !isAdmin && !isApplicant;
+  const showReviewsLink = resolvedReviewer || isAdmin;
   // For applicants the only destination is "Profile", so drop the tab bar entirely and
   // leave just the "Welcome" heading. Everyone else (students, reviewers, admins) keeps
   // their nav so they never lose access to their tabs.
-  const hasExtraLinks = showEditDing || isReviewer || isAdmin;
+  const hasExtraLinks = showEditDing || showReviewsLink || isAdmin;
   if (isApplicant && !hasExtraLinks) {
     return null;
   }
@@ -2283,7 +2309,7 @@ function PortalSectionLinks({ current, isAdmin, isReviewer = false, showEditDing
           </a>
         </>
       ) : null}
-      {isReviewer ? (
+      {showReviewsLink ? (
         <>
           <span className="portal-section-links-sep" aria-hidden="true">
             ·
@@ -2312,6 +2338,12 @@ function PortalSectionLinks({ current, isAdmin, isReviewer = false, showEditDing
           </span>
           <a href="/admin/campaigns" className={current === 'admin-campaigns' ? 'is-current' : undefined}>
             {t('nav.campaigns')}
+          </a>
+          <span className="portal-section-links-sep" aria-hidden="true">
+            ·
+          </span>
+          <a href="/admin/stats" className={current === 'admin-stats' ? 'is-current' : undefined}>
+            {t('nav.stats')}
           </a>
         </>
       ) : null}
@@ -4765,6 +4797,659 @@ function recipientEngagementSummary(recipient) {
   return parts.join(' · ');
 }
 
+const STATS_WINDOWS = [
+  { id: '1m', label: '1 min' },
+  { id: '5m', label: '5 mins' },
+  { id: '15m', label: '15 mins' },
+  { id: '1h', label: '1 hour' },
+];
+
+const STATS_PAGE_TYPE_LABELS = {
+  login: 'Login',
+  verify: 'Verify',
+  profile: 'Profile',
+  ding: 'Ding',
+  admin: 'Admin',
+  reviewer: 'Reviewer',
+  other: 'Other',
+};
+
+const STATS_INCIDENT_LABELS = {
+  magicLinkRequest: 'Magic-link requests',
+  magicLinkUnknownId: 'Unknown ID',
+  magicLinkSendFailed: 'Magic-link send failed',
+  verifySuccess: 'Verify success',
+  verifyExpired: 'Verify expired/invalid',
+  verifyError: 'Verify errors',
+  rateLimitHits: 'Rate-limit hits (429)',
+  portalClassGradeFail: 'Class/grade failures',
+  sheetsApiError: 'Sheets API errors',
+};
+
+const STATS_CHART_COLORS = {
+  successful: '#1f7a6c',
+  failed: '#c45c3e',
+  login: '#1f7a6c',
+  verify: '#3d8bfd',
+  profile: '#5b6abf',
+  ding: '#8a6d3b',
+  admin: '#c45c3e',
+  reviewer: '#6b7c85',
+  other: '#9aa5ad',
+  filesList: '#1f7a6c',
+  filesGet: '#c45c3e',
+  sheetsApi: '#3d8bfd',
+  errorRate: '#c45c3e',
+  magicLinkRequest: '#1f7a6c',
+  magicLinkUnknownId: '#8a6d3b',
+  magicLinkSendFailed: '#c45c3e',
+  verifySuccess: '#2f9e44',
+  verifyExpired: '#e67700',
+  verifyError: '#c92a2a',
+  rateLimitHits: '#9c36b5',
+  portalClassGradeFail: '#364fc7',
+  sheetsApiError: '#e03131',
+};
+
+function formatStatsClockTime(iso) {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) {
+    return '';
+  }
+  return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' });
+}
+
+function pickStatsAxisIndexes(count, maxLabels = 5) {
+  if (count <= 0) {
+    return [];
+  }
+  if (count <= maxLabels) {
+    return Array.from({ length: count }, (_, i) => i);
+  }
+  const indexes = [0];
+  for (let i = 1; i < maxLabels - 1; i += 1) {
+    indexes.push(Math.round((i * (count - 1)) / (maxLabels - 1)));
+  }
+  indexes.push(count - 1);
+  return [...new Set(indexes)];
+}
+
+/**
+ * @param {Array<{ t: string, v: number|null }>} series
+ * @param {{ color?: string, height?: number, width?: number, yMax?: number|null, formatY?: (n: number) => string }} [options]
+ */
+function PortalStatsLineChart({ series, color = '#1f7a6c', height = 180, width = 560, yMax = null, formatY }) {
+  const points = Array.isArray(series) ? series : [];
+  const values = points.map((p) => (p && Number.isFinite(p.v) ? Number(p.v) : null)).filter((v) => v != null);
+  const maxY = yMax != null && Number.isFinite(yMax) ? yMax : Math.max(1, ...values, 0);
+  const padLeft = 36;
+  const padRight = 12;
+  const padTop = 12;
+  const padBottom = 28;
+  const innerW = width - padLeft - padRight;
+  const innerH = height - padTop - padBottom;
+  const yTicks = [0, 0.5, 1].map((ratio) => ({
+    ratio,
+    value: maxY * ratio,
+    y: padTop + innerH - ratio * innerH,
+  }));
+  const xIndexes = pickStatsAxisIndexes(points.length, 5);
+
+  const coords = points.map((point, index) => {
+    const x = points.length <= 1 ? padLeft + innerW / 2 : padLeft + (index / (points.length - 1)) * innerW;
+    const raw = point && Number.isFinite(point.v) ? Number(point.v) : null;
+    const y = raw == null ? null : padTop + innerH - (raw / maxY) * innerH;
+    return { x, y, v: raw, t: point?.t };
+  });
+
+  const pathParts = [];
+  for (const coord of coords) {
+    if (coord.y == null) {
+      continue;
+    }
+    pathParts.push(`${pathParts.length === 0 ? 'M' : 'L'}${coord.x.toFixed(1)} ${coord.y.toFixed(1)}`);
+  }
+
+  const latest = values.length ? values[values.length - 1] : null;
+  const yLabel = typeof formatY === 'function' && latest != null ? formatY(latest) : latest != null ? String(latest) : '—';
+
+  return (
+    <div className="portal-stats-chart">
+      <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Time series chart" className="portal-stats-chart-svg">
+        {yTicks.map((tick) => (
+          <g key={`y-${tick.ratio}`}>
+            <line
+              x1={padLeft}
+              y1={tick.y}
+              x2={width - padRight}
+              y2={tick.y}
+              className="portal-stats-chart-grid"
+            />
+            <text x={padLeft - 6} y={tick.y + 3} textAnchor="end" className="portal-stats-chart-tick">
+              {typeof formatY === 'function' ? formatY(tick.value) : Math.round(tick.value)}
+            </text>
+          </g>
+        ))}
+        <line x1={padLeft} y1={padTop} x2={padLeft} y2={height - padBottom} className="portal-stats-chart-axis" />
+        <line
+          x1={padLeft}
+          y1={height - padBottom}
+          x2={width - padRight}
+          y2={height - padBottom}
+          className="portal-stats-chart-axis"
+        />
+        {pathParts.length > 1 ? (
+          <path d={pathParts.join(' ')} fill="none" stroke={color} strokeWidth="2.25" strokeLinejoin="round" />
+        ) : null}
+        {coords.map((coord, index) =>
+          coord.y == null ? null : (
+            <circle key={`pt-${index}`} cx={coord.x} cy={coord.y} r="2.4" fill={color} />
+          ),
+        )}
+        {xIndexes.map((index) => {
+          const point = points[index];
+          if (!point) {
+            return null;
+          }
+          const x = points.length <= 1 ? padLeft + innerW / 2 : padLeft + (index / (points.length - 1)) * innerW;
+          return (
+            <text key={`x-${index}`} x={x} y={height - 8} textAnchor="middle" className="portal-stats-chart-tick">
+              {formatStatsClockTime(point.t)}
+            </text>
+          );
+        })}
+      </svg>
+      <div className="portal-stats-chart-meta">
+        <span>max {typeof formatY === 'function' ? formatY(maxY) : maxY}</span>
+        <span>latest {yLabel}</span>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * @param {Array<{ id: string, label: string, color: string, series: Array<{ t: string, v: number|null }> }>} lines
+ * @param {{ height?: number, width?: number, formatY?: (n: number) => string }} [options]
+ */
+function PortalStatsMultiLineChart({ lines, height = 200, width = 600, formatY }) {
+  const safeLines = Array.isArray(lines) ? lines.filter((line) => Array.isArray(line.series) && line.series.length) : [];
+  const allValues = safeLines.flatMap((line) =>
+    line.series.map((p) => (p && Number.isFinite(p.v) ? Number(p.v) : null)).filter((v) => v != null),
+  );
+  const maxY = Math.max(1, ...allValues, 0);
+  const padLeft = 36;
+  const padRight = 12;
+  const padTop = 12;
+  const padBottom = 28;
+  const innerW = width - padLeft - padRight;
+  const innerH = height - padTop - padBottom;
+  const pointCount = safeLines[0]?.series?.length || 0;
+  const timeline = safeLines[0]?.series || [];
+  const yTicks = [0, 0.5, 1].map((ratio) => ({
+    ratio,
+    value: maxY * ratio,
+    y: padTop + innerH - ratio * innerH,
+  }));
+  const xIndexes = pickStatsAxisIndexes(pointCount, 5);
+
+  return (
+    <div className="portal-stats-chart">
+      <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Multi-series chart" className="portal-stats-chart-svg">
+        {yTicks.map((tick) => (
+          <g key={`y-${tick.ratio}`}>
+            <line
+              x1={padLeft}
+              y1={tick.y}
+              x2={width - padRight}
+              y2={tick.y}
+              className="portal-stats-chart-grid"
+            />
+            <text x={padLeft - 6} y={tick.y + 3} textAnchor="end" className="portal-stats-chart-tick">
+              {typeof formatY === 'function' ? formatY(tick.value) : Math.round(tick.value)}
+            </text>
+          </g>
+        ))}
+        <line x1={padLeft} y1={padTop} x2={padLeft} y2={height - padBottom} className="portal-stats-chart-axis" />
+        <line
+          x1={padLeft}
+          y1={height - padBottom}
+          x2={width - padRight}
+          y2={height - padBottom}
+          className="portal-stats-chart-axis"
+        />
+        {safeLines.map((line) => {
+          const pathParts = [];
+          line.series.forEach((point, index) => {
+            if (!Number.isFinite(point?.v)) {
+              return;
+            }
+            const x = pointCount <= 1 ? padLeft + innerW / 2 : padLeft + (index / (pointCount - 1)) * innerW;
+            const y = padTop + innerH - (Number(point.v) / maxY) * innerH;
+            pathParts.push(`${pathParts.length === 0 ? 'M' : 'L'}${x.toFixed(1)} ${y.toFixed(1)}`);
+          });
+          if (pathParts.length < 2) {
+            return null;
+          }
+          return (
+            <path
+              key={line.id}
+              d={pathParts.join(' ')}
+              fill="none"
+              stroke={line.color}
+              strokeWidth="2.1"
+              strokeLinejoin="round"
+            />
+          );
+        })}
+        {xIndexes.map((index) => {
+          const point = timeline[index];
+          if (!point) {
+            return null;
+          }
+          const x = pointCount <= 1 ? padLeft + innerW / 2 : padLeft + (index / (pointCount - 1)) * innerW;
+          return (
+            <text key={`x-${index}`} x={x} y={height - 8} textAnchor="middle" className="portal-stats-chart-tick">
+              {formatStatsClockTime(point.t)}
+            </text>
+          );
+        })}
+      </svg>
+      <div className="portal-stats-chart-legend">
+        {safeLines.map((line) => (
+          <span key={line.id} className="portal-stats-chart-legend-item">
+            <span className="portal-stats-chart-swatch" style={{ background: line.color }} aria-hidden="true" />
+            {line.label}
+          </span>
+        ))}
+      </div>
+      <div className="portal-stats-chart-meta">
+        <span>max {typeof formatY === 'function' ? formatY(maxY) : Math.round(maxY)}</span>
+      </div>
+    </div>
+  );
+}
+
+function formatStatsPercent(rate) {
+  if (!Number.isFinite(rate)) {
+    return '0%';
+  }
+  return `${(rate * 100).toFixed(rate > 0 && rate < 0.01 ? 2 : 1)}%`;
+}
+
+function formatStatsMs(ms) {
+  if (ms == null || !Number.isFinite(ms)) {
+    return '—';
+  }
+  return `${Math.round(ms)} ms`;
+}
+
+function PortalStatsMetricCard({ label, value, hint, tone = 'default' }) {
+  return (
+    <div className={`portal-stats-metric-card portal-stats-metric-card--${tone}`}>
+      <p className="portal-stats-metric-label">{label}</p>
+      <p className="portal-stats-metric-value">{value}</p>
+      {hint ? <p className="portal-stats-metric-hint">{hint}</p> : null}
+    </div>
+  );
+}
+
+function PortalStatsPanel({ title, subtitle, children, wide = false }) {
+  return (
+    <section className={`portal-stats-panel${wide ? ' portal-stats-panel--wide' : ''}`}>
+      <header className="portal-stats-panel-head">
+        <h2 className="portal-stats-panel-title">{title}</h2>
+        {subtitle ? <p className="portal-stats-panel-subtitle">{subtitle}</p> : null}
+      </header>
+      <div className="portal-stats-panel-body">{children}</div>
+    </section>
+  );
+}
+
+function PortalAdminStatsPage() {
+  const { isAdmin } = usePortalClassGrade();
+  const signedIn = isPortalSessionCompleteSync();
+  const [windowKey, setWindowKey] = useState('5m');
+  const [stats, setStats] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [lastUpdated, setLastUpdated] = useState('');
+
+  useEffect(() => {
+    if (!signedIn || !isAdmin) {
+      return undefined;
+    }
+    let cancelled = false;
+    let inFlight = false;
+
+    const load = async () => {
+      if (inFlight || cancelled) {
+        return;
+      }
+      inFlight = true;
+      setLoading(true);
+      setError('');
+      try {
+        const data = await adminApiPost('/api/portal-admin/stats', { window: windowKey });
+        if (!cancelled) {
+          setStats(data);
+          setLastUpdated(data.generatedAt || new Date().toISOString());
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setError(err.message || 'Could not load portal stats.');
+        }
+      } finally {
+        inFlight = false;
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    };
+
+    load();
+    const intervalId = window.setInterval(load, 10_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [signedIn, isAdmin, windowKey]);
+
+  if (!isAdmin) {
+    return (
+      <PortalLayout>
+        <div className="portal-card portal-content portal-admin-card">
+          <PortalSectionLinks current="admin-stats" isAdmin={false} />
+          <div className="portal-session-banner" role="status">
+            <p className="portal-session-banner-title">Access denied</p>
+            <p className="portal-session-banner-text">
+              Your account is not on the admin allowlist. Contact operations if you need access.
+            </p>
+          </div>
+        </div>
+      </PortalLayout>
+    );
+  }
+
+  const byType = stats?.pages?.byType || {};
+  const pageTypes = Object.keys(STATS_PAGE_TYPE_LABELS);
+  const incidentKeys = Object.keys(STATS_INCIDENT_LABELS);
+  const incidentTotals = stats?.incidents?.totals || {};
+  const loginOk = stats?.logins?.successful ?? 0;
+  const loginFail = stats?.logins?.failed ?? 0;
+  const pageSuccessTotal = pageTypes.reduce((sum, type) => sum + (byType[type]?.success || 0), 0);
+  const pageErrorTotal = pageTypes.reduce((sum, type) => sum + (byType[type]?.error || 0), 0);
+  const pageTotal = pageSuccessTotal + pageErrorTotal;
+  const overallErrorRate = pageTotal > 0 ? pageErrorTotal / pageTotal : 0;
+  const problemIncidentTotal =
+    (incidentTotals.magicLinkSendFailed || 0) +
+    (incidentTotals.verifyExpired || 0) +
+    (incidentTotals.verifyError || 0) +
+    (incidentTotals.rateLimitHits || 0) +
+    (incidentTotals.portalClassGradeFail || 0) +
+    (incidentTotals.sheetsApiError || 0);
+  const latencyValues = pageTypes
+    .map((type) => byType[type]?.avgLatencyMs)
+    .filter((ms) => ms != null && Number.isFinite(ms));
+  const avgLatencyMs =
+    latencyValues.length > 0
+      ? Math.round(latencyValues.reduce((sum, ms) => sum + ms, 0) / latencyValues.length)
+      : null;
+
+  const serveLines = pageTypes
+    .filter(
+      (type) =>
+        (byType[type]?.success || 0) + (byType[type]?.error || 0) > 0 ||
+        type === 'profile' ||
+        type === 'admin',
+    )
+    .map((type) => ({
+      id: type,
+      label: STATS_PAGE_TYPE_LABELS[type],
+      color: STATS_CHART_COLORS[type] || STATS_CHART_COLORS.other,
+      series: stats?.pages?.serveSeries?.[type] || [],
+    }));
+  const latencyLines = pageTypes
+    .filter((type) => byType[type]?.avgLatencyMs != null)
+    .map((type) => ({
+      id: type,
+      label: STATS_PAGE_TYPE_LABELS[type],
+      color: STATS_CHART_COLORS[type] || STATS_CHART_COLORS.other,
+      series: stats?.pages?.latencySeries?.[type] || [],
+    }));
+  const incidentProblemKeys = [
+    'magicLinkSendFailed',
+    'verifyExpired',
+    'verifyError',
+    'rateLimitHits',
+    'portalClassGradeFail',
+    'sheetsApiError',
+  ];
+  const incidentLines = incidentProblemKeys.map((key) => ({
+    id: key,
+    label: STATS_INCIDENT_LABELS[key],
+    color: STATS_CHART_COLORS[key] || STATS_CHART_COLORS.other,
+    series: stats?.incidents?.series?.[key] || [],
+  }));
+
+  return (
+    <PortalLayout>
+      <div className="portal-card portal-content portal-admin-card portal-admin-stats-page">
+        <PortalSectionLinks current="admin-stats" isAdmin={isAdmin} />
+
+        <div className="portal-stats-hero">
+          <div className="portal-stats-hero-copy">
+            <h1 className="portal-admin-title">Portal dashboard</h1>
+            <p className="portal-admin-lead">
+              Everything happening on the portal right now — logins, pages, speed, Google APIs, and problems.
+            </p>
+          </div>
+          <div className="portal-stats-toolbar">
+            <div className="portal-stats-windows" role="tablist" aria-label="Time window">
+              {STATS_WINDOWS.map((option) => (
+                <button
+                  key={option.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={windowKey === option.id}
+                  className={`portal-admin-tab${windowKey === option.id ? ' is-active' : ''}`}
+                  onClick={() => setWindowKey(option.id)}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+            <p className="portal-admin-hint portal-stats-updated">
+              {loading && !stats ? 'Loading…' : null}
+              {lastUpdated
+                ? `Live · updated ${new Date(lastUpdated).toLocaleTimeString()}`
+                : loading
+                  ? null
+                  : 'Waiting for data'}
+            </p>
+          </div>
+        </div>
+
+        {error ? (
+          <p className="portal-admin-status portal-admin-status--error" role="alert">
+            {error}
+          </p>
+        ) : null}
+
+        <div className="portal-stats-kpi-grid" aria-label="Key metrics">
+          <PortalStatsMetricCard
+            label="Successful logins"
+            value={loginOk}
+            hint="Verify magic link OK"
+            tone="good"
+          />
+          <PortalStatsMetricCard
+            label="Failed logins"
+            value={loginFail}
+            hint="Expired or invalid links"
+            tone={loginFail > 0 ? 'warn' : 'default'}
+          />
+          <PortalStatsMetricCard
+            label="Page serves"
+            value={pageSuccessTotal}
+            hint={`${pageErrorTotal} errors · ${formatStatsPercent(overallErrorRate)} error rate`}
+          />
+          <PortalStatsMetricCard
+            label="Problems"
+            value={problemIncidentTotal}
+            hint="Send fails, 429s, verify errors, Sheets errors"
+            tone={problemIncidentTotal > 0 ? 'bad' : 'good'}
+          />
+          <PortalStatsMetricCard
+            label="Avg serve time"
+            value={formatStatsMs(avgLatencyMs)}
+            hint="Across page types with traffic"
+          />
+          <PortalStatsMetricCard
+            label="Sheets API calls"
+            value={stats?.sheets?.apiCalls ?? 0}
+            hint={`${stats?.drive?.filesList ?? 0} Drive scans · ${stats?.drive?.filesGet ?? 0} file reads`}
+          />
+        </div>
+
+        <div className="portal-stats-dashboard-grid">
+          <PortalStatsPanel
+            title="Problems over time"
+            subtitle="Counts of login-critical incidents. Time on X, count on Y."
+            wide
+          >
+            <div className="portal-stats-chip-row">
+              {incidentKeys.map((key) => (
+                <span
+                  key={key}
+                  className={`portal-stats-chip${(incidentTotals[key] || 0) > 0 && key !== 'magicLinkRequest' && key !== 'verifySuccess' ? ' is-hot' : ''}`}
+                >
+                  <span className="portal-stats-chip-label">{STATS_INCIDENT_LABELS[key]}</span>
+                  <strong className="portal-stats-chip-value">{incidentTotals[key] ?? 0}</strong>
+                </span>
+              ))}
+            </div>
+            <PortalStatsMultiLineChart lines={incidentLines} formatY={(n) => String(Math.round(n))} />
+          </PortalStatsPanel>
+
+          <PortalStatsPanel title="Logins" subtitle="Successful vs failed verifies">
+            <div className="portal-stats-mini-metrics">
+              <PortalStatsMetricCard label="Successful" value={loginOk} tone="good" />
+              <PortalStatsMetricCard label="Failed" value={loginFail} tone={loginFail > 0 ? 'warn' : 'default'} />
+            </div>
+            <PortalStatsMultiLineChart
+              lines={[
+                {
+                  id: 'successful',
+                  label: 'Successful',
+                  color: STATS_CHART_COLORS.successful,
+                  series: stats?.logins?.series?.successful || [],
+                },
+                {
+                  id: 'failed',
+                  label: 'Failed',
+                  color: STATS_CHART_COLORS.failed,
+                  series: stats?.logins?.series?.failed || [],
+                },
+              ]}
+              formatY={(n) => String(Math.round(n))}
+            />
+          </PortalStatsPanel>
+
+          <PortalStatsPanel title="Error rate" subtitle="Share of page responses that failed">
+            <PortalStatsLineChart
+              series={stats?.pages?.errorRateSeries || []}
+              color={STATS_CHART_COLORS.errorRate}
+              yMax={1}
+              formatY={(n) => formatStatsPercent(n)}
+            />
+          </PortalStatsPanel>
+
+          <PortalStatsPanel title="Page serves by type" subtitle="Successful responses for each area of the portal" wide>
+            <div className="portal-stats-table-wrap">
+              <table className="portal-stats-table">
+                <thead>
+                  <tr>
+                    <th scope="col">Page</th>
+                    <th scope="col">Success</th>
+                    <th scope="col">Errors</th>
+                    <th scope="col">Error rate</th>
+                    <th scope="col">Avg time</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {pageTypes.map((type) => {
+                    const row = byType[type] || { success: 0, error: 0, errorRate: 0, avgLatencyMs: null };
+                    return (
+                      <tr key={type}>
+                        <td>
+                          <span
+                            className="portal-stats-type-swatch"
+                            style={{ background: STATS_CHART_COLORS[type] || STATS_CHART_COLORS.other }}
+                            aria-hidden="true"
+                          />
+                          {STATS_PAGE_TYPE_LABELS[type]}
+                        </td>
+                        <td>{row.success || 0}</td>
+                        <td>{row.error || 0}</td>
+                        <td>{formatStatsPercent(row.errorRate || 0)}</td>
+                        <td>{formatStatsMs(row.avgLatencyMs)}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <PortalStatsMultiLineChart lines={serveLines} formatY={(n) => String(Math.round(n))} />
+          </PortalStatsPanel>
+
+          <PortalStatsPanel title="Serve time by page" subtitle="How long responses take (milliseconds)">
+            <div className="portal-stats-chip-row portal-stats-chip-row--compact">
+              {pageTypes.map((type) => (
+                <span key={type} className="portal-stats-chip">
+                  <span className="portal-stats-chip-label">{STATS_PAGE_TYPE_LABELS[type]}</span>
+                  <strong className="portal-stats-chip-value">{formatStatsMs(byType[type]?.avgLatencyMs)}</strong>
+                </span>
+              ))}
+            </div>
+            <PortalStatsMultiLineChart lines={latencyLines} formatY={(n) => `${Math.round(n)} ms`} />
+          </PortalStatsPanel>
+
+          <PortalStatsPanel title="Google APIs" subtitle="Drive folder scans, file reads, and Sheets calls">
+            <div className="portal-stats-mini-metrics">
+              <PortalStatsMetricCard label="Drive scans" value={stats?.drive?.filesList ?? 0} />
+              <PortalStatsMetricCard label="Drive reads" value={stats?.drive?.filesGet ?? 0} />
+              <PortalStatsMetricCard label="Sheets calls" value={stats?.sheets?.apiCalls ?? 0} />
+            </div>
+            <PortalStatsMultiLineChart
+              lines={[
+                {
+                  id: 'filesList',
+                  label: 'Drive scans',
+                  color: STATS_CHART_COLORS.filesList,
+                  series: stats?.drive?.series?.filesList || [],
+                },
+                {
+                  id: 'filesGet',
+                  label: 'Drive reads',
+                  color: STATS_CHART_COLORS.filesGet,
+                  series: stats?.drive?.series?.filesGet || [],
+                },
+                {
+                  id: 'sheetsApi',
+                  label: 'Sheets API',
+                  color: STATS_CHART_COLORS.sheetsApi,
+                  series: stats?.sheets?.series?.apiCalls || [],
+                },
+              ]}
+              formatY={(n) => String(Math.round(n))}
+            />
+          </PortalStatsPanel>
+        </div>
+      </div>
+    </PortalLayout>
+  );
+}
+
 function PortalAdminCampaignsPage() {
   const { isAdmin } = usePortalClassGrade();
   const signedIn = isPortalSessionCompleteSync();
@@ -6192,12 +6877,58 @@ function useReviewAutoSave({ drafts, onSaveOne }) {
   return { markDirty, saveStatus, lastSavedAt };
 }
 
-function PortalReviewCard({ assignment, draft, onDraftChange, onMarkDirty, onNextStudent, showNextStudent, t }) {
+function PortalReviewVoicePlayer({ assignment, t }) {
+  const [audioError, setAudioError] = useState('');
+
+  const streamSrc = useMemo(() => {
+    if (!assignment?.hasVoiceMemo || !assignment?.streamToken) {
+      return '';
+    }
+    const params = new URLSearchParams({ st: assignment.streamToken });
+    return `/api/portal-reviews/voice-memo/stream?${params.toString()}`;
+  }, [assignment?.hasVoiceMemo, assignment?.streamToken]);
+
+  useEffect(() => {
+    setAudioError('');
+  }, [streamSrc]);
+
+  if (!assignment?.hasVoiceMemo || !streamSrc) {
+    return (
+      <div className="portal-review-voice-row">
+        <p className="portal-field-hint">{t('reviews.voiceNotAvailable')}</p>
+      </div>
+    );
+  }
+
   return (
-    <article className="portal-review-card" aria-labelledby={`review-${assignment.applicantId}-name`}>
+    <div className="portal-review-voice-row">
+      <div className="portal-review-voice-player" aria-label={t('reviews.playVoice')}>
+        <audio
+          controls
+          preload="none"
+          className="portal-review-voice-audio"
+          src={streamSrc}
+          onError={() => setAudioError(t('voiceMemo.audioPlayError'))}
+        >
+          {t('reviews.voiceAudioUnsupported')}
+        </audio>
+        {audioError ? <p className="portal-field-hint portal-review-voice-error">{audioError}</p> : null}
+      </div>
+    </div>
+  );
+}
+
+function PortalReviewCard({ assignment, draft, onDraftChange, onMarkDirty, onNextStudent, showNextStudent, t }) {
+  const ageDisplay = assignment.age?.trim() || t('reviews.notAvailable');
+
+  return (
+    <article className="portal-review-card" aria-labelledby={`review-${assignment.applicantId}-title`}>
       <header className="portal-review-card-header">
-        <h3 className="portal-review-card-title" id={`review-${assignment.applicantId}-name`}>
-          {assignment.name}
+        <h3 className="portal-review-card-title" id={`review-${assignment.applicantId}-title`}>
+          <span className="portal-ltr portal-admin-mono">{assignment.applicantId}</span>
+          <span className="portal-review-card-age">
+            {t('reviews.age')}: {ageDisplay}
+          </span>
         </h3>
       </header>
 
@@ -6210,12 +6941,7 @@ function PortalReviewCard({ assignment, draft, onDraftChange, onMarkDirty, onNex
         )}
       </section>
 
-      <div className="portal-review-voice-row">
-        <button type="button" className="portal-review-voice-btn" disabled aria-disabled="true">
-          <span className="portal-review-voice-btn-label">▶ {t('reviews.playVoice')}</span>
-          <span className="portal-review-voice-btn-soon">{t('reviews.voiceComingSoon')}</span>
-        </button>
-      </div>
+      <PortalReviewVoicePlayer assignment={assignment} t={t} />
 
       <div className="portal-review-scoring-panel" aria-label={t('reviews.scoringAria')}>
         <section className="portal-review-scoring-section portal-review-scoring-section--english">
@@ -6299,7 +7025,7 @@ function PortalReviewStudentList({ assignments, drafts, selectedApplicantId, onS
           const isSelected = assignment.applicantId === selectedApplicantId;
           const draft = drafts[assignment.applicantId] || EMPTY_REVIEW_DRAFT;
           const isComplete = reviewDraftIsSaveable(draft);
-          const appliedLevelDisplay = assignment.appliedLevel.trim() || t('reviews.notAvailable');
+          const ageDisplay = assignment.age?.trim() || t('reviews.notAvailable');
 
           return (
             <li key={assignment.applicantId}>
@@ -6314,10 +7040,13 @@ function PortalReviewStudentList({ assignments, drafts, selectedApplicantId, onS
                   event.currentTarget.focus({ preventScroll: true });
                 }}
               >
-                <span className="portal-review-student-name">{assignment.name}</span>
+                <span className="portal-review-student-name portal-ltr portal-admin-mono">
+                  {assignment.applicantId}
+                </span>
                 <span className="portal-review-student-idline portal-ltr">
-                  <span className="portal-review-student-id portal-admin-mono">{assignment.applicantId}</span>
-                  <span className="portal-review-student-level-tag">{appliedLevelDisplay}</span>
+                  <span className="portal-review-student-level-tag">
+                    {t('reviews.age')}: {ageDisplay}
+                  </span>
                 </span>
               </button>
             </li>
@@ -6363,7 +7092,7 @@ function PortalReviewApplicationsPage() {
     setLoading(true);
     setError('');
 
-    portalApiPost('/api/portal-reviews/list')
+    portalApiPost('/api/portal-reviews/list', {}, { timeoutMs: 45000 })
       .then((data) => {
         if (cancelled) {
           return;
@@ -6393,7 +7122,11 @@ function PortalReviewApplicationsPage() {
       })
       .catch((err) => {
         if (!cancelled) {
-          setError(err.message || t('reviews.loadError'));
+          const message =
+            err && err.message === 'Request timed out. Please try again.'
+              ? t('reviews.loadTimeout')
+              : err.message || t('reviews.loadError');
+          setError(message);
           setAssignments([]);
           setDrafts({});
           setSelectedApplicantId('');
@@ -6575,6 +7308,8 @@ function PortalShellApp() {
     page = <PortalAdminEmailsPage />;
   } else if (segment === 'admin-campaigns') {
     page = <PortalAdminCampaignsPage />;
+  } else if (segment === 'admin-stats') {
+    page = <PortalAdminStatsPage />;
   } else if (segment === 'admin') {
     page = <PortalAdminPage />;
   } else if (segment === 'reviews') {
@@ -6834,7 +7569,7 @@ function PortalProfilePage() {
       <PortalLayout>
         <div className="portal-card portal-content">
           <PortalSectionLinks
-            current="profile"
+            current="reviews"
             isAdmin={showAdminFeatures}
             isReviewer={isReviewer}
             showEditDingLink={false}

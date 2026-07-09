@@ -1,6 +1,7 @@
 const { google } = require("googleapis");
 const { buildServiceAccountJwt } = require("./googleAuth");
 const { parseVoiceMemoFileExtensions, DEFAULT_VOICE_MEMO_FILE_EXTENSIONS } = require("../utils/voiceMemoExtensions");
+const { recordDriveFilesList, recordDriveFilesGet } = require("./portalMetrics");
 
 const DRIVE_READONLY_SCOPE = "https://www.googleapis.com/auth/drive.readonly";
 
@@ -127,6 +128,7 @@ async function scanVoiceMemoFolder(folderId, options = {}) {
       supportsAllDrives: true,
       includeItemsFromAllDrives: true,
     });
+    recordDriveFilesList(1);
 
     for (const file of response.data.files || []) {
       totalDriveFiles += 1;
@@ -281,6 +283,7 @@ async function streamVoiceMemoFile(fileId, rangeHeader) {
     fields: "mimeType,name,size",
     supportsAllDrives: true,
   });
+  recordDriveFilesGet(1);
 
   const requestOptions = { responseType: "stream" };
   if (rangeHeader) {
@@ -291,6 +294,7 @@ async function streamVoiceMemoFile(fileId, rangeHeader) {
     { fileId: normalizedFileId, alt: "media", supportsAllDrives: true },
     requestOptions,
   );
+  recordDriveFilesGet(1);
 
   const sizeRaw = meta.data.size;
   const size = sizeRaw != null && String(sizeRaw).trim() !== "" ? Number.parseInt(String(sizeRaw), 10) : null;
@@ -345,6 +349,7 @@ async function readVoiceMemoDurationSeconds(fileId) {
     fields: "mimeType,name,size,videoMediaMetadata(durationMillis)",
     supportsAllDrives: true,
   });
+  recordDriveFilesGet(1);
 
   const durationMillis = meta.data.videoMediaMetadata?.durationMillis;
   if (durationMillis != null && Number.isFinite(Number(durationMillis)) && Number(durationMillis) > 0) {
@@ -364,6 +369,7 @@ async function readVoiceMemoDurationSeconds(fileId) {
       headers: { Range: "bytes=0-262143" },
     },
   );
+  recordDriveFilesGet(1);
 
   try {
     const { parseStream } = await import("music-metadata");

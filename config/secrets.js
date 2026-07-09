@@ -168,6 +168,7 @@ function buildGoogleSheetsConfig(fileSection) {
     admissionsNameColumn: envOr("GOOGLE_ADMISSIONS_NAME_COLUMN", "admissionsNameColumn", "C"),
     admissionsEmailColumn: envOr("GOOGLE_ADMISSIONS_EMAIL_COLUMN", "admissionsEmailColumn", "D"),
     admissionsLevelColumn: envOr("GOOGLE_ADMISSIONS_LEVEL_COLUMN", "admissionsLevelColumn", "E"),
+    admissionsAgeColumn: envOr("GOOGLE_ADMISSIONS_AGE_COLUMN", "admissionsAgeColumn", "L"),
     admissionsEssayColumn: envOr("GOOGLE_ADMISSIONS_ESSAY_COLUMN", "admissionsEssayColumn", "K"),
     /** Applicants sheet column for special send groups (e.g. didnt-send-mistake). Filter-only; sends use Email column. */
     admissionsSpecialEmailColumn: envOr(
@@ -293,6 +294,38 @@ function buildPostmarkConfig(fileSection) {
     serverToken: envOr("POSTMARK_SERVER_TOKEN", "serverToken", ""),
     webhookSecret: envOr("POSTMARK_WEBHOOK_SECRET", "webhookSecret", ""),
   };
+}
+
+/**
+ * Promote GMAIL_SA_* env vars into email.gmailServiceAccount when SECRETS_JSON
+ * omits credentials or stores them only as a separate Fly secret.
+ * @param {Record<string, unknown>} secrets
+ */
+function mergeGmailServiceAccountSecrets(secrets) {
+  if (!secrets || typeof secrets !== "object") {
+    return;
+  }
+  if (!secrets.email || typeof secrets.email !== "object") {
+    secrets.email = {};
+  }
+  if (!secrets.email.gmailServiceAccount || typeof secrets.email.gmailServiceAccount !== "object") {
+    secrets.email.gmailServiceAccount = {};
+  }
+  const sa = secrets.email.gmailServiceAccount;
+
+  const delegatedFromEnv = process.env.GMAIL_SA_DELEGATED_USER;
+  if (delegatedFromEnv != null && String(delegatedFromEnv).trim() !== "") {
+    sa.delegatedUser = String(delegatedFromEnv).trim();
+  }
+
+  const rawCreds = process.env.GMAIL_SA_CREDENTIALS_JSON;
+  if (rawCreds != null && String(rawCreds).trim() !== "") {
+    try {
+      sa.credentials = JSON.parse(String(rawCreds));
+    } catch (error) {
+      console.error("Invalid GMAIL_SA_CREDENTIALS_JSON: must be valid JSON");
+    }
+  }
 }
 
 /**
@@ -583,6 +616,7 @@ function loadSecretsFromSecretsJsonEnv() {
     parsed.security = buildSecurityConfig(parsed.security);
     parsed.postmark = buildPostmarkConfig(parsed.postmark);
     mergePostmarkSecrets(parsed);
+    mergeGmailServiceAccountSecrets(parsed);
     mergePortalContactEmail(parsed);
     return parsed;
   } catch (error) {
@@ -620,6 +654,7 @@ function loadSecrets() {
       secrets.security = buildSecurityConfig(secrets.security);
       secrets.postmark = buildPostmarkConfig(secrets.postmark);
       mergePostmarkSecrets(secrets);
+      mergeGmailServiceAccountSecrets(secrets);
       mergePortalContactEmail(secrets);
       return secrets;
     } catch (error) {
@@ -641,6 +676,7 @@ function loadSecrets() {
     portalContactEmail: "",
   };
   mergePortalContactEmail(secrets);
+  mergeGmailServiceAccountSecrets(secrets);
 
   return secrets;
 }

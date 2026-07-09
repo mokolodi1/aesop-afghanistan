@@ -60,6 +60,7 @@ const applicants = pgTable(
     email: varchar("email", { length: 320 }),
     name: varchar("name", { length: 255 }),
     appliedLevel: varchar("applied_level", { length: 64 }),
+    age: varchar("age", { length: 64 }),
     essay: text("essay"),
     round1: varchar("round1", { length: 64 }),
     round2: varchar("round2", { length: 64 }),
@@ -343,6 +344,20 @@ const emailCampaignRecipients = pgTable(
   }),
 );
 
+const portalMetricBuckets = pgTable(
+  "portal_metric_buckets",
+  {
+    bucketStart: timestamp("bucket_start", { withTimezone: true }).notNull(),
+    metric: text("metric").notNull(),
+    labels: jsonb("labels").notNull().default({}),
+    value: numeric("value").notNull().default("0"),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.bucketStart, table.metric, table.labels] }),
+    metricTimeIdx: index("portal_metric_buckets_metric_time_idx").on(table.metric, table.bucketStart),
+  }),
+);
+
 module.exports = {
   syncRuns,
   people,
@@ -360,4 +375,5 @@ module.exports = {
   emailAdminTests,
   emailCampaigns,
   emailCampaignRecipients,
+  portalMetricBuckets,
 };

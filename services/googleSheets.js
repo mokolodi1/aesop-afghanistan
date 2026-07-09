@@ -5,10 +5,34 @@ const { formatGoogleSheetsOperationError } = require("../utils/errorLogging");
 const { dateToGoogleSheetsSerial, formatEasternSheetTimestamp, sheetDatetimeCellTextToUtcMillis } = require("../utils/dingSheetTime");
 const { isDatabaseEnabled } = require("../db/index");
 const { getPersonByAesopId, isPeopleIdentityFresh, personRowToProfile } = require("./classroomDb");
+const { recordSheetsApiCall, recordSheetsApiError } = require("./portalMetrics");
 
 let doc = null;
 let initPromise = null;
+let sheetsMetricsHooked = false;
 const SHEETS_SCOPE = "https://www.googleapis.com/auth/spreadsheets";
+
+/**
+ * Count every Sheets HTTP call made through google-spreadsheet's axios client.
+ * @param {import('google-spreadsheet').GoogleSpreadsheet} spreadsheet
+ */
+function attachSheetsApiMetrics(spreadsheet) {
+  if (!spreadsheet?.sheetsApi?.interceptors?.request || sheetsMetricsHooked) {
+    return;
+  }
+  spreadsheet.sheetsApi.interceptors.request.use((requestConfig) => {
+    recordSheetsApiCall(1);
+    return requestConfig;
+  });
+  spreadsheet.sheetsApi.interceptors.response.use(
+    (response) => response,
+    (error) => {
+      recordSheetsApiError(1);
+      return Promise.reject(error);
+    },
+  );
+  sheetsMetricsHooked = true;
+}
 
 // #region agent log
 function agentDebugLog(location, message, data, hypothesisId) {
@@ -54,6 +78,10 @@ async function initGoogleSheets() {
 
       const authClient = await buildSheetsAuthClient();
       doc = new GoogleSpreadsheet(config.googleSheets.sheetId, authClient);
+      sheetsMetricsHooked = false;
+      attachSheetsApiMetrics(doc);
+    } else {
+      attachSheetsApiMetrics(doc);
     }
 
     // Required before using sheetsByTitle or other sheet metadata.

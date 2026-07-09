@@ -14,6 +14,7 @@ const TRANSLATIONS = {
     'nav.admin': 'Admin',
     'nav.compose': 'Compose',
     'nav.campaigns': 'Campaigns',
+    'nav.stats': 'Stats',
     'nav.reviewApplications': 'Review Applications',
     'nav.portalNav': 'Portal navigation',
 
@@ -72,6 +73,7 @@ const TRANSLATIONS = {
       'Enter the ID that AESOP provided you. We will email you a login link that will log you in to the AESOP Portal.',
     'hub.signInIdHint':
       'Your student ID should be either 10 or 11 numbers and looks like: 2617391637',
+    'hub.readFaqs': 'Read FAQs',
 
     'applicationStatus.accepted': 'Accepted to Round 1 Selection',
     'applicationStatus.rejected': 'Not selected to advance',
@@ -177,16 +179,20 @@ const TRANSLATIONS = {
     'reviews.pageLead': 'Review essays, set English level, and score fitness for the program.',
     'reviews.loading': 'Loading applications…',
     'reviews.loadError': 'Could not load review assignments.',
+    'reviews.loadTimeout': 'Loading review assignments timed out. Please try again.',
     'reviews.empty': 'No applications are assigned to you for review.',
     'reviews.accessDenied':
       'Reviewer access is required to view this page. Your AESOP ID must be marked as a reviewer on the People sheet (Reviewer column), then sign out and use a new login link.',
     'reviews.applicantId': 'AESOP ID',
+    'reviews.age': 'Age',
     'reviews.appliedLevel': 'Applied level',
     'reviews.notAvailable': 'Not listed',
     'reviews.essayLabel': 'Essay',
     'reviews.essayMissing': 'No essay on file.',
     'reviews.playVoice': 'Play voice note',
     'reviews.voiceComingSoon': 'Coming soon',
+    'reviews.voiceNotAvailable': 'No voice note on file',
+    'reviews.voiceAudioUnsupported': 'Your browser does not support audio playback.',
     'reviews.levelLabel': 'English Level',
     'reviews.suspectedAi': 'Suspected AI',
     'reviews.suspectedAiFlagged': 'Suspected AI — Flagged',
@@ -246,6 +252,7 @@ const TRANSLATIONS = {
     'nav.admin': 'مدیریت',
     'nav.compose': 'نوشتن ایمیل',
     'nav.campaigns': 'کمپین‌ها',
+    'nav.stats': 'آمار',
     'nav.reviewApplications': 'بررسی درخواست‌ها',
     'nav.portalNav': 'مسیریابی پورتال',
 
@@ -304,6 +311,7 @@ const TRANSLATIONS = {
       'شناسه‌ای که AESOP به شما داده را وارد کنید. ما یک لینک ورود برای شما ایمیل می‌کنیم که شما را به پورتال AESOP وارد می‌کند.',
     'hub.signInIdHint':
       'شناسه محصلی شما باید ۱۰ یا ۱۱ رقم باشد و مانند این است: 2617391637',
+    'hub.readFaqs': 'خواندن سوالات متداول',
 
     'applicationStatus.accepted': 'پذیرفته‌شده به مرحلهٔ انتخاب دور اول',
     'applicationStatus.rejected': 'برای مرحلهٔ بعدی انتخاب نشد',
@@ -409,16 +417,20 @@ const TRANSLATIONS = {
     'reviews.pageLead': 'انشا را بخوانید، سطح انگلیسی را تعیین کنید، و تناسب با برنامه را نمره دهید.',
     'reviews.loading': 'در حال بارگذاری درخواست‌ها…',
     'reviews.loadError': 'بارگذاری وظایف بررسی ممکن نشد.',
+    'reviews.loadTimeout': 'بارگذاری وظایف بررسی بیش از حد طول کشید. لطفاً دوباره تلاش کنید.',
     'reviews.empty': 'هیچ درخواستی برای بررسی به شما اختصاص داده نشده است.',
     'reviews.accessDenied':
       'برای دیدن این صفحه دسترسی بررسی‌کننده لازم است. AESOP ID شما باید در برگه People در ستون Reviewer علامت‌گذاری شود، سپس خارج شوید و با لینک ورود جدید وارد شوید.',
     'reviews.applicantId': 'AESOP ID',
+    'reviews.age': 'سن',
     'reviews.appliedLevel': 'سطح درخواستی',
     'reviews.notAvailable': 'ثبت نشده',
     'reviews.essayLabel': 'انشا',
     'reviews.essayMissing': 'انشا موجود نیست.',
     'reviews.playVoice': 'پخش یادداشت صوتی',
     'reviews.voiceComingSoon': 'به‌زودی',
+    'reviews.voiceNotAvailable': 'یادداشت صوتی موجود نیست',
+    'reviews.voiceAudioUnsupported': 'مرورگر شما از پخش صدا پشتیبانی نمی‌کند.',
     'reviews.levelLabel': 'سطح انگلیسی',
     'reviews.suspectedAi': 'مشکوک به هوش مصنوعی',
     'reviews.suspectedAiFlagged': 'مشکوک به هوش مصنوعی — علامت‌گذاری شد',

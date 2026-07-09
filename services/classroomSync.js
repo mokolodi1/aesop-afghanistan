@@ -21,6 +21,7 @@ const {
 } = require("./classroomDb");
 const { exportSyncBackup } = require("./backupExport");
 const { loadApplicantAesopIdSetFromSheets } = require("./voiceMemoSync");
+const { getServiceAccountCredentials } = require("./googleAuth");
 
 /**
  * Read-only Classroom scopes used by the unattended sync. The service account
@@ -40,8 +41,8 @@ const CLASSROOM_SYNC_SCOPES = [
  * @returns {Promise<import('googleapis').classroom_v1.Classroom>}
  */
 async function buildClassroomClient() {
-  const credentials = config.email?.gmailServiceAccount?.credentials;
-  if (!credentials?.client_email || !credentials?.private_key) {
+  const credentials = getServiceAccountCredentials();
+  if (!credentials) {
     throw new Error(
       "Classroom sync requires email.gmailServiceAccount.credentials (client_email and private_key).",
     );
