@@ -2282,12 +2282,15 @@ function PortalSectionLinks({ current, isAdmin, isReviewer, showEditDingLink = t
   const { t } = usePortalI18n();
   const hubHref = portalHubHref();
   const isApplicant = readPortalIsApplicant();
-  // Applicants never manage a Ding number, so the edit-Ding tab is always hidden for them.
-  const showEditDing = showEditDingLink && !isReviewer && !isApplicant;
+  // Fall back to session when callers (admin pages) omit isReviewer.
+  const resolvedReviewer = isReviewer === true || readPortalIsReviewer();
+  // Admins/reviewers use Review Applications instead of Edit Ding; applicants never manage Ding.
+  const showEditDing = showEditDingLink && !resolvedReviewer && !isAdmin && !isApplicant;
+  const showReviewsLink = resolvedReviewer || isAdmin;
   // For applicants the only destination is "Profile", so drop the tab bar entirely and
   // leave just the "Welcome" heading. Everyone else (students, reviewers, admins) keeps
   // their nav so they never lose access to their tabs.
-  const hasExtraLinks = showEditDing || isReviewer || isAdmin;
+  const hasExtraLinks = showEditDing || showReviewsLink || isAdmin;
   if (isApplicant && !hasExtraLinks) {
     return null;
   }
@@ -2306,7 +2309,7 @@ function PortalSectionLinks({ current, isAdmin, isReviewer, showEditDingLink = t
           </a>
         </>
       ) : null}
-      {resolvedReviewer ? (
+      {showReviewsLink ? (
         <>
           <span className="portal-section-links-sep" aria-hidden="true">
             ·
