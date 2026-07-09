@@ -8,6 +8,7 @@ const {
 } = require("../utils/voiceMemoDuration");
 const { findProfileById } = require("./googleSheets");
 const { streamVoiceMemoFile, getVoiceMemoFileForAesopId, getVoiceMemoDurationSeconds } = require("./googleDrive");
+const { updateApplicantDriveDurationSeconds } = require("./classroomDb");
 const {
   getApplicantRowByAesopId,
   getVoiceMemoSheetConfig,
@@ -262,13 +263,16 @@ async function resolveDriveFileForApplicant(applicant, cfg) {
  * @param {Awaited<ReturnType<typeof getApplicantRowByAesopId>>} applicant
  * @param {{ minSeconds: number, maxSeconds: number }} durationLimits
  * @param {ReturnType<typeof getVoiceMemoSheetConfig>} cfg
- * @returns {Promise<{ fileName: string|null, hasRecording: boolean, durationSeconds: number|null, durationStatus: 'valid'|'too_short'|'too_long'|'unknown', durationWarning: string|null, submittedAt: Date|null }>}
+ * @param {{ forceRefreshDuration?: boolean }} [options]
+ * @returns {Promise<{ fileName: string|null, fileId: string|null, hasRecording: boolean, durationSeconds: number|null, durationStatus: 'valid'|'too_short'|'too_long'|'unknown', durationWarning: string|null, submittedAt: Date|null }>}
  */
-async function resolveVoiceMemoRecordingFromApplicant(applicant, durationLimits, cfg) {
+async function resolveVoiceMemoRecordingFromApplicant(applicant, durationLimits, cfg, options = {}) {
+  const forceRefreshDuration = options.forceRefreshDuration === true;
   const driveFile = await resolveDriveFileForApplicant(applicant, cfg);
   if (!driveFile) {
     return {
       fileName: null,
+      fileId: null,
       hasRecording: false,
       durationSeconds: null,
       durationStatus: "unknown",
@@ -277,16 +281,37 @@ async function resolveVoiceMemoRecordingFromApplicant(applicant, durationLimits,
     };
   }
 
-  let durationSeconds =
+  const cachedFileId = applicant.driveFileId ? String(applicant.driveFileId).trim() : "";
+  const cachedDurationSeconds =
     applicant.driveDurationSeconds != null && Number.isFinite(Number(applicant.driveDurationSeconds))
       ? Number(applicant.driveDurationSeconds)
       : null;
+  const cacheMatchesCurrentFile =
+    Boolean(cachedFileId) &&
+    cachedFileId === driveFile.fileId &&
+    cachedDurationSeconds != null;
+
+  // Cache is keyed by Drive file id: reuse duration when the file has not changed.
+  // Probe Drive when the file is new/unknown, duration is missing, or a refresh is requested.
+  let durationSeconds = !forceRefreshDuration && cacheMatchesCurrentFile ? cachedDurationSeconds : null;
   if (durationSeconds == null) {
     durationSeconds = await getVoiceMemoDurationSeconds(driveFile.fileId);
+    if (durationSeconds != null) {
+      updateApplicantDriveDurationSeconds(applicant.aesopId, {
+        driveDurationSeconds: durationSeconds,
+        driveFileId: driveFile.fileId,
+        driveFileName: driveFile.fileName,
+      }).catch(() => {});
+    } else if (cacheMatchesCurrentFile) {
+      // Keep the previous cache if a refresh probe fails.
+      durationSeconds = cachedDurationSeconds;
+    }
   }
+
   const durationStatus = classifyVoiceMemoDuration(durationSeconds, durationLimits);
   return {
     fileName: driveFile.fileName,
+    fileId: driveFile.fileId,
     hasRecording: true,
     durationSeconds,
     durationStatus,
@@ -312,7 +337,7 @@ async function resolveVoiceMemoRecordingFromApplicant(applicant, durationLimits,
  *   maxDurationSeconds: number,
  * }>}
  */
-async function getPortalVoiceMemoStatus({ userId, email }) {
+async function getPortalVoiceMemoStatus({ userId, email, refreshDuration = false }) {
   const profile = await verifyPortalVoiceMemoSession({ userId, email });
   if (!profile) {
     const error = new Error("Unable to load voice memo status. Please sign in again from the login link.");
@@ -337,14 +362,18 @@ async function getPortalVoiceMemoStatus({ userId, email }) {
   let submitted = applicant.round2.trim().toLowerCase() === submittedValue;
   let submittedAt = applicant.submittedAt.trim() || null;
   let fileName = null;
+  let fileId = null;
   let hasRecording = false;
   let durationSeconds = null;
   let durationStatus = "unknown";
   let durationWarning = null;
 
-  const recording = await resolveVoiceMemoRecordingFromApplicant(applicant, durationLimits, cfg);
+  const recording = await resolveVoiceMemoRecordingFromApplicant(applicant, durationLimits, cfg, {
+    forceRefreshDuration: refreshDuration === true,
+  });
   if (recording.hasRecording) {
     fileName = recording.fileName;
+    fileId = recording.fileId;
     hasRecording = true;
     durationSeconds = recording.durationSeconds;
     durationStatus = recording.durationStatus;
@@ -362,6 +391,7 @@ async function getPortalVoiceMemoStatus({ userId, email }) {
     submitted,
     submittedAt,
     fileName,
+    fileId,
     hasRecording,
     submissionInstructions,
     // Short-lived signed token the <audio> element uses to stream, so the URL
@@ -371,6 +401,68 @@ async function getPortalVoiceMemoStatus({ userId, email }) {
     durationLabel: formatVoiceMemoDurationLabel(durationSeconds),
     durationStatus,
     durationWarning,
+    minDurationSeconds: durationLimits.minSeconds,
+    maxDurationSeconds: durationLimits.maxSeconds,
+  };
+}
+
+/**
+ * Persist a browser-measured voice memo duration for the current Drive file.
+ * @param {{ userId: string, email: string, durationSeconds: number, fileId?: string }} params
+ */
+async function reportPortalVoiceMemoDuration({ userId, email, durationSeconds, fileId }) {
+  const profile = await verifyPortalVoiceMemoSession({ userId, email });
+  if (!profile) {
+    const error = new Error("Unable to update voice memo duration. Please sign in again from the login link.");
+    error.statusCode = 403;
+    throw error;
+  }
+
+  const seconds = Number(durationSeconds);
+  if (!Number.isFinite(seconds) || seconds < 0 || seconds > 60 * 30) {
+    const error = new Error("A valid recording duration is required.");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const cfg = getVoiceMemoSheetConfig();
+  const applicant = await getApplicantRowByAesopId(profile.id || userId);
+  if (!applicant) {
+    const error = new Error("Voice memo is not available for your account.");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const driveFile = await resolveDriveFileForApplicant(applicant, cfg);
+  if (!driveFile) {
+    const error = new Error("No voice memo file was found for your account.");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const reportedFileId = String(fileId || "").trim();
+  if (reportedFileId && reportedFileId !== driveFile.fileId) {
+    const error = new Error("That voice memo file is no longer the current submission.");
+    error.statusCode = 409;
+    throw error;
+  }
+
+  const rounded = Math.round(seconds);
+  await updateApplicantDriveDurationSeconds(applicant.aesopId, {
+    driveDurationSeconds: rounded,
+    driveFileId: driveFile.fileId,
+    driveFileName: driveFile.fileName,
+  });
+
+  const durationLimits = getVoiceMemoDurationLimits(cfg.voiceMemo);
+  const durationStatus = classifyVoiceMemoDuration(rounded, durationLimits);
+  return {
+    success: true,
+    fileId: driveFile.fileId,
+    durationSeconds: rounded,
+    durationLabel: formatVoiceMemoDurationLabel(rounded),
+    durationStatus,
+    durationWarning: voiceMemoDurationWarning(durationStatus, durationLimits),
     minDurationSeconds: durationLimits.minSeconds,
     maxDurationSeconds: durationLimits.maxSeconds,
   };
@@ -476,6 +568,7 @@ async function getPortalVoiceMemoStreamByToken({ token, rangeHeader = "" }) {
 
 module.exports = {
   getPortalVoiceMemoStatus,
+  reportPortalVoiceMemoDuration,
   getPortalVoiceMemoStream,
   getPortalVoiceMemoStreamByToken,
   getReviewVoiceMemoStreamByToken,

@@ -55,10 +55,33 @@ function formatVoiceMemoDurationLabel(seconds) {
   return `${secs} sec`;
 }
 
+/**
+ * Browser-measured durations can differ slightly from server probes; only treat
+ * larger gaps as a cache mismatch worth correcting.
+ */
+const VOICE_MEMO_DURATION_MISMATCH_SECONDS = 2;
+
+/**
+ * @param {number|null|undefined} cachedSeconds
+ * @param {number|null|undefined} measuredSeconds
+ * @returns {boolean}
+ */
+function voiceMemoDurationsDiffer(cachedSeconds, measuredSeconds) {
+  if (cachedSeconds == null || measuredSeconds == null) {
+    return false;
+  }
+  if (!Number.isFinite(cachedSeconds) || !Number.isFinite(measuredSeconds)) {
+    return false;
+  }
+  return Math.abs(cachedSeconds - measuredSeconds) >= VOICE_MEMO_DURATION_MISMATCH_SECONDS;
+}
+
 module.exports = {
   VOICE_MEMO_MIN_DURATION_SEC,
   VOICE_MEMO_MAX_DURATION_SEC,
+  VOICE_MEMO_DURATION_MISMATCH_SECONDS,
   classifyVoiceMemoDuration,
   voiceMemoDurationWarning,
   formatVoiceMemoDurationLabel,
+  voiceMemoDurationsDiffer,
 };

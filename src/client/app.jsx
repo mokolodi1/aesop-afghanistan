@@ -21,6 +21,11 @@ import {
   applyPortalDocumentLocale,
 } from './portalI18n.js';
 import { getPortalApplicationCalendarEntries } from './portalApplicationCalendar.js';
+import {
+  classifyVoiceMemoDuration,
+  formatVoiceMemoDurationLabel,
+  voiceMemoDurationsDiffer,
+} from '../../utils/voiceMemoDuration.js';
 import './styles.css';
 
 const PortalLanguageContext = React.createContext({
@@ -2455,7 +2460,9 @@ function PortalVoiceMemoSection({ studentUserId, studentEmail, enabled }) {
   const [voiceMemoStatus, setVoiceMemoStatus] = useState(null);
   const [voiceMemoAudioError, setVoiceMemoAudioError] = useState('');
   const [voiceMemoReloadKey, setVoiceMemoReloadKey] = useState(0);
+  const [measuredDurationSeconds, setMeasuredDurationSeconds] = useState(null);
   const voiceMemoRetryCountRef = useRef(0);
+  const reportedDurationKeyRef = useRef('');
 
   const voiceMemoStreamSrc = useMemo(() => {
     if (!voiceMemoStatus?.submitted || !voiceMemoStatus?.hasRecording || !enabled) {
@@ -2476,18 +2483,25 @@ function PortalVoiceMemoSection({ studentUserId, studentEmail, enabled }) {
       setVoiceMemoError('');
       setVoiceMemoLoading(false);
       setVoiceMemoAudioError('');
+      setMeasuredDurationSeconds(null);
+      reportedDurationKeyRef.current = '';
       return undefined;
     }
     let cancelled = false;
     setVoiceMemoLoading(true);
     setVoiceMemoError('');
     setVoiceMemoAudioError('');
+    setMeasuredDurationSeconds(null);
+    reportedDurationKeyRef.current = '';
     (async () => {
       try {
         const response = await fetch('/api/portal-voice-memo/status', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ userId: studentUserId, email: studentEmail }),
+          body: JSON.stringify({
+            userId: studentUserId,
+            email: studentEmail,
+          }),
         });
         const data = await response.json();
         if (cancelled) {
@@ -2515,21 +2529,100 @@ function PortalVoiceMemoSection({ studentUserId, studentEmail, enabled }) {
     };
   }, [enabled, studentUserId, studentEmail, t, voiceMemoReloadKey]);
 
+  const displayDurationSeconds =
+    measuredDurationSeconds != null && Number.isFinite(measuredDurationSeconds)
+      ? measuredDurationSeconds
+      : voiceMemoStatus?.durationSeconds != null && Number.isFinite(Number(voiceMemoStatus.durationSeconds))
+        ? Number(voiceMemoStatus.durationSeconds)
+        : null;
+  const displayDurationLabel =
+    formatVoiceMemoDurationLabel(displayDurationSeconds) || voiceMemoStatus?.durationLabel || null;
+  const displayDurationStatus = classifyVoiceMemoDuration(displayDurationSeconds, {
+    minSeconds: voiceMemoStatus?.minDurationSeconds,
+    maxSeconds: voiceMemoStatus?.maxDurationSeconds,
+  });
+
   const voiceMemoDurationWarning = useMemo(() => {
-    if (!voiceMemoStatus?.durationStatus) {
+    if (!displayDurationStatus || displayDurationStatus === 'unknown') {
       return voiceMemoStatus?.durationWarning || null;
     }
     return (
-      translateVoiceMemoDurationWarning(locale, voiceMemoStatus.durationStatus, {
-        minSeconds: voiceMemoStatus.minDurationSeconds,
-        maxSeconds: voiceMemoStatus.maxDurationSeconds,
-      }) || voiceMemoStatus.durationWarning
+      translateVoiceMemoDurationWarning(locale, displayDurationStatus, {
+        minSeconds: voiceMemoStatus?.minDurationSeconds,
+        maxSeconds: voiceMemoStatus?.maxDurationSeconds,
+      }) || voiceMemoStatus?.durationWarning
     );
-  }, [locale, voiceMemoStatus]);
+  }, [locale, displayDurationStatus, voiceMemoStatus]);
 
   useEffect(() => {
     setVoiceMemoAudioError('');
   }, [voiceMemoStreamSrc]);
+
+  useEffect(() => {
+    if (
+      !enabled ||
+      !studentUserId ||
+      !studentEmail ||
+      measuredDurationSeconds == null ||
+      !Number.isFinite(measuredDurationSeconds) ||
+      !voiceMemoStatus?.fileId
+    ) {
+      return undefined;
+    }
+    if (!voiceMemoDurationsDiffer(voiceMemoStatus.durationSeconds, measuredDurationSeconds)) {
+      return undefined;
+    }
+    const reportKey = `${voiceMemoStatus.fileId}:${Math.round(measuredDurationSeconds)}`;
+    if (reportedDurationKeyRef.current === reportKey) {
+      return undefined;
+    }
+    reportedDurationKeyRef.current = reportKey;
+    let cancelled = false;
+    (async () => {
+      try {
+        const response = await fetch('/api/portal-voice-memo/duration', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            userId: studentUserId,
+            email: studentEmail,
+            fileId: voiceMemoStatus.fileId,
+            durationSeconds: measuredDurationSeconds,
+          }),
+        });
+        const data = await response.json();
+        if (cancelled || !response.ok) {
+          return;
+        }
+        setVoiceMemoStatus((prev) =>
+          prev
+            ? {
+                ...prev,
+                durationSeconds: data.durationSeconds ?? Math.round(measuredDurationSeconds),
+                durationLabel: data.durationLabel || formatVoiceMemoDurationLabel(measuredDurationSeconds),
+                durationStatus: data.durationStatus || classifyVoiceMemoDuration(measuredDurationSeconds, {
+                  minSeconds: prev.minDurationSeconds,
+                  maxSeconds: prev.maxDurationSeconds,
+                }),
+                durationWarning: data.durationWarning ?? prev.durationWarning,
+              }
+            : prev,
+        );
+      } catch {
+        // Keep the browser-measured label even if cache update fails.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    enabled,
+    studentUserId,
+    studentEmail,
+    measuredDurationSeconds,
+    voiceMemoStatus?.fileId,
+    voiceMemoStatus?.durationSeconds,
+  ]);
 
   if (!enabled || !voiceMemoStatus?.eligible) {
     return null;
@@ -2552,20 +2645,20 @@ function PortalVoiceMemoSection({ studentUserId, studentEmail, enabled }) {
                 {voiceMemoError}
               </p>
             ) : null}
-            {voiceMemoDurationWarning && voiceMemoStatus.durationStatus === 'too_short' ? (
+            {voiceMemoDurationWarning && displayDurationStatus === 'too_short' ? (
               <p className="portal-voice-memo-duration-warning" role="alert">
                 {voiceMemoDurationWarning}
               </p>
             ) : null}
-            {voiceMemoStatus.durationLabel ? (
+            {displayDurationLabel ? (
               <p className="portal-field-hint">
-                {t('voiceMemo.recordingLength')}: <strong>{voiceMemoStatus.durationLabel}</strong>
-                {voiceMemoStatus.durationStatus === 'too_long' ? (
+                {t('voiceMemo.recordingLength')}: <strong>{displayDurationLabel}</strong>
+                {displayDurationStatus === 'too_long' ? (
                   <span className="portal-voice-memo-duration-ok">
                     {' '}
                     {t('voiceMemo.durationExceeding')}
                   </span>
-                ) : voiceMemoStatus.durationStatus === 'valid' ? (
+                ) : displayDurationStatus === 'valid' ? (
                   <span className="portal-voice-memo-duration-ok">
                     {' '}
                     {t('voiceMemo.durationWithin')}
@@ -2573,7 +2666,46 @@ function PortalVoiceMemoSection({ studentUserId, studentEmail, enabled }) {
                 ) : null}
               </p>
             ) : null}
-            {voiceMemoStatus.durationStatus !== 'too_short' ? (
+            {voiceMemoStatus.hasRecording ? (
+              <>
+                {voiceMemoAudioError ? (
+                  <p className="portal-field-error" role="alert">
+                    {voiceMemoAudioError}
+                  </p>
+                ) : null}
+                {voiceMemoStreamSrc ? (
+                  <audio
+                    key={voiceMemoStreamSrc}
+                    className="portal-voice-memo-player"
+                    controls
+                    preload="metadata"
+                    src={voiceMemoStreamSrc}
+                    onLoadedMetadata={(event) => {
+                      const duration = event.currentTarget?.duration;
+                      if (Number.isFinite(duration) && duration > 0) {
+                        setMeasuredDurationSeconds(duration);
+                      }
+                    }}
+                    onError={() => {
+                      // A likely-expired token: refresh status once to mint
+                      // a fresh one before surfacing an error to the user.
+                      if (voiceMemoRetryCountRef.current < 1) {
+                        voiceMemoRetryCountRef.current += 1;
+                        setVoiceMemoAudioError('');
+                        setVoiceMemoReloadKey((key) => key + 1);
+                        return;
+                      }
+                      setVoiceMemoAudioError(t('voiceMemo.audioPlayError'));
+                    }}
+                  >
+                    {t('voiceMemo.audioUnsupported')}
+                  </audio>
+                ) : null}
+              </>
+            ) : (
+              <p className="portal-field-hint">{t('voiceMemo.audioUnavailable')}</p>
+            )}
+            {displayDurationStatus !== 'too_short' ? (
               <div className="portal-voice-memo-done">
                 <p className="portal-voice-memo-done-title">{t('voiceMemo.doneTitle')}</p>
                 <p className="portal-voice-memo-done-lead">{t('voiceMemo.doneLead')}</p>

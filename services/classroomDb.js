@@ -1128,6 +1128,65 @@ async function upsertApplicantFromMirror(fields) {
   return result.rows[0] || null;
 }
 
+/**
+ * Update cached Drive file metadata / duration for an applicant without rewriting sheet fields.
+ * @param {string} aesopId
+ * @param {{
+ *   driveDurationSeconds?: number|null,
+ *   driveFileId?: string|null,
+ *   driveFileName?: string|null,
+ * }} fields
+ * @returns {Promise<boolean>}
+ */
+async function updateApplicantDriveDurationSeconds(aesopId, fields = {}) {
+  const pool = getPool();
+  if (!pool) {
+    return false;
+  }
+  const id = String(aesopId || "").trim();
+  if (!id) {
+    return false;
+  }
+
+  const sets = [];
+  const values = [id];
+  let param = 2;
+
+  if (Object.prototype.hasOwnProperty.call(fields, "driveDurationSeconds")) {
+    const duration =
+      fields.driveDurationSeconds != null && Number.isFinite(Number(fields.driveDurationSeconds))
+        ? Math.round(Number(fields.driveDurationSeconds))
+        : null;
+    sets.push(`drive_duration_seconds = $${param}`);
+    values.push(duration);
+    param += 1;
+  }
+  if (Object.prototype.hasOwnProperty.call(fields, "driveFileId")) {
+    const fileId = fields.driveFileId ? String(fields.driveFileId).trim() : null;
+    sets.push(`drive_file_id = $${param}`);
+    values.push(fileId || null);
+    param += 1;
+  }
+  if (Object.prototype.hasOwnProperty.call(fields, "driveFileName")) {
+    const fileName = fields.driveFileName ? String(fields.driveFileName).trim() : null;
+    sets.push(`drive_file_name = $${param}`);
+    values.push(fileName || null);
+    param += 1;
+  }
+
+  if (sets.length === 0) {
+    return false;
+  }
+
+  const result = await pool.query(
+    `UPDATE applicants
+     SET ${sets.join(", ")}
+     WHERE lower(aesop_id) = lower($1)`,
+    values,
+  );
+  return (result.rowCount || 0) > 0;
+}
+
 /** @returns {Promise<boolean>} */
 async function isApplicantsTableMirrorFresh() {
   const pool = getPool();
@@ -1169,6 +1228,52 @@ async function getApplicantsReviewFieldsMapFromDb() {
     });
   }
   return byId;
+}
+
+/**
+ * Cached voice-memo durations keyed by Drive file id (and AESOP id fallback).
+ * Includes browser-corrected lengths written by the portal player.
+ * @returns {Promise<{
+ *   byFileId: Map<string, number>,
+ *   byAesopId: Map<string, { fileId: string|null, durationSeconds: number }>,
+ * }|null>}
+ */
+async function getApplicantVoiceMemoDurationsMapFromDb() {
+  const pool = getPool();
+  if (!pool) {
+    return null;
+  }
+
+  const result = await pool.query(
+    `SELECT lower(aesop_id) AS aesop_key, drive_file_id, drive_duration_seconds
+     FROM applicants
+     WHERE drive_duration_seconds IS NOT NULL
+       AND aesop_id IS NOT NULL
+       AND trim(aesop_id) <> ''`,
+  );
+
+  /** @type {Map<string, number>} */
+  const byFileId = new Map();
+  /** @type {Map<string, { fileId: string|null, durationSeconds: number }>} */
+  const byAesopId = new Map();
+
+  for (const row of result.rows) {
+    const aesopKey = String(row.aesop_key || "").trim().toLowerCase();
+    const fileId = String(row.drive_file_id || "").trim();
+    const durationRaw = Number(row.drive_duration_seconds);
+    if (!aesopKey || !Number.isFinite(durationRaw) || durationRaw < 0) {
+      continue;
+    }
+    byAesopId.set(aesopKey, {
+      fileId: fileId || null,
+      durationSeconds: durationRaw,
+    });
+    if (fileId) {
+      byFileId.set(fileId, durationRaw);
+    }
+  }
+
+  return { byFileId, byAesopId };
 }
 
 /**
@@ -1364,12 +1469,14 @@ module.exports = {
   isApplicantsMirrorFresh,
   isApplicantsTableMirrorFresh,
   getApplicantsReviewFieldsMapFromDb,
+  getApplicantVoiceMemoDurationsMapFromDb,
   isReviewerAssignedToApplicantFromDb,
   isApplicantReviewsMirrorFresh,
   personRowToProfile,
   applicantRowFromDb,
   getApplicantRowByAesopIdFromDb,
   upsertApplicantFromMirror,
+  updateApplicantDriveDurationSeconds,
   getApplicantReviewRowFromDb,
   upsertApplicantReviewFromMirror,
   getReviewAssignmentsForReviewerFromDb,

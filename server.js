@@ -65,6 +65,7 @@ const {
 } = require('./services/voiceMemoSync');
 const {
   getPortalVoiceMemoStatus,
+  reportPortalVoiceMemoDuration,
   getPortalVoiceMemoStream,
   getPortalVoiceMemoStreamByToken,
   getReviewVoiceMemoStreamByToken,
@@ -1404,12 +1405,46 @@ app.post('/api/portal-voice-memo/status', portalVoiceMemoRateLimiter, async (req
       return res.status(400).json({ error: 'Invalid ID or email.' });
     }
 
-    const status = await getPortalVoiceMemoStatus({ userId, email: emailSan });
+    const refreshDuration = req.body?.refreshDuration === true;
+    const status = await getPortalVoiceMemoStatus({
+      userId,
+      email: emailSan,
+      refreshDuration,
+    });
     res.json({ success: true, ...status });
   } catch (error) {
     console.error('Error loading portal voice memo status:', formatErrorForLog(error));
     const status = error.statusCode || 500;
     res.status(status).json({ error: error.message || 'Could not load voice memo status.' });
+  }
+});
+
+app.post('/api/portal-voice-memo/duration', portalVoiceMemoRateLimiter, async (req, res) => {
+  try {
+    let { userId, email, fileId } = req.body;
+    const durationSeconds = Number(req.body?.durationSeconds);
+
+    if (!userId || typeof userId !== 'string' || !email || typeof email !== 'string') {
+      return res.status(400).json({ error: 'ID and email are required.' });
+    }
+
+    userId = sanitizeIdentifier(userId);
+    const emailSan = sanitizeEmail(email);
+    if (!userId || !emailSan) {
+      return res.status(400).json({ error: 'Invalid ID or email.' });
+    }
+
+    const result = await reportPortalVoiceMemoDuration({
+      userId,
+      email: emailSan,
+      durationSeconds,
+      fileId: typeof fileId === 'string' ? fileId : '',
+    });
+    res.json(result);
+  } catch (error) {
+    console.error('Error reporting portal voice memo duration:', formatErrorForLog(error));
+    const status = error.statusCode || 500;
+    res.status(status).json({ error: error.message || 'Could not update voice memo duration.' });
   }
 });
 
