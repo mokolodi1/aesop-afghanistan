@@ -1745,14 +1745,14 @@ function RequestMagicLinkApp() {
         />
       </div>
       <h1>AESOP Afghanistan</h1>
-      <p className="subtitle">Enter your AESOP ID to receive a magic link</p>
-      <MagicLinkRequestForm inputId="userId" submitLabel="Send Magic Link" />
+      <p className="subtitle">Enter your AESOP ID to receive a login link</p>
+      <MagicLinkRequestForm inputId="userId" submitLabel="Send Login Link" />
     </div>
   );
 }
 
 function VerifyMagicLinkApp() {
-  const [status, setStatus] = useState('Verifying magic link...');
+  const [status, setStatus] = useState('Verifying login link...');
   const [message, setMessage] = useState({ type: '', text: '' });
   const [showSpinner, setShowSpinner] = useState(true);
   const [verificationFailed, setVerificationFailed] = useState(false);
@@ -1820,7 +1820,7 @@ function VerifyMagicLinkApp() {
 
         if (response.ok && data.success) {
           setStatus('Success!');
-          setMessage({ type: 'success', text: 'Magic link verified successfully. Redirecting...' });
+          setMessage({ type: 'success', text: 'Login link verified successfully. Redirecting...' });
           try {
             applyPortalSessionFromApi(data, { allowAdmin: true });
           } catch (sessionError) {
@@ -1848,7 +1848,7 @@ function VerifyMagicLinkApp() {
           type: 'error',
           text:
             data.error ||
-            (response.ok ? 'Invalid or expired magic link.' : `Request failed (HTTP ${response.status}). Try again.`),
+            (response.ok ? 'Invalid or expired login link.' : `Request failed (HTTP ${response.status}). Try again.`),
         });
         setVerificationFailed(true);
         setCanResendByToken(data.canResend === true);
@@ -1868,7 +1868,7 @@ function VerifyMagicLinkApp() {
 
   const requestMagicLinkByUserId = async (userId) => {
     setIsResending(true);
-    setMessage({ type: 'loading', text: 'Sending a new magic link...' });
+    setMessage({ type: 'loading', text: 'Sending a new login link...' });
 
     try {
       const response = await fetch('/api/request-magic-link', {
@@ -1882,7 +1882,7 @@ function VerifyMagicLinkApp() {
         setStatus('Verification Failed');
         setMessage({
           type: 'error',
-          text: data.error || data.message || 'Unable to send a new magic link. Enter your AESOP ID below.',
+          text: data.error || data.message || 'Unable to send a new login link. Enter your AESOP ID below.',
         });
         setShowIdForm(true);
         return;
@@ -1891,7 +1891,7 @@ function VerifyMagicLinkApp() {
       setStatus('Check your email');
       setMessage({
         type: 'success',
-        text: data.message || 'A new magic link has been sent to your registered email.',
+        text: data.message || 'A new login link has been sent to your registered email.',
       });
       setVerificationFailed(false);
       sessionStorage.setItem('studentPortalPendingMagicUserId', userId);
@@ -1911,7 +1911,7 @@ function VerifyMagicLinkApp() {
 
     if (canResendByToken && linkToken) {
       setIsResending(true);
-      setMessage({ type: 'loading', text: 'Sending a new magic link...' });
+      setMessage({ type: 'loading', text: 'Sending a new login link...' });
 
       try {
         const response = await fetch('/api/resend-magic-link', {
@@ -1925,7 +1925,7 @@ function VerifyMagicLinkApp() {
           setStatus('Check your email');
           setMessage({
             type: 'success',
-            text: data.message || 'A new magic link has been sent to your registered email.',
+            text: data.message || 'A new login link has been sent to your registered email.',
           });
           setVerificationFailed(false);
           return;
@@ -2274,12 +2274,19 @@ function PortalLayout({ children }) {
 function PortalSectionLinks({ current, isAdmin, isReviewer = false, showEditDingLink = true }) {
   const { t } = usePortalI18n();
   const hubHref = portalHubHref();
+  // Applicants never manage a Ding number, so the edit-Ding tab is always hidden for them.
+  const showEditDing = showEditDingLink && !isReviewer && !readPortalIsApplicant();
+  // When the only navigation item would be "Profile", don't render a tab bar at all.
+  const hasExtraLinks = showEditDing || isReviewer || isAdmin;
+  if (!hasExtraLinks) {
+    return null;
+  }
   return (
     <nav className="portal-section-links" aria-label={t('nav.portalNav')}>
       <a href={hubHref} className={current === 'hub' ? 'is-current' : undefined}>
         {t('nav.profile')}
       </a>
-      {showEditDingLink && !isReviewer ? (
+      {showEditDing ? (
         <>
           <span className="portal-section-links-sep" aria-hidden="true">
             ·
@@ -2563,64 +2570,78 @@ function PortalVoiceMemoSection({ studentUserId, studentEmail, enabled }) {
   );
 }
 
-function PortalCalendarSection({ enabled }) {
+function PortalCalendarSection({ enabled, studentUserId, studentEmail }) {
   const { locale, t } = usePortalI18n();
-  const [calendarOpen, setCalendarOpen] = useState(false);
   const calendarEntries = useMemo(() => getPortalApplicationCalendarEntries(locale), [locale]);
+  const [voiceNoteSubmitted, setVoiceNoteSubmitted] = useState(false);
+
+  useEffect(() => {
+    if (!enabled || !studentUserId || !studentEmail) {
+      setVoiceNoteSubmitted(false);
+      return undefined;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const response = await fetch('/api/portal-voice-memo/status', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId: studentUserId, email: studentEmail }),
+        });
+        const data = await response.json();
+        if (cancelled) {
+          return;
+        }
+        setVoiceNoteSubmitted(response.ok && data?.submitted === true);
+      } catch {
+        if (!cancelled) {
+          setVoiceNoteSubmitted(false);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [enabled, studentUserId, studentEmail]);
 
   if (!enabled) {
     return null;
   }
 
+  const resolveNote = (entry) => {
+    if (entry.dynamicNote === 'voiceCompleted') {
+      return voiceNoteSubmitted ? t('calendar.note.voiceCompleted') : '';
+    }
+    return entry.note || '';
+  };
+
   return (
     <section className="portal-calendar-section" aria-label={t('calendar.sectionAria')}>
-      <div className="portal-ding-accordion portal-calendar-accordion" aria-label={t('calendar.accordionAria')}>
-        <div className="portal-ding-accordion-item">
-          <button
-            type="button"
-            role="tab"
-            id="application-calendar-tab"
-            aria-selected={calendarOpen}
-            aria-controls="application-calendar-panel"
-            aria-expanded={calendarOpen}
-            className={`portal-ding-tab${calendarOpen ? ' is-active' : ''}`}
-            onClick={() => setCalendarOpen((open) => !open)}
-          >
-            <span className="portal-ding-tab-label">{t('calendar.label')}</span>
-            <span className="portal-ding-tab-chevron" aria-hidden="true">
-              {calendarOpen ? '▼' : '▶'}
-            </span>
-          </button>
-          {calendarOpen ? (
-            <div
-              id="application-calendar-panel"
-              role="tabpanel"
-              aria-labelledby="application-calendar-tab"
-              className="portal-ding-panel portal-calendar-panel"
-            >
-              <div className="portal-calendar-scroll">
-                <table className="portal-calendar-table">
-                  <thead>
-                    <tr>
-                      <th scope="col">{t('calendar.process')}</th>
-                      <th scope="col">{t('calendar.date')}</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {calendarEntries.map((entry, index) => (
-                      <tr key={`${entry.process}-${entry.date}-${index}`}>
-                        <td>{entry.process}</td>
-                        <td>{entry.date}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              <p className="portal-field-hint portal-calendar-deadline-note">{t('calendar.deadlineNote')}</p>
-            </div>
-          ) : null}
-        </div>
+      <h3 className="portal-calendar-heading">{t('calendar.label')}</h3>
+      <div className="portal-calendar-scroll">
+        <table className="portal-calendar-table">
+          <thead>
+            <tr>
+              <th scope="col">{t('calendar.process')}</th>
+              <th scope="col">{t('calendar.date')}</th>
+              <th scope="col">{t('calendar.info')}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {calendarEntries.map((entry, index) => {
+              const note = resolveNote(entry);
+              return (
+                <tr key={`${entry.process}-${entry.date}-${index}`}>
+                  <td>{entry.process}</td>
+                  <td className="portal-calendar-date-cell">{entry.date}</td>
+                  <td className="portal-calendar-note-cell">{note || null}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
       </div>
+      <p className="portal-field-hint portal-calendar-deadline-note">{t('calendar.deadlineNote')}</p>
     </section>
   );
 }
@@ -2663,19 +2684,65 @@ function PortalAdminImpersonateActions({ targetUserId, compact = false }) {
   );
 }
 
+function PortalRejectionLetter({ name }) {
+  const displayName = String(name || '').trim();
+  const enName = displayName || 'Applicant';
+  const faName = displayName || 'متقاضی';
+  const enParagraphs = [
+    `Dear ${enName},`,
+    'Thank you for your application to AESOP English classes in our 2026-2027 academic year.',
+    'We regret that your application was not selected to advance. We received over 9,000 applications this summer and we regret that we were not able to accept your application this time.',
+    'We admire your dedication to learning and encourage you to keep studying English with the help of AESOP\u2019s youtube channel where you can find English learning videos in English & Dari.',
+    'We hope you will apply again for AESOP\u2019s 2027-2028 academic year. Applications will open at AESOPAfghanistan.org in June, 2027.',
+    'Sincerely,',
+    'AESOP Admission Team',
+  ];
+  const faParagraphs = [
+    `${faName} عزیز،`,
+    'از شما سپاسگزاریم که برای صنف‌های انگلیسی AESOP در سال تعلیمی ۲۰۲۶–۲۰۲۷ درخواست فرستادید.',
+    'با تأسف باید به شما اطلاع بدهیم که درخواست شما برای مرحلهٔ بعدی انتخاب نشد. در تابستان امسال بیش از ۹۰۰۰ درخواست دریافت کردیم و متأسفانه نتوانستیم درخواست شما را در این دوره بپذیریم.',
+    'ما پشتکار و علاقهٔ شما را به یادگیری تحسین می‌کنیم و تشویقتان می‌کنیم که با استفاده از کانال یوتیوب AESOP به یادگیری زبان انگلیسی ادامه بدهید. در آن‌جا می‌توانید ویدیوهای آموزشی زبان انگلیسی به زبان انگلیسی و دری پیدا کنید.',
+    'امیدواریم برای سال تعلیمی ۲۰۲۷–۲۰۲۸ دوباره برای AESOP درخواست بدهید. درخواست‌ها در جون ۲۰۲۷ در AESOPAfghanistan.org باز خواهند شد.',
+    'با احترام،',
+    'تیم پذیرش AESOP',
+  ];
+  return (
+    <section className="portal-rejection-letter">
+      <div className="portal-rejection-letter-body" dir="ltr">
+        {enParagraphs.map((paragraph, index) => (
+          <p key={`en-${index}`} className="portal-rejection-letter-line">
+            {paragraph}
+          </p>
+        ))}
+      </div>
+      <div className="portal-rejection-letter-body portal-rejection-letter-body--fa" dir="rtl">
+        {faParagraphs.map((paragraph, index) => (
+          <p key={`fa-${index}`} className="portal-rejection-letter-line">
+            {paragraph}
+          </p>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function PortalComingSoonContent() {
   const { t } = usePortalI18n();
+  const { studentName } = usePortalStudentRecord();
+  const trimmedName = String(studentName || '').trim();
+  const title = trimmedName ? t('hub.comingSoonTitle', { name: trimmedName }) : t('hub.comingSoonTitleNoName');
   return (
     <div className="portal-coming-soon">
-      <h2 className="portal-welcome">{t('hub.comingSoonTitle')}</h2>
+      <h2 className="portal-welcome">{title}</h2>
       <p className="portal-coming-soon-message">{t('hub.comingSoonMessage')}</p>
+      <p className="portal-coming-soon-message">{t('hub.comingSoonSignoff')}</p>
     </div>
   );
 }
 
 function PortalHubPage() {
   const { locale, t } = usePortalI18n();
-  const { studentName, studentUserId, studentEmail, studentPhone, newDingNumber } = usePortalStudentRecord();
+  const { studentName, studentUserId, studentEmail, studentPhone } = usePortalStudentRecord();
   const {
     studentClass,
     studentGrade,
@@ -2699,6 +2766,8 @@ function PortalHubPage() {
     studentName.trim() || (isApplied ? t('hub.welcomeApplicant') : t('hub.welcomeStudent'));
   const isRound1Accepted =
     String(applicationStatus || '').trim().toLowerCase() === 'accepted';
+  const isRejected =
+    String(applicationStatus || '').trim().toLowerCase() === 'rejected';
 
   useEffect(() => {
     if (!signedIn && intent) {
@@ -2736,14 +2805,6 @@ function PortalHubPage() {
               <div className="portal-hub-meta-row">
                 <dt className="portal-hub-meta-label">{t('header.email')}</dt>
                 <dd className="portal-hub-meta-value portal-ltr">{studentEmail || '—'}</dd>
-              </div>
-              <div className="portal-hub-meta-row">
-                <dt className="portal-hub-meta-label">{t('hub.dingNumber')}</dt>
-                <dd
-                  className={`portal-hub-meta-value portal-hub-meta-mono portal-ltr${newDingNumber.trim() ? '' : ' portal-hub-meta-empty'}`}
-                >
-                  {newDingNumber.trim() ? newDingNumber.trim() : t('hub.notSetYet')}
-                </dd>
               </div>
               {showStudentFields ? (
                 <div className="portal-hub-meta-row">
@@ -2824,12 +2885,17 @@ function PortalHubPage() {
                 </div>
               ) : null}
             </dl>
+            {isRejected ? <PortalRejectionLetter name={studentName} /> : null}
             <PortalVoiceMemoSection
               studentUserId={studentUserId}
               studentEmail={studentEmail}
               enabled={signedIn && studentUserId.length > 0 && studentEmail.length > 0}
             />
-            <PortalCalendarSection enabled={signedIn && isRound1Accepted} />
+            <PortalCalendarSection
+              enabled={signedIn && isRound1Accepted}
+              studentUserId={studentUserId}
+              studentEmail={studentEmail}
+            />
             {isTeacher || showAdminFeatures ? (
               <PortalTeacherRoster
                 rosterEnabled={isTeacher || showAdminFeatures}

@@ -269,7 +269,7 @@ async function isPortalApplicantProfile(userId, profile) {
 async function requirePortalReviewer(res, body) {
   const profile = await verifyPortalSessionBody(body.userId, body.email);
   if (!profile) {
-    res.status(403).json({ error: 'Unable to continue. Please sign in again from the magic link.' });
+    res.status(403).json({ error: 'Unable to continue. Please sign in again from the login link.' });
     return null;
   }
   if (!await resolvePortalReviewerAccess(profile)) {
@@ -287,7 +287,7 @@ async function requirePortalReviewer(res, body) {
 async function requirePortalAdmin(res, body) {
   const profile = await verifyPortalSessionBody(body.userId, body.email);
   if (!profile) {
-    res.status(403).json({ error: 'Unable to continue. Please sign in again from the magic link.' });
+    res.status(403).json({ error: 'Unable to continue. Please sign in again from the login link.' });
     return null;
   }
   if (!isPortalAdmin(profile)) {
@@ -424,7 +424,7 @@ app.post('/api/resend-magic-link', magicLinkRateLimiter, async (req, res) => {
 
     const result = await resendMagicLinkByToken(token);
     if (!result.success) {
-      return res.status(400).json({ error: result.error || 'Unable to resend magic link.' });
+      return res.status(400).json({ error: result.error || 'Unable to resend login link.' });
     }
 
     res.json({ success: true, message: result.message });
@@ -546,11 +546,11 @@ app.post('/api/verify-magic-link', verifyRateLimiter, async (req, res) => {
         isApplicant,
         applicationStatus,
         peopleStatus,
-        message: 'Magic link verified successfully',
+        message: 'Login link verified successfully',
       });
     } else {
       res.status(401).json({
-        error: 'Invalid or expired magic link.',
+        error: 'Invalid or expired login link.',
         canResend: result.canResend === true,
       });
     }
@@ -628,11 +628,11 @@ app.post('/api/update-ding-number', dingUpdateRateLimiter, async (req, res) => {
 
     const profile = await findProfileById(userId);
     if (!profile) {
-      return res.status(403).json({ error: 'Unable to update. Please sign in again from the magic link.' });
+      return res.status(403).json({ error: 'Unable to update. Please sign in again from the login link.' });
     }
 
     if (sanitizeEmail(profile.email) !== emailSan) {
-      return res.status(403).json({ error: 'Unable to update. Please sign in again from the magic link.' });
+      return res.status(403).json({ error: 'Unable to update. Please sign in again from the login link.' });
     }
 
     if (await isPortalApplicantProfile(userId, profile)) {
@@ -722,11 +722,11 @@ app.post('/api/portal-request-ding-help', portalDingHelpRateLimiter, async (req,
 
     const profile = await findProfileById(userId);
     if (!profile) {
-      return res.status(403).json({ error: 'Unable to send request. Please sign in again from the magic link.' });
+      return res.status(403).json({ error: 'Unable to send request. Please sign in again from the login link.' });
     }
 
     if (sanitizeEmail(profile.email) !== emailSan) {
-      return res.status(403).json({ error: 'Unable to send request. Please sign in again from the magic link.' });
+      return res.status(403).json({ error: 'Unable to send request. Please sign in again from the login link.' });
     }
 
     if (await isPortalApplicantProfile(userId, profile)) {
@@ -785,11 +785,11 @@ app.post('/api/portal-ding-history', portalDingHistoryRateLimiter, async (req, r
 
     const profile = await findProfileById(userId);
     if (!profile) {
-      return res.status(403).json({ error: 'Unable to load history. Please sign in again from the magic link.' });
+      return res.status(403).json({ error: 'Unable to load history. Please sign in again from the login link.' });
     }
 
     if (sanitizeEmail(profile.email) !== emailSan) {
-      return res.status(403).json({ error: 'Unable to load history. Please sign in again from the magic link.' });
+      return res.status(403).json({ error: 'Unable to load history. Please sign in again from the login link.' });
     }
 
     if (await isPortalApplicantProfile(userId, profile)) {
@@ -822,13 +822,13 @@ app.post('/api/portal-class-grade', portalClassGradeRateLimiter, async (req, res
     if (!profile) {
       return res
         .status(403)
-        .json({ error: 'Unable to load class. Please sign in again from the magic link.' });
+        .json({ error: 'Unable to load class. Please sign in again from the login link.' });
     }
 
     if (sanitizeEmail(profile.email) !== emailSan) {
       return res
         .status(403)
-        .json({ error: 'Unable to load class. Please sign in again from the magic link.' });
+        .json({ error: 'Unable to load class. Please sign in again from the login link.' });
     }
 
     const studentName = typeof profile.name === 'string' ? profile.name : '';
@@ -890,13 +890,13 @@ app.post('/api/portal-student-grades', portalStudentGradesRateLimiter, async (re
     if (!profile) {
       return res
         .status(403)
-        .json({ error: 'Unable to load grades. Please sign in again from the magic link.' });
+        .json({ error: 'Unable to load grades. Please sign in again from the login link.' });
     }
 
     if (sanitizeEmail(profile.email) !== emailSan) {
       return res
         .status(403)
-        .json({ error: 'Unable to load grades. Please sign in again from the magic link.' });
+        .json({ error: 'Unable to load grades. Please sign in again from the login link.' });
     }
 
     if (!config.classroom?.enabled) {
@@ -931,13 +931,13 @@ app.post('/api/portal-teacher-roster', portalTeacherRosterRateLimiter, async (re
     if (!profile) {
       return res
         .status(403)
-        .json({ error: 'Unable to load roster. Please sign in again from the magic link.' });
+        .json({ error: 'Unable to load roster. Please sign in again from the login link.' });
     }
 
     if (sanitizeEmail(profile.email) !== emailSan) {
       return res
         .status(403)
-        .json({ error: 'Unable to load roster. Please sign in again from the magic link.' });
+        .json({ error: 'Unable to load roster. Please sign in again from the login link.' });
     }
 
     if (!config.classroom?.enabled) {

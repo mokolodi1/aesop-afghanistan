@@ -46,7 +46,7 @@ async function verifyPortalCalendarSession({ userId, email }) {
 async function getPortalCalendarForApplicant({ userId, email }) {
   const profile = await verifyPortalCalendarSession({ userId, email });
   if (!profile) {
-    const error = new Error("Unable to load calendar. Please sign in again from the magic link.");
+    const error = new Error("Unable to load calendar. Please sign in again from the login link.");
     error.statusCode = 403;
     throw error;
   }

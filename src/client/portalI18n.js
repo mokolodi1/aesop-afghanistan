@@ -45,36 +45,38 @@ const TRANSLATIONS = {
       'Dear Applicant, thank you for applying. If you want to be a successful candidate for this round of AESOP Applications, please check your emails regularly and follow the instructions shared with you there.',
     'hub.aboutPortal': 'About this portal',
     'hub.aboutApplicantPrefix':
-      'This secure applicant portal is where you sign in with a magic link—there is no password to remember on this site. Check your application status, Round 2 voice memo, and the application calendar here, and read',
+      'This secure applicant portal is where you sign in with a login link—there is no password to remember on this site. Check your application status, Round 2 voice memo, and the application calendar here, and read',
     'hub.aboutStudentPrefix':
-      'This secure student portal is where you sign in with a magic link—there is no password to remember on this site. Use it to update your Afghanistan Ding phone number when it changes (with confirmation), review past Ding updates, request help if you need a non-Afghan number for Ding, and read',
+      'This secure student portal is where you sign in with a login link—there is no password to remember on this site. Use it to update your Afghanistan Ding phone number when it changes (with confirmation), review past Ding updates, request help if you need a non-Afghan number for Ding, and read',
     'hub.aboutStudentSuffix':
       'Your AESOP ID, email, and Ding number above summarize what we have on file—open',
     'hub.aboutStudentEnd': 'to change your Ding number.',
     'hub.aboutGuestLine1':
-      'The AESOP Student Portal helps you update your Afghanistan Ding number, see Ding number history after you sign in, and read FAQs—using a magic link, not a password on this site.',
+      'The AESOP Student Portal helps you update your Afghanistan Ding number, see Ding number history after you sign in, and read FAQs—using a login link, not a password on this site.',
     'hub.aboutGuestSectionsLead': 'Portal sections:',
     'hub.aboutGuestAnd': 'and',
     'hub.aboutGuestNotConnected': 'Not connected?',
     'hub.aboutGuestRequestAbove': 'above with your AESOP ID.',
     'hub.preferMainSite': 'Prefer the main site?',
     'hub.profileIntro':
-      'Sign in with your magic link to update your Afghanistan Ding number, view history, or request help with a non-Afghan number.',
+      'Sign in with your login link to update your Afghanistan Ding number, view history, or request help with a non-Afghan number.',
     'hub.faqLink': 'frequently asked questions',
     'hub.studentPortalTitle': 'AESOP Portal',
-    'hub.comingSoonTitle': 'Welcome to the AESOP Portal',
-    'hub.comingSoonMessage': 'Student/Teacher Feature will be visible soon.',
+    'hub.comingSoonTitle': 'Welcome {{name}}',
+    'hub.comingSoonTitleNoName': 'Welcome',
+    'hub.comingSoonMessage':
+      'Your profile page is coming soon! The developers here at AESOP are working hard on the portal, and we are prioritizing new student applications for the next week or so. Watch this space!',
+    'hub.comingSoonSignoff': 'Your friendly developers, Teo and Farahnosh',
     'hub.reviewerLead':
       'Open Review Applications to score essays for applicants assigned to you.',
     'hub.signInHeading': 'Log in with your AESOP ID',
     'hub.signInLead':
-      'Enter the ID AESOP provided you. We will email you a login link that will log you in to the AESOP Portal.',
+      'Enter the ID that AESOP provided you. We will email you a login link that will log you in to the AESOP Portal.',
     'hub.signInIdHint':
       'Your student ID should be either 10 or 11 numbers and looks like: 2617391637',
 
-    'applicationStatus.accepted': 'Your application is accepted for Round 1 selection.',
-    'applicationStatus.rejected':
-      'Thank you for applying. We received over 9,000 applications this summer, and unfortunately your application was not selected to advance at this time. We hope you apply again next year.',
+    'applicationStatus.accepted': 'Accepted to Round 1 Selection',
+    'applicationStatus.rejected': 'Not selected to advance',
     'applicationStatus.pending': 'Pending',
 
     'role.applicant': 'Applicant',
@@ -111,30 +113,35 @@ const TRANSLATIONS = {
     'calendar.empty': 'No application dates are listed yet.',
     'calendar.process': 'Application process',
     'calendar.date': 'Date',
+    'calendar.info': 'More info',
     'calendar.networkError': 'Network error. Please try again.',
     'calendar.loadError': 'Could not load calendar.',
     'calendar.sectionAria': 'Application calendar',
     'calendar.accordionAria': 'Calendar',
-    'calendar.deadlineNote': 'All dates are due by 11:59 PM Afghanistan Time.',
-    'calendar.event.signalVoice': 'Signal voice messages (students send in)',
-    'calendar.event.manualReview': 'Manual review (of signal + essay)',
-    'calendar.event.interviews': 'Interviews',
-    'calendar.event.decisions': 'Decisions',
-    'calendar.event.studentsAdmitted': 'Students admitted',
+    'calendar.deadlineNote': 'All times are 11:59 PM Afghanistan Time.',
+    'calendar.event.round2VoiceDeadline': 'Round 2 voice note submission deadline (11:59 pm)',
+    'calendar.event.round2Results': 'Round 2 Results Shared by Email',
+    'calendar.event.round3InterviewsBegin': 'Round 3 Interviews Begin',
+    'calendar.event.round3InterviewsEnd': 'Round 3 Interviews End',
+    'calendar.event.round3Decision': 'Final Round 3 Admission Decision Shared',
     'calendar.event.openingCeremony': 'Opening Ceremony',
     'calendar.event.classesStart': 'Classes start',
     'calendar.event.classesEnd': 'Classes end',
+    'calendar.note.round2Results':
+      'we will share more information about Round 3 Interviews if you are selected.',
+    'calendar.note.voiceCompleted':
+      'Thank you for successfully completing all the required steps. We will email you by Friday, July 24 with your result.',
 
     'magicLink.aesopId': 'AESOP ID',
-    'magicLink.enterId': 'Enter your ID',
+    'magicLink.enterId': 'Enter your AESOP ID',
     'magicLink.rememberId': 'Remember my ID',
-    'magicLink.submit': 'Email me a magic link',
+    'magicLink.submit': 'Email me a login link',
     'magicLink.invalidId': 'Please enter a valid ID.',
     'magicLink.invalidIdNotFound':
       'Your ID is invalid. Please enter a correct ID. Please enter the AESOP ID you received in your email.',
     'magicLink.linkSent':
       'Please click the login link that has been sent to your email on file.',
-    'magicLink.sending': 'Checking your ID and sending a magic link...',
+    'magicLink.sending': 'Checking your ID and sending a login link...',
     'magicLink.networkError': 'Internal error. Please try again.',
 
     'profile.applicantBlockedTitle': 'Not available for applicants',
@@ -149,7 +156,7 @@ const TRANSLATIONS = {
     'intent.signInProfileTitle': 'Sign in to manage your Ding number',
     'intent.signInGenericTitle': 'Sign in for account-specific help',
     'intent.openedLink': 'You opened a link related to {{title}}.',
-    'intent.requestMagicLink': 'Request a magic link',
+    'intent.requestMagicLink': 'Request a login link',
     'intent.magicLinkHelpBeforeFaq': 'with your AESOP ID—we\'ll email you a one-time link. The',
     'intent.magicLinkHelpAfterFaq': 'page does not require signing in.',
     'intent.editDing': 'Edit Ding',
@@ -161,7 +168,7 @@ const TRANSLATIONS = {
     'reviews.loadError': 'Could not load review assignments.',
     'reviews.empty': 'No applications are assigned to you for review.',
     'reviews.accessDenied':
-      'Reviewer access is required to view this page. Your AESOP ID must be marked as a reviewer on the People sheet (Reviewer column), then sign out and use a new magic link.',
+      'Reviewer access is required to view this page. Your AESOP ID must be marked as a reviewer on the People sheet (Reviewer column), then sign out and use a new login link.',
     'reviews.applicantId': 'AESOP ID',
     'reviews.appliedLevel': 'Applied level',
     'reviews.notAvailable': 'Not listed',
@@ -259,25 +266,28 @@ const TRANSLATIONS = {
       'متقاضی گرامی، از درخواست شما سپاسگزاریم. اگر می‌خواهید در این دور از درخواست‌های AESOP نامزد موفق باشید، لطفاً به‌طور منظم ایمیل‌های خود را بررسی کنید و دستورالعمل‌هایی را که در آنجا با شما به اشتراک گذاشته شده است دنبال کنید.',
     'hub.aboutPortal': 'درباره این پورتال',
     'hub.aboutApplicantPrefix':
-      'این پورتال امن متقاضیان است که با لینک جادویی وارد می‌شوید — در این سایت رمز عبور وجود ندارد. وضعیت درخواست، یادداشت صوتی دور دوم و تقویم درخواست را اینجا ببینید و',
+      'این پورتال امن متقاضیان است که با لینک ورود وارد می‌شوید — در این سایت رمز عبور وجود ندارد. وضعیت درخواست، یادداشت صوتی دور دوم و تقویم درخواست را اینجا ببینید و',
     'hub.aboutStudentPrefix':
-      'این پورتال امن محصلین است که با لینک جادویی وارد می‌شوید — در این سایت رمز عبور وجود ندارد. شماره Ding افغانستان خود را به‌روز کنید، سابقه تغییرات را ببینید، در صورت نیاز به شماره غیرافغانی درخواست کمک کنید و',
+      'این پورتال امن محصلین است که با لینک ورود وارد می‌شوید — در این سایت رمز عبور وجود ندارد. شماره Ding افغانستان خود را به‌روز کنید، سابقه تغییرات را ببینید، در صورت نیاز به شماره غیرافغانی درخواست کمک کنید و',
     'hub.aboutStudentSuffix':
       'AESOP ID، ایمیل و شماره Ding بالا خلاصه اطلاعات ثبت‌شده است — برای تغییر شماره Ding به',
     'hub.aboutStudentEnd': 'بروید.',
     'hub.aboutGuestLine1':
-      'پورتال محصلین AESOP به شما کمک می‌کند شماره Ding افغانستان خود را به‌روز کنید، پس از ورود سابقه تغییرات را ببینید و سوالات متداول را بخوانید — با لینک جادویی، نه رمز عبور در این سایت.',
+      'پورتال محصلین AESOP به شما کمک می‌کند شماره Ding افغانستان خود را به‌روز کنید، پس از ورود سابقه تغییرات را ببینید و سوالات متداول را بخوانید — با لینک ورود، نه رمز عبور در این سایت.',
     'hub.aboutGuestSectionsLead': 'بخش‌های پورتال:',
     'hub.aboutGuestAnd': 'و',
     'hub.aboutGuestNotConnected': 'وصل نیستید؟',
     'hub.aboutGuestRequestAbove': 'بالا با AESOP ID خود درخواست دهید.',
     'hub.preferMainSite': 'ترجیح می‌دهید سایت اصلی را ببینید؟',
     'hub.profileIntro':
-      'با لینک جادویی وارد شوید تا شماره Ding افغانستان خود را به‌روز کنید، سابقه را ببینید یا در مورد شماره غیرافغانی درخواست کمک کنید.',
+      'با لینک ورود وارد شوید تا شماره Ding افغانستان خود را به‌روز کنید، سابقه را ببینید یا در مورد شماره غیرافغانی درخواست کمک کنید.',
     'hub.faqLink': 'سوالات متداول',
     'hub.studentPortalTitle': 'پورتال AESOP',
-    'hub.comingSoonTitle': 'به پورتال AESOP خوش آمدید',
-    'hub.comingSoonMessage': 'ویژگی‌های محصل/معلم به‌زودی در دسترس خواهد بود.',
+    'hub.comingSoonTitle': 'خوش آمدید {{name}}',
+    'hub.comingSoonTitleNoName': 'خوش آمدید',
+    'hub.comingSoonMessage':
+      'صفحه پروفایل شما به‌زودی آماده می‌شود! توسعه‌دهندگان AESOP سخت روی پورتال کار می‌کنند و در یک هفته آینده اولویت را به درخواست‌های جدید محصلان می‌دهیم. منتظر باشید!',
+    'hub.comingSoonSignoff': 'توسعه‌دهندگان دوست شما، Teo و Farahnosh',
     'hub.reviewerLead':
       'برای نمره‌دهی به مقاله‌های متقاضیانِ اختصاص‌داده‌شده به شما، «بررسی درخواست‌ها» را باز کنید.',
     'hub.signInHeading': 'با AESOP ID خود وارد شوید',
@@ -286,9 +296,8 @@ const TRANSLATIONS = {
     'hub.signInIdHint':
       'شناسه محصلی شما باید ۱۰ یا ۱۱ رقم باشد و مانند این است: 2617391637',
 
-    'applicationStatus.accepted': 'درخواست شما برای انتخاب دور اول پذیرفته شده است.',
-    'applicationStatus.rejected':
-      'از درخواست شما سپاسگزاریم. ما بیش از ۹٬۰۰۰ درخواست در این تابستان دریافت کردیم و متأسفانه درخواست شما در این مرحله انتخاب نشد. امیدواریم سال آینده دوباره درخواست دهید.',
+    'applicationStatus.accepted': 'پذیرفته‌شده به مرحلهٔ انتخاب دور اول',
+    'applicationStatus.rejected': 'برای مرحلهٔ بعدی انتخاب نشد',
     'applicationStatus.pending': 'در انتظار',
 
     'role.applicant': 'متقاضی',
@@ -325,30 +334,35 @@ const TRANSLATIONS = {
     'calendar.empty': 'هنوز تاریخ درخواست ثبت نشده است.',
     'calendar.process': 'مراحل درخواست',
     'calendar.date': 'تاریخ',
+    'calendar.info': 'معلومات بیشتر',
     'calendar.networkError': 'خطای شبکه. لطفاً دوباره تلاش کنید.',
     'calendar.loadError': 'بارگذاری تقویم ممکن نشد.',
     'calendar.sectionAria': 'تقویم درخواست',
     'calendar.accordionAria': 'تقویم',
-    'calendar.deadlineNote': 'همه تاریخ‌ها تا ساعت ۱۱:۵۹ شب به وقت افغانستان است.',
-    'calendar.event.signalVoice': 'پیام‌های صوتی Signal (ارسال توسط محصلین)',
-    'calendar.event.manualReview': 'بررسی دستی (Signal + انشا)',
-    'calendar.event.interviews': 'مصاحبه‌ها',
-    'calendar.event.decisions': 'تصمیم‌ها',
-    'calendar.event.studentsAdmitted': 'پذیرش محصلین',
+    'calendar.deadlineNote': 'همه ساعت‌ها ۱۱:۵۹ شب به وقت افغانستان است.',
+    'calendar.event.round2VoiceDeadline': 'مهلت ارسال پیام صوتی دور دوم (۱۱:۵۹ شب)',
+    'calendar.event.round2Results': 'نتایج دور دوم از طریق ایمیل اعلام می‌شود',
+    'calendar.event.round3InterviewsBegin': 'آغاز مصاحبه‌های دور سوم',
+    'calendar.event.round3InterviewsEnd': 'پایان مصاحبه‌های دور سوم',
+    'calendar.event.round3Decision': 'اعلام تصمیم نهایی پذیرش دور سوم',
     'calendar.event.openingCeremony': 'مراسم افتتاح',
     'calendar.event.classesStart': 'شروع صنف‌ها',
     'calendar.event.classesEnd': 'پایان صنف‌ها',
+    'calendar.note.round2Results':
+      'اگر انتخاب شوید، معلومات بیشتری دربارهٔ مصاحبه‌های دور سوم با شما در میان می‌گذاریم.',
+    'calendar.note.voiceCompleted':
+      'از اینکه همه مراحل لازم را با موفقیت تکمیل کردید سپاسگزاریم. تا جمعه، ۲۴ جولای نتیجهٔ شما را از طریق ایمیل به شما اطلاع می‌دهیم.',
 
     'magicLink.aesopId': 'AESOP ID',
     'magicLink.enterId': 'AESOP ID خود را وارد کنید',
     'magicLink.rememberId': 'AESOP ID مرا به خاطر بسپار',
-    'magicLink.submit': 'لینک جادویی برایم بفرستید',
+    'magicLink.submit': 'لینک ورود برایم بفرستید',
     'magicLink.invalidId': 'لطفاً یک AESOP ID معتبر وارد کنید.',
     'magicLink.invalidIdNotFound':
       'AESOP ID شما معتبر نیست. لطفاً AESOP ID درست را وارد کنید — همان شناسه‌ای که در ایمیل خود دریافت کرده‌اید.',
     'magicLink.linkSent':
       'لطفاً روی لینک ورودی که به ایمیل ثبت‌شده شما ارسال شده کلیک کنید.',
-    'magicLink.sending': 'در حال بررسی AESOP ID و ارسال لینک جادویی…',
+    'magicLink.sending': 'در حال بررسی AESOP ID و ارسال لینک ورود…',
     'magicLink.networkError': 'خطای داخلی. لطفاً دوباره تلاش کنید.',
 
     'profile.applicantBlockedTitle': 'برای متقاضیان در دسترس نیست',
@@ -363,7 +377,7 @@ const TRANSLATIONS = {
     'intent.signInProfileTitle': 'برای مدیریت شماره Ding وارد شوید',
     'intent.signInGenericTitle': 'برای کمک مخصوص حساب خود وارد شوید',
     'intent.openedLink': 'شما لینکی مربوط به {{title}} باز کرده‌اید.',
-    'intent.requestMagicLink': 'درخواست لینک جادویی',
+    'intent.requestMagicLink': 'درخواست لینک ورود',
     'intent.magicLinkHelpBeforeFaq': 'با AESOP ID خود — یک لینک یک‌بار مصرف ایمیل می‌کنیم. صفحه',
     'intent.magicLinkHelpAfterFaq': 'نیاز به ورود ندارد.',
     'intent.editDing': 'تغییر Ding',
@@ -375,7 +389,7 @@ const TRANSLATIONS = {
     'reviews.loadError': 'بارگذاری وظایف بررسی ممکن نشد.',
     'reviews.empty': 'هیچ درخواستی برای بررسی به شما اختصاص داده نشده است.',
     'reviews.accessDenied':
-      'برای دیدن این صفحه دسترسی بررسی‌کننده لازم است. AESOP ID شما باید در برگه People در ستون Reviewer علامت‌گذاری شود، سپس خارج شوید و با لینک جادویی جدید وارد شوید.',
+      'برای دیدن این صفحه دسترسی بررسی‌کننده لازم است. AESOP ID شما باید در برگه People در ستون Reviewer علامت‌گذاری شود، سپس خارج شوید و با لینک ورود جدید وارد شوید.',
     'reviews.applicantId': 'AESOP ID',
     'reviews.appliedLevel': 'سطح درخواستی',
     'reviews.notAvailable': 'ثبت نشده',

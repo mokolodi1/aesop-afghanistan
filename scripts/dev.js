@@ -20,7 +20,14 @@ async function main() {
 
   const server = spawn(process.execPath, ['--watch', '--watch-preserve-output', 'server.js'], {
     stdio: 'inherit',
-    env: { ...process.env, PORT: process.env.PORT || '3003' },
+    env: {
+      ...process.env,
+      PORT: process.env.PORT || '3003',
+      // Serve the portal SPA (header/footer chrome) at / on localhost, like the
+      // portal.* host in prod. Set PORTAL_EXTRA_HOSTS= (empty) to test the plain
+      // apex login page instead.
+      PORTAL_EXTRA_HOSTS: process.env.PORTAL_EXTRA_HOSTS ?? 'localhost,127.0.0.1',
+    },
   });
 
   server.on('exit', async (code) => {
