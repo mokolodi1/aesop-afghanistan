@@ -90,6 +90,7 @@ const {
   PORTAL_DING_HELP_NEED_DETAIL_MESSAGE,
 } = require('./utils/validation');
 const { createRateLimiter } = require('./middleware/rateLimiter');
+const { getClientIp } = require('./utils/clientIp');
 const { securityHeaders } = require('./middleware/security');
 const { formatDingChangeTimestamp } = require('./utils/dingSheetTime');
 const { sendDingNumberUpdatedEmail, sendPortalDingHelpRequestEmail } = require('./services/email');
@@ -407,7 +408,7 @@ const MAGIC_LINK_REQUEST_WINDOW_MS = 15 * 60 * 1000;
 
 function magicLinkRequestSubjectKey(req) {
   const userId = sanitizeIdentifier(req.body?.userId);
-  return userId ? `id:${userId}` : `ip:${req.ip || req.connection?.remoteAddress || 'unknown'}`;
+  return userId ? `id:${userId}` : `ip:${getClientIp(req)}`;
 }
 
 function magicLinkResendSubjectKey(req) {
@@ -415,7 +416,7 @@ function magicLinkResendSubjectKey(req) {
   if (isValidToken(token)) {
     return `token:${token}`;
   }
-  return `ip:${req.ip || req.connection?.remoteAddress || 'unknown'}`;
+  return `ip:${getClientIp(req)}`;
 }
 
 const magicLinkRequestCooldownLimiter = createRateLimiter({
@@ -477,7 +478,7 @@ app.post(
     // Validate ID exists
     if (!userId || typeof userId !== 'string') {
       console.warn('Invalid student ID request: missing or non-string ID', {
-        ip: req.ip,
+        ip: getClientIp(req),
         route: req.originalUrl
       });
       return res.status(400).json({ error: 'ID is required' });
@@ -487,7 +488,7 @@ app.post(
     userId = sanitizeIdentifier(userId);
     if (!userId) {
       console.warn('Invalid student ID request: failed ID sanitization', {
-        ip: req.ip,
+        ip: getClientIp(req),
         route: req.originalUrl
       });
       return res.status(400).json({ error: 'Invalid ID format' });
@@ -704,7 +705,7 @@ function portalSubjectKey(req) {
     }
   }
 
-  return `ip:${req.ip || req.connection?.remoteAddress || 'unknown'}`;
+  return `ip:${getClientIp(req)}`;
 }
 
 // Rate limiter for updating ding number from the portal

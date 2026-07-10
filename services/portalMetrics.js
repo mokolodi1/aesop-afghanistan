@@ -1,4 +1,5 @@
 const { getPool, isDatabaseEnabled } = require("../db/index");
+const { getClientIpContext } = require("../utils/clientIp");
 
 const BUCKET_SECONDS = 10;
 const FLUSH_INTERVAL_MS = 5_000;
@@ -345,7 +346,7 @@ function createRequestLogMiddleware() {
           status: statusCode,
           pageType,
           ms: Date.now() - startedAt,
-          ip: req.ip || undefined,
+          ...getClientIpContext(req),
           instance: process.env.FLY_MACHINE_ID || undefined,
         }),
       );

@@ -2,6 +2,7 @@
 
 const { recordRateLimitHit } = require('../services/portalMetrics');
 const { getPool, isDatabaseEnabled } = require('../db/index');
+const { getClientIp, getClientIpContext } = require('../utils/clientIp');
 
 const rateLimitStore = new Map();
 let postgresCleanupScheduled = false;
@@ -167,7 +168,7 @@ function logRateLimitBlock(req, key, name) {
       at: new Date().toISOString(),
       name,
       key,
-      ip: req.ip || undefined,
+      ...getClientIpContext(req),
       path: req.path,
       instance: process.env.FLY_MACHINE_ID || undefined,
     }),
@@ -193,7 +194,7 @@ function createRateLimiter({
   message = 'Too many requests. Please try again later.',
 }) {
   return (req, res, next) => {
-    const ip = req.ip || req.connection.remoteAddress || 'unknown';
+    const ip = getClientIp(req);
     const key = `${name}:${buildRateLimitKey(req, ip, resolveKeySuffix)}`;
     const now = Date.now();
 
