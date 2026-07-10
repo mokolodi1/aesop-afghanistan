@@ -2488,9 +2488,19 @@ function PortalVoiceMemoInstructions({ aesopId, round2Prompt }) {
   );
 }
 
+function PortalVoiceMemoLoading() {
+  const { t } = usePortalI18n();
+  return (
+    <div className="portal-voice-memo-loading" role="status" aria-live="polite">
+      <div className="portal-voice-memo-loading-spinner" aria-hidden="true" />
+      <p className="portal-voice-memo-loading-text">{t('voiceMemo.checking')}</p>
+    </div>
+  );
+}
+
 function PortalVoiceMemoSection({ studentUserId, studentEmail, enabled }) {
   const { locale, t } = usePortalI18n();
-  const [voiceMemoLoading, setVoiceMemoLoading] = useState(false);
+  const [voiceMemoLoading, setVoiceMemoLoading] = useState(enabled);
   const [voiceMemoError, setVoiceMemoError] = useState('');
   const [voiceMemoStatus, setVoiceMemoStatus] = useState(null);
   const [voiceMemoAudioError, setVoiceMemoAudioError] = useState('');
@@ -2662,17 +2672,25 @@ function PortalVoiceMemoSection({ studentUserId, studentEmail, enabled }) {
     voiceMemoStatus?.durationSeconds,
   ]);
 
-  if (!enabled || !voiceMemoStatus?.eligible) {
+  if (!enabled) {
+    return null;
+  }
+
+  if (voiceMemoLoading) {
+    return (
+      <section className="portal-voice-memo-section" aria-label={t('voiceMemo.sectionAria')}>
+        <PortalVoiceMemoLoading />
+      </section>
+    );
+  }
+
+  if (!voiceMemoStatus?.eligible) {
     return null;
   }
 
   return (
     <section className="portal-voice-memo-section" aria-label={t('voiceMemo.sectionAria')}>
-      {voiceMemoLoading ? (
-        <div className="portal-voice-memo-status portal-voice-memo-status--pending" role="status">
-          {t('voiceMemo.checking')}
-        </div>
-      ) : voiceMemoStatus.submitted ? (
+      {voiceMemoStatus.submitted ? (
         <>
           <div
             className={`portal-voice-memo-status${
@@ -2800,7 +2818,7 @@ function PortalVoiceMemoSection({ studentUserId, studentEmail, enabled }) {
             <p className="portal-voice-memo-warning-lead">{t('voiceMemo.noneLead')}</p>
           </div>
           <div className="portal-voice-memo-panel">
-            <h4 className="portal-voice-memo-instructions-title">{t('voiceMemo.instrTitle')}</h4>
+            <h3 className="portal-voice-memo-instructions-title">{t('voiceMemo.instrTitle')}</h3>
             <PortalVoiceMemoInstructions
               aesopId={studentUserId}
               round2Prompt={voiceMemoStatus.round2Prompt}
