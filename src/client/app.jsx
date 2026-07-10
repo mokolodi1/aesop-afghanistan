@@ -1954,15 +1954,29 @@ function RequestMagicLinkApp() {
 
 function VerifyMagicLinkApp() {
   const t = (key, params) => translatePortalText(getStoredPortalLocale(), key, params);
-  const [status, setStatus] = useState('Verifying login link...');
+  const [status, setStatus] = useState(() => t('verify.verifying'));
   const [message, setMessage] = useState({ type: '', text: '' });
   const [showSpinner, setShowSpinner] = useState(true);
   const [verificationFailed, setVerificationFailed] = useState(false);
   const [canResendByToken, setCanResendByToken] = useState(false);
+  const [canOneClickResend, setCanOneClickResend] = useState(false);
   const [linkToken, setLinkToken] = useState('');
   const [showIdForm, setShowIdForm] = useState(false);
   const [isResending, setIsResending] = useState(false);
   const canSendAgain = !isResending;
+
+  const verifyFailureMessage = (reason, oneClickResend) => {
+    if (!oneClickResend) {
+      return t('verify.failedEnterId');
+    }
+    if (reason === 'expired') {
+      return t('verify.expiredCanResend');
+    }
+    if (reason === 'used') {
+      return t('verify.usedCanResend');
+    }
+    return t('verify.failedCanResend');
+  };
 
   useEffect(() => {
     const runVerification = async () => {
@@ -1987,9 +2001,9 @@ function VerifyMagicLinkApp() {
       }
 
       if (!token) {
-        setStatus('Invalid Link');
+        setStatus(t('verify.invalidLink'));
         setShowSpinner(false);
-        setMessage({ type: 'error', text: 'No token provided. Please check your email link.' });
+        setMessage({ type: 'error', text: t('verify.noToken') });
         setVerificationFailed(true);
         setShowIdForm(true);
         return;
@@ -1998,9 +2012,9 @@ function VerifyMagicLinkApp() {
       setLinkToken(token);
 
       if (!/^[a-f0-9]{64}$/i.test(token)) {
-        setStatus('Invalid Link');
+        setStatus(t('verify.invalidLink'));
         setShowSpinner(false);
-        setMessage({ type: 'error', text: 'Invalid token format.' });
+        setMessage({ type: 'error', text: t('verify.invalidToken') });
         setVerificationFailed(true);
         setShowIdForm(true);
         return;
@@ -2023,7 +2037,7 @@ function VerifyMagicLinkApp() {
 
         if (response.ok && data.success) {
           setStatus('Success!');
-          setMessage({ type: 'success', text: 'Login link verified successfully. Redirecting...' });
+          setMessage({ type: 'success', text: t('verify.success') });
           try {
             applyPortalSessionFromApi(data, { allowAdmin: true });
           } catch (sessionError) {
@@ -2031,9 +2045,7 @@ function VerifyMagicLinkApp() {
             setStatus('Error');
             setMessage({
               type: 'error',
-              text:
-                sessionError?.message ||
-                'Sign-in succeeded but this browser could not save your session. Try the link again or use a regular (non-private) browser window.',
+              text: sessionError?.message || t('verify.sessionError'),
             });
             setVerificationFailed(true);
             return;
@@ -2046,23 +2058,36 @@ function VerifyMagicLinkApp() {
           return;
         }
 
-        setStatus('Verification Failed');
+        const pendingUserId = sessionStorage.getItem('studentPortalPendingMagicUserId')?.trim();
+        const resendByToken = data.canResend === true;
+        const oneClickResend = resendByToken || !!pendingUserId;
+
+        setStatus(t('verify.failed'));
         setMessage({
           type: 'error',
           text:
-            data.error ||
-            (response.ok ? 'Invalid or expired login link.' : `Request failed (HTTP ${response.status}). Try again.`),
+            response.status === 401
+              ? verifyFailureMessage(data.reason, oneClickResend)
+              : data.error ||
+                (response.ok
+                  ? t('verify.failedEnterId')
+                  : `Request failed (HTTP ${response.status}). Try again.`),
         });
         setVerificationFailed(true);
-        setCanResendByToken(data.canResend === true);
+        setCanResendByToken(resendByToken);
+        setCanOneClickResend(oneClickResend);
+        setShowIdForm(!oneClickResend);
       } catch (error) {
         setShowSpinner(false);
         setStatus('Error');
         setMessage({
           type: 'error',
-          text: 'Could not reach the server to verify your link. Check your connection and try again.',
+          text: t('verify.networkError'),
         });
         setVerificationFailed(true);
+        const pendingUserId = sessionStorage.getItem('studentPortalPendingMagicUserId')?.trim();
+        setCanOneClickResend(!!pendingUserId);
+        setShowIdForm(!pendingUserId);
       }
     };
 
@@ -2077,7 +2102,7 @@ function VerifyMagicLinkApp() {
       const result = await postMagicLinkRequest(userId, { t });
 
       if (!result.ok) {
-        setStatus('Verification Failed');
+        setStatus(t('verify.failed'));
         setMessage({
           type: 'error',
           text: result.message,
@@ -2086,7 +2111,7 @@ function VerifyMagicLinkApp() {
         return;
       }
 
-      setStatus('Check your email');
+      setStatus(t('verify.checkEmail'));
       setMessage({
         type: 'success',
         text: t('magicLink.linkSent'),
@@ -2114,12 +2139,13 @@ function VerifyMagicLinkApp() {
         const result = await postResendMagicLink(linkToken, { t });
 
         if (result.ok) {
-          setStatus('Check your email');
+          setStatus(t('verify.checkEmail'));
           setMessage({
             type: 'success',
             text: result.data?.message || t('magicLink.linkSent'),
           });
           setVerificationFailed(false);
+          setCanOneClickResend(false);
           return;
         }
 
@@ -2160,7 +2186,7 @@ function VerifyMagicLinkApp() {
       {showSpinner ? <div className="spinner" /> : null}
       <h2>{status}</h2>
       <div className={`message ${message.type || ''}`}>{message.text}</div>
-      {verificationFailed && !showIdForm ? (
+      {verificationFailed && canOneClickResend && !showIdForm ? (
         <div className="verify-resend">
           <button
             type="button"
@@ -2169,13 +2195,13 @@ function VerifyMagicLinkApp() {
             disabled={!canSendAgain}
             aria-disabled={!canSendAgain}
           >
-            Send again
+            {t('magicLink.resendOneClick')}
           </button>
         </div>
       ) : null}
       {verificationFailed && showIdForm ? (
         <div className="verify-resend-form">
-          <MagicLinkRequestForm inputId="verifyUserId" submitLabel="Send again" />
+          <MagicLinkRequestForm inputId="verifyUserId" submitLabel={t('magicLink.resendOneClick')} />
         </div>
       ) : null}
     </div>

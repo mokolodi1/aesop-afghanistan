@@ -207,6 +207,27 @@ const TRANSLATIONS = {
     'magicLink.waitAboutOneMinute': 'about 1 minute',
     'magicLink.waitAboutMinutes': 'about {{minutes}} minutes',
     'magicLink.resendFailed': 'Unable to send a new login link. Enter your AESOP ID below.',
+    'magicLink.resendOneClick': 'Email me a new login link',
+
+    'verify.verifying': 'Verifying login link...',
+    'verify.success': 'Login link verified successfully. Redirecting...',
+    'verify.checkEmail': 'Check your email',
+    'verify.failed': 'Verification Failed',
+    'verify.invalidLink': 'Invalid Link',
+    'verify.noToken': 'No token provided. Please check your email link.',
+    'verify.invalidToken': 'Invalid token format.',
+    'verify.expiredCanResend':
+      'This login link has expired. Click below and we will email a fresh link to your registered address.',
+    'verify.usedCanResend':
+      'This login link was already used. Click below and we will email a fresh link to your registered address.',
+    'verify.failedCanResend':
+      'This login link is no longer valid. Click below and we will email a fresh link to your registered address.',
+    'verify.failedEnterId':
+      'This login link is no longer valid. Enter your AESOP ID below to request a new one.',
+    'verify.networkError':
+      'Could not reach the server to verify your link. Check your connection and try again.',
+    'verify.sessionError':
+      'Sign-in succeeded but this browser could not save your session. Try the link again or use a regular (non-private) browser window.',
 
     'profile.applicantBlockedTitle': 'Not available for applicants',
     'profile.applicantBlockedPrefix':
@@ -497,6 +518,27 @@ const TRANSLATIONS = {
     'magicLink.waitAboutOneMinute': 'حدود ۱ دقیقه',
     'magicLink.waitAboutMinutes': 'حدود {{minutes}} دقیقه',
     'magicLink.resendFailed': 'ارسال لینک ورود جدید ممکن نشد. AESOP ID خود را در زیر وارد کنید.',
+    'magicLink.resendOneClick': 'لینک ورود جدید برایم بفرستید',
+
+    'verify.verifying': 'در حال تأیید لینک ورود…',
+    'verify.success': 'لینک ورود با موفقیت تأیید شد. در حال انتقال…',
+    'verify.checkEmail': 'ایمیل خود را بررسی کنید',
+    'verify.failed': 'تأیید ناموفق بود',
+    'verify.invalidLink': 'لینک نامعتبر',
+    'verify.noToken': 'توکن ارائه نشده است. لطفاً لینک ایمیل خود را بررسی کنید.',
+    'verify.invalidToken': 'فرمت توکن نامعتبر است.',
+    'verify.expiredCanResend':
+      'این لینک ورود منقضی شده است. روی دکمه زیر بزنید تا لینک تازه به ایمیل ثبت‌شده‌تان ارسال شود.',
+    'verify.usedCanResend':
+      'این لینک ورود قبلاً استفاده شده است. روی دکمه زیر بزنید تا لینک تازه به ایمیل ثبت‌شده‌تان ارسال شود.',
+    'verify.failedCanResend':
+      'این لینک ورود دیگر معتبر نیست. روی دکمه زیر بزنید تا لینک تازه به ایمیل ثبت‌شده‌تان ارسال شود.',
+    'verify.failedEnterId':
+      'این لینک ورود دیگر معتبر نیست. AESOP ID خود را در زیر وارد کنید تا لینک جدید بخواهید.',
+    'verify.networkError':
+      'اتصال به سرور برای تأیید لینک برقرار نشد. اتصال اینترنت خود را بررسی کنید و دوباره تلاش کنید.',
+    'verify.sessionError':
+      'ورود موفق بود اما این مرورگر نتوانست نشست شما را ذخیره کند. دوباره لینک را امتحان کنید یا از پنجره مرورگر عادی (غیرخصوصی) استفاده کنید.',
 
     'profile.applicantBlockedTitle': 'برای متقاضیان در دسترس نیست',
     'profile.applicantBlockedPrefix':

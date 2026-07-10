@@ -197,17 +197,17 @@ async function generateAndStoreMagicLink(email, userId) {
 /**
  * Verify a magic link token
  * @param {string} token - Magic link token (should be pre-validated)
- * @returns {Promise<{valid: boolean, email?: string, userId?: string, canResend?: boolean}>}
+ * @returns {Promise<{valid: boolean, email?: string, userId?: string, canResend?: boolean, reason?: 'expired'|'used'|'unknown'}>}
  */
 async function verifyMagicLink(token) {
   if (!token || typeof token !== 'string' || token.length !== 64) {
-    return { valid: false };
+    return { valid: false, reason: 'unknown' };
   }
 
   const linkData = await readMagicLinkRecord(token);
 
   if (!linkData) {
-    return { valid: false };
+    return { valid: false, reason: 'unknown' };
   }
 
   const now = new Date();
@@ -217,6 +217,7 @@ async function verifyMagicLink(token) {
     return {
       valid: false,
       canResend: !!(linkData.email && linkData.userId),
+      reason: linkData.used ? 'used' : 'expired',
     };
   }
 

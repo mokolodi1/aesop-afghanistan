@@ -594,6 +594,7 @@ app.post('/api/verify-magic-link', async (req, res) => {
       res.status(401).json({
         error: 'Invalid or expired login link.',
         canResend: result.canResend === true,
+        reason: result.reason || 'unknown',
       });
     }
   } catch (error) {
