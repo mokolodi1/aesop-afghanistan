@@ -4,8 +4,37 @@ const config = require("../config/secrets");
 const { getDb, isDatabaseEnabled } = require("../db/index");
 const { emailCampaignRecipients } = require("../db/schema");
 
+const WEBHOOK_SECRET_HEADER = "x-aesop-postmark-webhook-secret";
+
 function getWebhookSecret() {
   return config.postmark?.webhookSecret || process.env.POSTMARK_WEBHOOK_SECRET || "";
+}
+
+function getWebhookUsername() {
+  return (
+    config.postmark?.webhookUsername ||
+    process.env.POSTMARK_WEBHOOK_USERNAME ||
+    "aesop"
+  );
+}
+
+function parseBasicAuth(authHeader) {
+  if (!authHeader || !authHeader.startsWith("Basic ")) {
+    return null;
+  }
+  try {
+    const decoded = Buffer.from(authHeader.slice(6).trim(), "base64").toString("utf8");
+    const colon = decoded.indexOf(":");
+    if (colon === -1) {
+      return null;
+    }
+    return {
+      username: decoded.slice(0, colon),
+      password: decoded.slice(colon + 1),
+    };
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -33,8 +62,15 @@ function verifyPostmarkWebhookAuth(req) {
   if (safeEqual(authHeader, `Bearer ${secret}`)) {
     return true;
   }
-  if (safeEqual(req.get("x-aesop-postmark-webhook-secret") || "", secret)) {
+  if (safeEqual(req.get(WEBHOOK_SECRET_HEADER) || "", secret)) {
     return true;
+  }
+  const basic = parseBasicAuth(authHeader);
+  if (basic) {
+    const expectedUsername = getWebhookUsername();
+    if (safeEqual(basic.username, expectedUsername) && safeEqual(basic.password, secret)) {
+      return true;
+    }
   }
   return false;
 }
@@ -192,7 +228,9 @@ async function handlePostmarkWebhook(payload) {
 }
 
 module.exports = {
+  WEBHOOK_SECRET_HEADER,
   verifyPostmarkWebhookAuth,
   handlePostmarkWebhook,
   getWebhookSecret,
+  getWebhookUsername,
 };

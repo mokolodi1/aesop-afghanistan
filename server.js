@@ -55,6 +55,7 @@ const {
 const {
   verifyPostmarkWebhookAuth,
   handlePostmarkWebhook,
+  getWebhookSecret,
 } = require('./services/postmarkWebhooks');
 const {
   syncVoiceMemoRound2Status,
@@ -1783,6 +1784,11 @@ app.post('/api/portal-admin/email/campaign-detail', portalAdminRateLimiter, asyn
 
 app.post('/api/postmark/webhook', postmarkWebhookRateLimiter, async (req, res) => {
   if (!verifyPostmarkWebhookAuth(req)) {
+    const hasSecret = Boolean(getWebhookSecret());
+    console.warn(
+      'Postmark webhook rejected:',
+      hasSecret ? 'auth mismatch' : 'POSTMARK_WEBHOOK_SECRET not configured',
+    );
     return res.status(401).json({ error: 'Unauthorized webhook request.' });
   }
   try {
