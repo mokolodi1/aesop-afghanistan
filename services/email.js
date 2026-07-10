@@ -5,6 +5,39 @@ const config = require('../config/secrets');
 const { getPostmarkToken, getPostmarkMessageStream } = require('./postmark');
 const { AESOP_EMAIL, FONT_HEADING, wrapAesopEmail } = require('./emailBranding');
 const { formatGmailAuthError, formatErrorForLog } = require('../utils/errorLogging');
+const { consumeRateLimit } = require('../middleware/rateLimiter');
+
+const EMAIL_SEND_HOURLY_MAX = Number.parseInt(process.env.EMAIL_SEND_HOURLY_MAX || '3000', 10);
+const EMAIL_SEND_HOURLY_WINDOW_MS = 60 * 60 * 1000;
+const EMAIL_SEND_HOURLY_BUCKET_KEY = 'email-send-hourly:global';
+
+class EmailSendQuotaExceededError extends Error {
+  constructor() {
+    super('Hourly email send quota exceeded');
+    this.name = 'EmailSendQuotaExceededError';
+    this.code = 'EMAIL_SEND_QUOTA_EXCEEDED';
+  }
+}
+
+async function assertWithinHourlyEmailQuota() {
+  const max = Number.isFinite(EMAIL_SEND_HOURLY_MAX) && EMAIL_SEND_HOURLY_MAX > 0
+    ? EMAIL_SEND_HOURLY_MAX
+    : 3000;
+  const record = await consumeRateLimit(EMAIL_SEND_HOURLY_BUCKET_KEY, EMAIL_SEND_HOURLY_WINDOW_MS);
+  if (record.count > max) {
+    console.warn(
+      JSON.stringify({
+        type: 'email_send_quota_exceeded',
+        at: new Date().toISOString(),
+        count: record.count,
+        max,
+        resetTime: new Date(record.resetTime).toISOString(),
+        instance: process.env.FLY_MACHINE_ID || undefined,
+      }),
+    );
+    throw new EmailSendQuotaExceededError();
+  }
+}
 
 let transporter = null;
 let gmailJwtClient = null;
@@ -266,6 +299,8 @@ async function sendWithPostmark({ to, subject, text, html, fromEmail }) {
  */
 async function sendEmail({ to, subject, text, html }) {
   try {
+    await assertWithinHourlyEmailQuota();
+
     const fromEmail = config.email.from || config.email.smtp?.user || config.email.gmailServiceAccount?.delegatedUser || 'noreply@aesopafghanistan.org';
 
     // Sanitize subject to prevent header injection

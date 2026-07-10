@@ -220,4 +220,5 @@ function createRateLimiter({
 
 module.exports = {
   createRateLimiter,
+  consumeRateLimit,
 };

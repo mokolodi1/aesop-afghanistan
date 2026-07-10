@@ -403,77 +403,11 @@ app.get('/health', (req, res) => {
   });
 });
 
-const MAGIC_LINK_COOLDOWN_MS = 2 * 60 * 1000;
-const MAGIC_LINK_REQUEST_WINDOW_MS = 15 * 60 * 1000;
-const RATE_LIMIT_WINDOW_15M_MS = 15 * 60 * 1000;
-const RATE_LIMIT_MIN_PER_15M = 50;
-
-function magicLinkRequestSubjectKey(req) {
-  const userId = sanitizeIdentifier(req.body?.userId);
-  return userId ? `id:${userId}` : `ip:${getClientIp(req)}`;
-}
-
-function magicLinkResendSubjectKey(req) {
-  const token = typeof req.body?.token === 'string' ? req.body.token.trim() : '';
-  if (isValidToken(token)) {
-    return `token:${token}`;
-  }
-  return `ip:${getClientIp(req)}`;
-}
-
-const magicLinkRequestCooldownLimiter = createRateLimiter({
-  name: 'magic-link-request-cooldown',
-  windowMs: MAGIC_LINK_COOLDOWN_MS,
-  max: 1,
-  resolveKeySuffix: magicLinkRequestSubjectKey,
-  message: 'A login link was sent recently. Please wait a couple of minutes before requesting another.',
-});
-
-const magicLinkRequestIdLimiter = createRateLimiter({
-  name: 'magic-link-request',
-  windowMs: MAGIC_LINK_REQUEST_WINDOW_MS,
-  max: RATE_LIMIT_MIN_PER_15M,
-  resolveKeySuffix: magicLinkRequestSubjectKey,
-  message: 'Too many login link requests for this AESOP ID. Please wait and try again later.',
-});
-
-const magicLinkRequestIpLimiter = createRateLimiter({
-  name: 'magic-link-request-ip',
-  windowMs: MAGIC_LINK_REQUEST_WINDOW_MS,
-  max: 150,
-  message: 'Too many login link requests from this network. Please wait and try again later.',
-});
-
-const magicLinkResendCooldownLimiter = createRateLimiter({
-  name: 'magic-link-resend-cooldown',
-  windowMs: MAGIC_LINK_COOLDOWN_MS,
-  max: 1,
-  resolveKeySuffix: magicLinkResendSubjectKey,
-  message: 'A login link was sent recently. Please wait a couple of minutes before requesting another.',
-});
-
-const magicLinkResendLimiter = createRateLimiter({
-  name: 'magic-link-resend',
-  windowMs: MAGIC_LINK_REQUEST_WINDOW_MS,
-  max: RATE_LIMIT_MIN_PER_15M,
-  resolveKeySuffix: magicLinkResendSubjectKey,
-  message: 'Too many resend attempts for this login link. Please wait and try again later.',
-});
-
-const magicLinkResendIpLimiter = createRateLimiter({
-  name: 'magic-link-resend-ip',
-  windowMs: MAGIC_LINK_REQUEST_WINDOW_MS,
-  max: 100,
-  message: 'Too many login link resend attempts from this network. Please wait and try again later.',
-});
+const MAGIC_LINK_REQUEST_ACK_MESSAGE =
+  'If that AESOP ID is on file, we emailed a one-time login link. Check your inbox and spam folder.';
 
 // Request magic link
-app.post(
-  '/api/request-magic-link',
-  magicLinkRequestCooldownLimiter,
-  magicLinkRequestIdLimiter,
-  magicLinkRequestIpLimiter,
-  async (req, res) => {
+app.post('/api/request-magic-link', async (req, res) => {
   try {
     let { userId } = req.body;
     
@@ -513,16 +447,10 @@ app.post(
     console.error('Error requesting magic link:', formatErrorForLog(error));
     res.status(500).json({ error: 'An error occurred. Please try again later.' });
   }
-  },
-);
+});
 
 // Resend magic link for an expired or used token
-app.post(
-  '/api/resend-magic-link',
-  magicLinkResendCooldownLimiter,
-  magicLinkResendLimiter,
-  magicLinkResendIpLimiter,
-  async (req, res) => {
+app.post('/api/resend-magic-link', async (req, res) => {
   try {
     const { token } = req.body;
 
@@ -544,18 +472,10 @@ app.post(
     console.error('Error resending magic link:', formatErrorForLog(error));
     res.status(500).json({ error: 'An error occurred sending the link.' });
   }
-  },
-);
-
-// Rate limiter for token verification (10 attempts per 15 minutes per IP)
-const verifyRateLimiter = createRateLimiter({
-  name: 'verify-magic-link',
-  windowMs: RATE_LIMIT_WINDOW_15M_MS,
-  max: RATE_LIMIT_MIN_PER_15M,
 });
 
 // Verify magic link (changed to POST to prevent token exposure in URLs/logs)
-app.post('/api/verify-magic-link', verifyRateLimiter, async (req, res) => {
+app.post('/api/verify-magic-link', async (req, res) => {
   try {
     const { token } = req.body;
     
@@ -684,8 +604,8 @@ app.post('/api/verify-magic-link', verifyRateLimiter, async (req, res) => {
   }
 });
 
-const MAGIC_LINK_REQUEST_ACK_MESSAGE =
-  'Please click the login link that has been sent to your email on file.';
+const RATE_LIMIT_WINDOW_15M_MS = 15 * 60 * 1000;
+const RATE_LIMIT_MIN_PER_15M = 50;
 
 function portalSubjectKey(req) {
   const userId = sanitizeIdentifier(req.body?.userId);

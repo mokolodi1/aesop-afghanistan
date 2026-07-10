@@ -52,6 +52,10 @@ async function checkIdAndSendMagicLink(userId) {
     return { success: true, userFound: true };
   } catch (error) {
     recordMagicLinkSendFailed(1);
+    if (error?.code === 'EMAIL_SEND_QUOTA_EXCEEDED') {
+      console.warn('[magic-link] hourly email quota exceeded; login link not sent');
+      return { success: true, userFound: false };
+    }
     console.error('Error in checkIdAndSendMagicLink:', formatErrorForLog(error));
     throw error;
   }

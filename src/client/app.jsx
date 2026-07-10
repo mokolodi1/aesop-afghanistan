@@ -29,8 +29,6 @@ import {
 import {
   postMagicLinkRequest,
   postResendMagicLink,
-  readMagicLinkCooldownRemainingMs,
-  formatMagicLinkWaitDuration,
 } from './magicLinkClient.js';
 import './styles.css';
 
@@ -1807,24 +1805,6 @@ function formatPortalDingHistoryAt(atMs) {
   }
 }
 
-function useMagicLinkCooldownRemaining(userId = '') {
-  const trimmedUserId = String(userId || '').trim();
-  const [remainingMs, setRemainingMs] = useState(() =>
-    readMagicLinkCooldownRemainingMs(trimmedUserId),
-  );
-
-  useEffect(() => {
-    const tick = () => {
-      setRemainingMs(readMagicLinkCooldownRemainingMs(trimmedUserId));
-    };
-    tick();
-    const intervalId = window.setInterval(tick, 1000);
-    return () => window.clearInterval(intervalId);
-  }, [trimmedUserId]);
-
-  return remainingMs;
-}
-
 function MagicLinkRequestForm({ inputId, submitLabel }) {
   const { locale, t } = usePortalI18n();
   const resolvedSubmitLabel = submitLabel || t('magicLink.submit');
@@ -1832,12 +1812,10 @@ function MagicLinkRequestForm({ inputId, submitLabel }) {
   const [rememberUserId, setRememberUserId] = useState(() => readRememberUserIdEnabled());
   const [status, setStatus] = useState({ type: '', text: '' });
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const cooldownRemainingMs = useMagicLinkCooldownRemaining(userId);
-  const isCooldownActive = cooldownRemainingMs > 0;
 
   const canSubmit = useMemo(
-    () => userId.trim().length > 0 && !isSubmitting && !isCooldownActive,
-    [userId, isSubmitting, isCooldownActive],
+    () => userId.trim().length > 0 && !isSubmitting,
+    [userId, isSubmitting],
   );
 
   const handleUserIdChange = (event) => {
@@ -1874,7 +1852,7 @@ function MagicLinkRequestForm({ inputId, submitLabel }) {
 
       if (!result.ok) {
         setStatus({
-          type: result.clientCooldown || result.rateLimited ? 'success' : 'error',
+          type: 'error',
           text: result.message,
         });
         return;
@@ -1984,10 +1962,7 @@ function VerifyMagicLinkApp() {
   const [linkToken, setLinkToken] = useState('');
   const [showIdForm, setShowIdForm] = useState(false);
   const [isResending, setIsResending] = useState(false);
-  const pendingMagicUserId = sessionStorage.getItem('studentPortalPendingMagicUserId') || '';
-  const cooldownRemainingMs = useMagicLinkCooldownRemaining(pendingMagicUserId);
-  const isCooldownActive = cooldownRemainingMs > 0;
-  const canSendAgain = !isResending && !isCooldownActive;
+  const canSendAgain = !isResending;
 
   useEffect(() => {
     const runVerification = async () => {
@@ -2104,12 +2079,10 @@ function VerifyMagicLinkApp() {
       if (!result.ok) {
         setStatus('Verification Failed');
         setMessage({
-          type: result.clientCooldown || result.rateLimited ? 'success' : 'error',
+          type: 'error',
           text: result.message,
         });
-        if (!result.clientCooldown) {
-          setShowIdForm(true);
-        }
+        setShowIdForm(true);
         return;
       }
 
@@ -2150,22 +2123,20 @@ function VerifyMagicLinkApp() {
           return;
         }
 
-        if (result.clientCooldown || result.rateLimited) {
-          setMessage({ type: 'success', text: result.message });
+        if (!result.ok) {
+          const pendingUserId = sessionStorage.getItem('studentPortalPendingMagicUserId')?.trim();
+          if (pendingUserId) {
+            await requestMagicLinkByUserId(pendingUserId);
+            return;
+          }
+
+          setMessage({
+            type: 'error',
+            text: result.message || t('magicLink.resendFailed'),
+          });
+          setShowIdForm(true);
           return;
         }
-
-        const pendingUserId = sessionStorage.getItem('studentPortalPendingMagicUserId')?.trim();
-        if (pendingUserId) {
-          await requestMagicLinkByUserId(pendingUserId);
-          return;
-        }
-
-        setMessage({
-          type: 'error',
-          text: result.message || t('magicLink.resendFailed'),
-        });
-        setShowIdForm(true);
       } catch {
         setMessage({ type: 'error', text: t('magicLink.networkError') });
         setShowIdForm(true);

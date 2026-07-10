@@ -340,7 +340,17 @@ async function resendMagicLinkByToken(token) {
   } catch {
     profileName = '';
   }
-  await sendMagicLinkEmail(email, newToken, { name: profileName, userId });
+  try {
+    await sendMagicLinkEmail(email, newToken, { name: profileName, userId });
+  } catch (error) {
+    if (error?.code === 'EMAIL_SEND_QUOTA_EXCEEDED') {
+      return {
+        success: false,
+        error: 'Login emails are temporarily unavailable. Please try again later.',
+      };
+    }
+    throw error;
+  }
 
   return {
     success: true,
