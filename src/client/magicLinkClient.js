@@ -5,6 +5,9 @@ export const MAGIC_LINK_CLIENT_COOLDOWN_MS = 2 * 60 * 1000;
 const LAST_SENT_AT_KEY = 'studentPortalMagicLinkLastSentAt';
 const LAST_SENT_USER_KEY = 'studentPortalMagicLinkLastSentUserId';
 
+/** @type {Map<string, Promise<any>>} */
+const inFlightMagicLinkRequests = new Map();
+
 function defaultTranslate(key, params) {
   return translatePortalText(getStoredPortalLocale(), key, params);
 }
@@ -25,7 +28,7 @@ export function readMagicLinkCooldownRemainingMs(userId = '') {
 
   const trimmedUserId = String(userId || '').trim();
   const lastUserId = String(sessionStorage.getItem(LAST_SENT_USER_KEY) || '').trim();
-  if (trimmedUserId && lastUserId && trimmedUserId !== lastUserId) {
+  if (!trimmedUserId || !lastUserId || trimmedUserId !== lastUserId) {
     return 0;
   }
 
@@ -45,14 +48,19 @@ export function markMagicLinkSent(userId = '') {
 
 /**
  * @param {number} retryAfterSeconds
+ * @param {string} [userId]
  */
-export function syncMagicLinkCooldownFrom429(retryAfterSeconds) {
+export function syncMagicLinkCooldownFrom429(retryAfterSeconds, userId = '') {
   const seconds = Number(retryAfterSeconds);
   if (!Number.isFinite(seconds) || seconds <= 0) {
     return;
   }
   const impliedLastSent = Date.now() + seconds * 1000 - MAGIC_LINK_CLIENT_COOLDOWN_MS;
   sessionStorage.setItem(LAST_SENT_AT_KEY, String(Math.max(Date.now(), impliedLastSent)));
+  const trimmedUserId = String(userId || '').trim();
+  if (trimmedUserId) {
+    sessionStorage.setItem(LAST_SENT_USER_KEY, trimmedUserId);
+  }
 }
 
 /**
@@ -92,15 +100,32 @@ export function parseRetryAfterHeader(response) {
  * @param {Response} response
  * @param {{ error?: string, retryAfterSeconds?: number }} data
  * @param {(key: string, params?: Record<string, string>) => string} [t]
+ * @param {string} [userId]
  * @returns {string}
  */
-export function resolveMagicLink429Message(response, data = {}, t = defaultTranslate) {
+const MAGIC_LINK_COOLDOWN_LIMITERS = new Set([
+  'magic-link-request-cooldown',
+  'magic-link-resend-cooldown',
+]);
+
+function isMagicLinkCooldown429(data = {}) {
+  const name = String(data.rateLimitName || '').trim();
+  if (MAGIC_LINK_COOLDOWN_LIMITERS.has(name)) {
+    return true;
+  }
+  const error = String(data.error || '').toLowerCase();
+  return error.includes('sent recently') || error.includes('wait a couple of minutes');
+}
+
+export function resolveMagicLink429Message(response, data = {}, t = defaultTranslate, userId = '') {
   const retryAfterSeconds =
     Number(data.retryAfterSeconds) || parseRetryAfterHeader(response) || Math.ceil(MAGIC_LINK_CLIENT_COOLDOWN_MS / 1000);
-  syncMagicLinkCooldownFrom429(retryAfterSeconds);
-  return t('magicLink.rateLimited', {
-    wait: formatMagicLinkWaitDuration(retryAfterSeconds * 1000, t),
-  });
+  syncMagicLinkCooldownFrom429(retryAfterSeconds, userId);
+  const wait = formatMagicLinkWaitDuration(retryAfterSeconds * 1000, t);
+  if (isMagicLinkCooldown429(data)) {
+    return t('magicLink.alreadySentWait', { wait });
+  }
+  return t('magicLink.rateLimited', { wait });
 }
 
 /**
@@ -116,99 +141,133 @@ export async function postMagicLinkRequest(userId, options = {}) {
     return {
       ok: false,
       clientCooldown: true,
-      message: t('magicLink.alreadySentWait', {
+      message: t('magicLink.waitBeforeRetry', {
         wait: formatMagicLinkWaitDuration(cooldownRemaining, t),
       }),
     };
   }
 
-  const response = await fetch('/api/request-magic-link', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ userId: trimmedUserId }),
-  });
+  const inFlightKey = `request:${trimmedUserId || '__empty__'}`;
+  const inFlight = inFlightMagicLinkRequests.get(inFlightKey);
+  if (inFlight) {
+    return inFlight;
+  }
 
-  let data = {};
+  const promise = (async () => {
+    const response = await fetch('/api/request-magic-link', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId: trimmedUserId }),
+    });
+
+    let data = {};
+    try {
+      data = await response.json();
+    } catch {
+      data = {};
+    }
+
+    if (response.status === 429) {
+      const clientCooldown = isMagicLinkCooldown429(data);
+      return {
+        ok: false,
+        clientCooldown,
+        rateLimited: !clientCooldown,
+        message: resolveMagicLink429Message(response, data, t, trimmedUserId),
+        data,
+      };
+    }
+
+    if (!response.ok) {
+      return {
+        ok: false,
+        message:
+          response.status >= 500
+            ? data.error || t('magicLink.networkError')
+            : data.error || data.message || t('magicLink.networkError'),
+        data,
+      };
+    }
+
+    sessionStorage.setItem('studentPortalPendingMagicUserId', trimmedUserId);
+    return { ok: true, data };
+  })();
+
+  inFlightMagicLinkRequests.set(inFlightKey, promise);
   try {
-    data = await response.json();
-  } catch {
-    data = {};
+    return await promise;
+  } finally {
+    inFlightMagicLinkRequests.delete(inFlightKey);
   }
-
-  if (response.status === 429) {
-    return {
-      ok: false,
-      rateLimited: true,
-      message: resolveMagicLink429Message(response, data, t),
-      data,
-    };
-  }
-
-  if (!response.ok) {
-    return {
-      ok: false,
-      message:
-        response.status >= 500
-          ? data.error || t('magicLink.networkError')
-          : data.error || data.message || t('magicLink.networkError'),
-      data,
-    };
-  }
-
-  markMagicLinkSent(trimmedUserId);
-  sessionStorage.setItem('studentPortalPendingMagicUserId', trimmedUserId);
-  return { ok: true, data };
 }
 
 /**
  * @param {string} token
- * @param {{ t?: (key: string, params?: Record<string, string>) => string }} [options]
+ * @param {{ t?: (key: string, params?: Record<string, string>) => string, userId?: string }} [options]
  * @returns {Promise<{ ok: true, data: any } | { ok: false, clientCooldown?: boolean, rateLimited?: boolean, message: string, data?: any }>}
  */
 export async function postResendMagicLink(token, options = {}) {
   const t = options.t || defaultTranslate;
   const trimmedToken = String(token || '').trim();
-  const cooldownRemaining = readMagicLinkCooldownRemainingMs();
+  const trimmedUserId = String(options.userId || sessionStorage.getItem('studentPortalPendingMagicUserId') || '').trim();
+  const cooldownRemaining = readMagicLinkCooldownRemainingMs(trimmedUserId);
   if (cooldownRemaining > 0) {
     return {
       ok: false,
       clientCooldown: true,
-      message: t('magicLink.alreadySentWait', {
+      message: t('magicLink.waitBeforeRetry', {
         wait: formatMagicLinkWaitDuration(cooldownRemaining, t),
       }),
     };
   }
 
-  const response = await fetch('/api/resend-magic-link', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ token: trimmedToken }),
-  });
+  const inFlightKey = `resend:${trimmedToken || '__empty__'}`;
+  const inFlight = inFlightMagicLinkRequests.get(inFlightKey);
+  if (inFlight) {
+    return inFlight;
+  }
 
-  let data = {};
+  const promise = (async () => {
+    const response = await fetch('/api/resend-magic-link', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: trimmedToken }),
+    });
+
+    let data = {};
+    try {
+      data = await response.json();
+    } catch {
+      data = {};
+    }
+
+    if (response.status === 429) {
+      const clientCooldown = isMagicLinkCooldown429(data);
+      return {
+        ok: false,
+        clientCooldown,
+        rateLimited: !clientCooldown,
+        message: resolveMagicLink429Message(response, data, t, trimmedUserId),
+        data,
+      };
+    }
+
+    if (!response.ok || data.success === false) {
+      return {
+        ok: false,
+        message: data.error || data.message || t('magicLink.resendFailed'),
+        data,
+      };
+    }
+
+    markMagicLinkSent(trimmedUserId);
+    return { ok: true, data };
+  })();
+
+  inFlightMagicLinkRequests.set(inFlightKey, promise);
   try {
-    data = await response.json();
-  } catch {
-    data = {};
+    return await promise;
+  } finally {
+    inFlightMagicLinkRequests.delete(inFlightKey);
   }
-
-  if (response.status === 429) {
-    return {
-      ok: false,
-      rateLimited: true,
-      message: resolveMagicLink429Message(response, data, t),
-      data,
-    };
-  }
-
-  if (!response.ok || data.success === false) {
-    return {
-      ok: false,
-      message: data.error || data.message || t('magicLink.resendFailed'),
-      data,
-    };
-  }
-
-  markMagicLinkSent();
-  return { ok: true, data };
 }

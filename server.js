@@ -69,6 +69,8 @@ const {
   getPortalVoiceMemoStream,
   getPortalVoiceMemoStreamByToken,
   getReviewVoiceMemoStreamByToken,
+  verifyVoiceStreamToken,
+  verifyReviewVoiceStreamToken,
 } = require('./services/portalVoiceMemo');
 const { getPortalCalendarForApplicant } = require('./services/portalCalendar');
 const {
@@ -675,32 +677,110 @@ app.post('/api/verify-magic-link', verifyRateLimiter, async (req, res) => {
   }
 });
 
-// Rate limiter for updating ding number from the portal
-const dingUpdateRateLimiter = createRateLimiter({ name: 'update-ding', windowMs: 15 * 60 * 1000, max: 20 });
-
-const portalDingHelpRateLimiter = createRateLimiter({ name: 'portal-ding-help', windowMs: 15 * 60 * 1000, max: 8 });
-
-const portalDingHistoryRateLimiter = createRateLimiter({ name: 'portal-ding-history', windowMs: 15 * 60 * 1000, max: 40 });
-
-const portalClassGradeRateLimiter = createRateLimiter({ name: 'portal-class-grade', windowMs: 15 * 60 * 1000, max: 40 });
-
-const portalTeacherRosterRateLimiter = createRateLimiter({ name: 'portal-teacher-roster', windowMs: 15 * 60 * 1000, max: 20 });
-
-const portalStudentGradesRateLimiter = createRateLimiter({ name: 'portal-student-grades', windowMs: 15 * 60 * 1000, max: 20 });
-
-const portalAdminRateLimiter = createRateLimiter({ name: 'portal-admin', windowMs: 15 * 60 * 1000, max: 200 });
-
 const MAGIC_LINK_REQUEST_ACK_MESSAGE =
   'Please click the login link that has been sent to your email on file.';
 
-const portalVoiceMemoRateLimiter = createRateLimiter({ name: 'portal-voice-memo', windowMs: 15 * 60 * 1000, max: 40 });
+function portalSubjectKey(req) {
+  const userId = sanitizeIdentifier(req.body?.userId);
+  if (userId) {
+    return `id:${userId}`;
+  }
+
+  const streamToken = typeof req.query?.st === 'string' ? req.query.st.trim() : '';
+  if (streamToken) {
+    const verified = verifyVoiceStreamToken(streamToken);
+    if (verified?.userId) {
+      const id = sanitizeIdentifier(verified.userId);
+      if (id) {
+        return `id:${id}`;
+      }
+    }
+    const reviewVerified = verifyReviewVoiceStreamToken(streamToken);
+    if (reviewVerified?.reviewerId) {
+      const id = sanitizeIdentifier(reviewVerified.reviewerId);
+      if (id) {
+        return `id:${id}`;
+      }
+    }
+  }
+
+  return `ip:${req.ip || req.connection?.remoteAddress || 'unknown'}`;
+}
+
+// Rate limiter for updating ding number from the portal
+const dingUpdateRateLimiter = createRateLimiter({
+  name: 'update-ding',
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  resolveKeySuffix: portalSubjectKey,
+});
+
+const portalDingHelpRateLimiter = createRateLimiter({
+  name: 'portal-ding-help',
+  windowMs: 15 * 60 * 1000,
+  max: 8,
+  resolveKeySuffix: portalSubjectKey,
+});
+
+const portalDingHistoryRateLimiter = createRateLimiter({
+  name: 'portal-ding-history',
+  windowMs: 15 * 60 * 1000,
+  max: 40,
+  resolveKeySuffix: portalSubjectKey,
+});
+
+const portalClassGradeRateLimiter = createRateLimiter({
+  name: 'portal-class-grade',
+  windowMs: 15 * 60 * 1000,
+  max: 40,
+  resolveKeySuffix: portalSubjectKey,
+});
+
+const portalTeacherRosterRateLimiter = createRateLimiter({
+  name: 'portal-teacher-roster',
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  resolveKeySuffix: portalSubjectKey,
+});
+
+const portalStudentGradesRateLimiter = createRateLimiter({
+  name: 'portal-student-grades',
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  resolveKeySuffix: portalSubjectKey,
+});
+
+const portalAdminRateLimiter = createRateLimiter({
+  name: 'portal-admin',
+  windowMs: 15 * 60 * 1000,
+  max: 200,
+  resolveKeySuffix: portalSubjectKey,
+});
+
+const portalVoiceMemoRateLimiter = createRateLimiter({
+  name: 'portal-voice-memo',
+  windowMs: 15 * 60 * 1000,
+  max: 15 * 10,
+  resolveKeySuffix: portalSubjectKey,
+});
 const portalVoiceMemoStreamRateLimiter = createRateLimiter({
   name: 'portal-voice-memo-stream',
   windowMs: 15 * 60 * 1000,
   max: 120,
+  resolveKeySuffix: portalSubjectKey,
 });
-const portalCalendarRateLimiter = createRateLimiter({ name: 'portal-calendar', windowMs: 15 * 60 * 1000, max: 40 });
-const portalReviewsRateLimiter = createRateLimiter({ name: 'portal-reviews', windowMs: 15 * 60 * 1000, max: 40 });
+const portalCalendarRateLimiter = createRateLimiter({
+  name: 'portal-calendar',
+  windowMs: 15 * 60 * 1000,
+  max: 40,
+  resolveKeySuffix: portalSubjectKey,
+});
+const portalReviewsRateLimiter = createRateLimiter({
+  name: 'portal-reviews',
+  windowMs: 15 * 60 * 1000,
+  max: 40,
+  resolveKeySuffix: portalSubjectKey,
+});
 // Postmark sends many events per campaign from a few source IPs; keep this
 // generous but bounded so an unauthenticated flood or secret brute-force is throttled.
 // Throttled events return non-2xx and Postmark retries them later with backoff.

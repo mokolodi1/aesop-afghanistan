@@ -1,6 +1,11 @@
 const { google } = require("googleapis");
 const { buildServiceAccountJwt } = require("./googleAuth");
-const { parseVoiceMemoFileExtensions, DEFAULT_VOICE_MEMO_FILE_EXTENSIONS } = require("../utils/voiceMemoExtensions");
+const { parseVoiceMemoFileExtensions, DEFAULT_VOICE_MEMO_FILE_EXTENSIONS, voiceMemoExtensionFromFileName } = require("../utils/voiceMemoExtensions");
+const {
+  voiceMemoNeedsTranscodeForPlayback,
+  isFfmpegAvailable,
+  transcodeVoiceMemoToM4aStream,
+} = require("../utils/voiceMemoTranscode");
 const { recordDriveFilesList, recordDriveFilesGet } = require("./portalMetrics");
 
 const DRIVE_READONLY_SCOPE = "https://www.googleapis.com/auth/drive.readonly";
@@ -242,10 +247,10 @@ function resolveVoiceMemoStreamMimeType(fileName, driveMimeType) {
   if (name.endsWith(".m4a")) {
     return "audio/mp4";
   }
-  if (name.endsWith(".aac")) {
+  if (name.endsWith(".aac") || name.endsWith(".acc")) {
     return "audio/aac";
   }
-  if (name.endsWith(".mp3")) {
+  if (name.endsWith(".mp3") || name.endsWith(".mpga")) {
     return "audio/mpeg";
   }
   if (name.endsWith(".ogg")) {
@@ -253,6 +258,12 @@ function resolveVoiceMemoStreamMimeType(fileName, driveMimeType) {
   }
   if (name.endsWith(".opus")) {
     return "audio/opus";
+  }
+  if (name.endsWith(".wav")) {
+    return "audio/wav";
+  }
+  if (name.endsWith(".mpg")) {
+    return "video/mpeg";
   }
   if (name.endsWith(".mp4")) {
     return "audio/mp4";
@@ -262,6 +273,19 @@ function resolveVoiceMemoStreamMimeType(fileName, driveMimeType) {
     return mime;
   }
   return "audio/mp4";
+}
+
+/**
+ * @param {string} fileName
+ * @returns {string}
+ */
+function voiceMemoPlaybackFileName(fileName) {
+  const base = String(fileName || "voice-memo.m4a").trim() || "voice-memo.m4a";
+  const extension = voiceMemoExtensionFromFileName(base);
+  if (!extension || !voiceMemoNeedsTranscodeForPlayback(extension)) {
+    return base;
+  }
+  return base.replace(/\.[^.]+$/i, ".m4a");
 }
 
 /**
@@ -285,8 +309,12 @@ async function streamVoiceMemoFile(fileId, rangeHeader) {
   });
   recordDriveFilesGet(1);
 
+  const fileName = String(meta.data.name || "voice-memo.m4a");
+  const extension = voiceMemoExtensionFromFileName(fileName);
+  const shouldTranscode = extension != null && voiceMemoNeedsTranscodeForPlayback(extension) && (await isFfmpegAvailable());
+
   const requestOptions = { responseType: "stream" };
-  if (rangeHeader) {
+  if (rangeHeader && !shouldTranscode) {
     requestOptions.headers = { Range: rangeHeader };
   }
 
@@ -298,7 +326,19 @@ async function streamVoiceMemoFile(fileId, rangeHeader) {
 
   const sizeRaw = meta.data.size;
   const size = sizeRaw != null && String(sizeRaw).trim() !== "" ? Number.parseInt(String(sizeRaw), 10) : null;
-  const fileName = String(meta.data.name || "voice-memo.m4a");
+
+  if (shouldTranscode) {
+    const { stream } = transcodeVoiceMemoToM4aStream(media.data);
+    return {
+      stream,
+      mimeType: "audio/mp4",
+      fileName: voiceMemoPlaybackFileName(fileName),
+      size: null,
+      status: 200,
+      contentRange: null,
+      contentLength: null,
+    };
+  }
 
   return {
     stream: media.data,
@@ -321,7 +361,7 @@ const VOICE_MEMO_FULL_DURATION_PROBE_MAX_BYTES = 8 * 1024 * 1024;
  */
 function isLikelyAudioVoiceMemo(fileName, mimeType) {
   const name = String(fileName || "").trim().toLowerCase();
-  if (/\.(m4a|aac|mp3|ogg|opus|wav|flac|mp4)$/i.test(name)) {
+  if (/\.(m4a|aac|acc|mp3|mpga|mpg|ogg|opus|wav|flac|mp4)$/i.test(name)) {
     return true;
   }
   const mime = String(mimeType || "").trim().toLowerCase();

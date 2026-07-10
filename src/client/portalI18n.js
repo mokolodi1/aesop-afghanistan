@@ -145,7 +145,7 @@ const TRANSLATIONS = {
     'voiceMemo.audioUnavailable':
       'Your submission is recorded, but the audio file is not available to play yet. Please check again later.',
     'voiceMemo.audioPlayError':
-      'Could not play your voice memo. Please try again or contact support.',
+      'Could not play your voice memo. Please reload this page and try again, or contact support.',
     'voiceMemo.instructionsParagraph':
       'Submit your Round 2 voice memo using the instructions you received by email. Once it is received, this page will show Submitted and you can listen to your recording here. Your voice note can take up to 3 days to appear on the AESOP Portal after you send it. You may submit your voice notes as many times as you\'d like, but only ONE voice notes will be saved.',
     'voiceMemo.loadError': 'Could not load voice memo status.',
@@ -196,12 +196,14 @@ const TRANSLATIONS = {
     'magicLink.invalidIdNotFound':
       'Your ID is invalid. Please enter a correct ID. Please enter the AESOP ID you received in your email.',
     'magicLink.linkSent':
-      'Please click the login link that has been sent to your email on file.',
+      'If your AESOP ID is on file, check your email for a login link (including spam). It may take a minute to arrive.',
     'magicLink.sending': 'Checking your ID and sending a login link...',
     'magicLink.networkError': 'Internal error. Please try again.',
     'magicLink.alreadySentWait':
       'We already sent a login link to your email. Please check your inbox (and spam). You can request another in {{wait}}.',
-    'magicLink.rateLimited': 'Too many login link requests. Please try again in {{wait}}.',
+    'magicLink.waitBeforeRetry': 'Please wait {{wait}} before requesting another login link.',
+    'magicLink.rateLimited':
+      'Too many login link requests for this AESOP ID. Each request counts even if you have not signed in yet. Please try again in {{wait}}.',
     'magicLink.waitAboutOneMinute': 'about 1 minute',
     'magicLink.waitAboutMinutes': 'about {{minutes}} minutes',
     'magicLink.resendFailed': 'Unable to send a new login link. Enter your AESOP ID below.',
@@ -433,7 +435,7 @@ const TRANSLATIONS = {
     'voiceMemo.audioUnavailable':
       'ارسال شما ثبت شده، اما فایل صوتی هنوز برای پخش در دسترس نیست. لطفاً بعداً دوباره بررسی کنید.',
     'voiceMemo.audioPlayError':
-      'پخش یادداشت صوتی ممکن نشد. لطفاً دوباره تلاش کنید یا با پشتیبانی تماس بگیرید.',
+      'پخش یادداشت صوتی ممکن نشد. لطفاً این صفحه را دوباره بارگذاری کنید و دوباره تلاش کنید، یا با پشتیبانی تماس بگیرید.',
     'voiceMemo.instructionsParagraph':
       'یادداشت صوتی دور دوم را طبق دستورالعمل ایمیل‌شده ارسال کنید. پس از دریافت، این صفحه «ثبت شده» را نشان می‌دهد و می‌توانید ضبط خود را بشنوید. یادداشت صوتی شما ممکن است تا ۳ روز پس از ارسال در پورتال AESOP نمایان شود. می‌توانید هر چند بار که بخواهید یادداشت صوتی بفرستید، اما فقط یک یادداشت صوتی ذخیره می‌شود.',
     'voiceMemo.loadError': 'بارگذاری وضعیت یادداشت صوتی ممکن نشد.',
@@ -484,12 +486,14 @@ const TRANSLATIONS = {
     'magicLink.invalidIdNotFound':
       'AESOP ID شما معتبر نیست. لطفاً AESOP ID درست را وارد کنید — همان شناسه‌ای که در ایمیل خود دریافت کرده‌اید.',
     'magicLink.linkSent':
-      'لطفاً روی لینک ورودی که به ایمیل ثبت‌شده شما ارسال شده کلیک کنید.',
+      'اگر AESOP ID شما در پرونده باشد، ایمیل خود را برای لینک ورود بررسی کنید (از جمله هرزنامه). ممکن است یک دقیقه طول بکشد.',
     'magicLink.sending': 'در حال بررسی AESOP ID و ارسال لینک ورود…',
     'magicLink.networkError': 'خطای داخلی. لطفاً دوباره تلاش کنید.',
     'magicLink.alreadySentWait':
       'ما قبلاً یک لینک ورود به ایمیل شما فرستاده‌ایم. لطفاً صندوق ورودی (و هرزنامه) را بررسی کنید. می‌توانید پس از {{wait}} دوباره درخواست دهید.',
-    'magicLink.rateLimited': 'درخواست‌های زیاد برای لینک ورود. لطفاً پس از {{wait}} دوباره تلاش کنید.',
+    'magicLink.waitBeforeRetry': 'لطفاً {{wait}} صبر کنید و سپس دوباره لینک ورود بخواهید.',
+    'magicLink.rateLimited':
+      'درخواست‌های زیاد برای لینک ورود با این AESOP ID. هر درخواست شمرده می‌شود حتی اگر هنوز وارد نشده باشید. لطفاً پس از {{wait}} دوباره تلاش کنید.',
     'magicLink.waitAboutOneMinute': 'حدود ۱ دقیقه',
     'magicLink.waitAboutMinutes': 'حدود {{minutes}} دقیقه',
     'magicLink.resendFailed': 'ارسال لینک ورود جدید ممکن نشد. AESOP ID خود را در زیر وارد کنید.',

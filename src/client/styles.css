@@ -2262,6 +2262,32 @@ html[dir='rtl'] .portal-voice-memo-substeps {
   border-top: 1px solid #e7e5e4;
 }
 
+.portal-admin-application-issues {
+  margin-top: 20px;
+  padding: 14px 16px;
+  border-radius: var(--aesop-radius-md);
+  border: 1px solid #fcd34d;
+  background: #fffbeb;
+}
+
+.portal-admin-application-issues-group + .portal-admin-application-issues-group {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid #fde68a;
+}
+
+.portal-admin-application-issues-title {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #78350f;
+}
+
+.portal-admin-table-wrap--scroll {
+  max-height: 320px;
+  overflow: auto;
+}
+
 .portal-admin-application-category-panel-head {
   display: flex;
   flex-wrap: wrap;

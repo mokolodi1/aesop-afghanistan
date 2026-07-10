@@ -502,6 +502,21 @@ async function getRound1ApplicationStats() {
   }
 
   console.info(`[application-stats] completed in ${Date.now() - startedAt}ms`);
+  logAesopIdsInLots(
+    "[application-stats]",
+    "voice memo too short",
+    lists.voiceMemoTooShort,
+  );
+  logAesopIdsInLots(
+    "[application-stats]",
+    "voice memo too long",
+    lists.voiceMemoTooLong,
+  );
+  logAesopIdsInLots(
+    "[application-stats]",
+    "voice memo duration unknown",
+    lists.voiceMemoUnknownDuration,
+  );
 
   return {
     sheetName: cfg.sheetName,
@@ -650,6 +665,51 @@ function findVoiceMemoInScan(memoById, aesopId) {
 }
 
 /**
+ * Print AESOP IDs to server logs in fixed-size lots for grep-friendly tracing.
+ * @param {string} prefix
+ * @param {string} label
+ * @param {Array<{ aesopId?: string }|string>} entries
+ * @param {{ lotSize?: number }} [options]
+ */
+function logAesopIdsInLots(prefix, label, entries, options = {}) {
+  const lotSize = options.lotSize ?? 40;
+  const ids = entries
+    .map((entry) => (typeof entry === "string" ? entry : String(entry?.aesopId || "").trim()))
+    .filter(Boolean);
+  if (ids.length === 0) {
+    return;
+  }
+  const totalLots = Math.ceil(ids.length / lotSize);
+  for (let lotIndex = 0; lotIndex < totalLots; lotIndex += 1) {
+    const lot = ids.slice(lotIndex * lotSize, (lotIndex + 1) * lotSize);
+    const lotLabel = totalLots > 1 ? ` (lot ${lotIndex + 1}/${totalLots})` : "";
+    console.warn(`${prefix} ${label}${lotLabel}: ${lot.join(", ")}`);
+  }
+}
+
+/**
+ * @param {{
+ *   warnings?: string[],
+ *   duplicateAesopIds?: Array<{ aesopId: string, files?: Array<{ fileName: string }> }>,
+ *   unmatchedFiles?: Array<{ aesopId: string, fileName: string }>,
+ * }} result
+ */
+function logVoiceMemoSyncAudit(result) {
+  for (const warning of result.warnings || []) {
+    console.warn(`[sync-voice-memos] warning: ${warning}`);
+  }
+  for (const entry of result.duplicateAesopIds || []) {
+    const names = (entry.files || []).map((file) => file.fileName).join(", ");
+    console.warn(`[sync-voice-memos] duplicate AESOP ID ${entry.aesopId}: ${names}`);
+  }
+  logAesopIdsInLots(
+    "[sync-voice-memos]",
+    "unmatched voice note AESOP IDs (not on Applicants sheet)",
+    (result.unmatchedFiles || []).map((entry) => entry.aesopId),
+  );
+}
+
+/**
  * Build Drive audit warnings against Applicants AESOP IDs.
  * @param {Set<string>} applicantIds
  * @param {Awaited<ReturnType<typeof scanVoiceMemoFolder>>} scan
@@ -777,7 +837,7 @@ async function syncVoiceMemoRound2Status() {
   }
 
   if (pending.length === 0) {
-    return {
+    const result = {
       updated: 0,
       skippedUpToDate,
       skippedNoFile,
@@ -786,6 +846,8 @@ async function syncVoiceMemoRound2Status() {
       driveFileCount: memoById.size,
       ...driveWarnings,
     };
+    logVoiceMemoSyncAudit(result);
+    return result;
   }
 
   const columnIndices = [round2ColIdx, linksColIdx, dateColIdx];
@@ -809,7 +871,7 @@ async function syncVoiceMemoRound2Status() {
 
   await worksheet.saveUpdatedCells();
 
-  return {
+  const result = {
     updated: pending.length,
     skippedUpToDate,
     skippedNoFile,
@@ -818,6 +880,8 @@ async function syncVoiceMemoRound2Status() {
     driveFileCount: memoById.size,
     ...driveWarnings,
   };
+  logVoiceMemoSyncAudit(result);
+  return result;
 }
 
 /**
@@ -848,6 +912,8 @@ module.exports = {
   classifyRound1ApplicationStatus,
   getRound1ApplicationStats,
   buildVoiceMemoDriveWarnings,
+  logAesopIdsInLots,
+  logVoiceMemoSyncAudit,
   findVoiceMemoInScan,
   readApplicantRound2Prompt,
 };

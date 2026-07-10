@@ -29,6 +29,8 @@ import {
 import {
   postMagicLinkRequest,
   postResendMagicLink,
+  readMagicLinkCooldownRemainingMs,
+  formatMagicLinkWaitDuration,
 } from './magicLinkClient.js';
 import './styles.css';
 
@@ -228,6 +230,12 @@ const APPLICATION_STAT_CATEGORY_LABELS = {
   voiceMemoUnknownDuration: 'Voice memo duration unknown',
 };
 
+const APPLICATION_STAT_ISSUE_CATEGORIES = [
+  'voiceMemoTooShort',
+  'voiceMemoTooLong',
+  'voiceMemoUnknownDuration',
+];
+
 function isPortalAdminSession() {
   if (readSessionField('studentPortalIsAdmin') === '1') {
     return true;
@@ -340,6 +348,18 @@ function ensurePortalSessionReady() {
 
 /** Dedupe concurrent class/grade fetches (header + hub both mount). */
 let portalClassGradeInFlight = null;
+
+/** Dedupe concurrent voice-memo status fetches (memo section + calendar both mount). */
+const portalVoiceMemoStatusInFlight = new Map();
+
+/** Dedupe concurrent teacher-roster fetches when multiple roster panels mount. */
+let portalTeacherRosterInFlight = null;
+
+/** Dedupe concurrent student-grades fetches. */
+let portalStudentGradesInFlight = null;
+
+/** Dedupe concurrent ding-history fetches (e.g. rapid accordion toggles). */
+const portalDingHistoryInFlight = new Map();
 
 function readAdminApiCredentials() {
   if (isPortalImpersonating()) {
@@ -773,6 +793,199 @@ async function loadPortalClassGradeFromApi() {
   return portalClassGradeInFlight;
 }
 
+async function loadPortalVoiceMemoStatusFromApi({ userId, email }) {
+  const id = String(userId || '').trim();
+  const em = String(email || '').trim();
+  if (!id || !em) {
+    return { ok: true, status: null, errorKind: '', errorMessage: '' };
+  }
+  const cacheKey = `${id}:${em}`;
+  if (portalVoiceMemoStatusInFlight.has(cacheKey)) {
+    return portalVoiceMemoStatusInFlight.get(cacheKey);
+  }
+  const promise = (async () => {
+    try {
+      const response = await fetch('/api/portal-voice-memo/status', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: id, email: em }),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        return {
+          ok: false,
+          status: null,
+          errorKind: 'load',
+          errorMessage: typeof data.error === 'string' ? data.error : '',
+        };
+      }
+      return { ok: true, status: data, errorKind: '', errorMessage: '' };
+    } catch {
+      return { ok: false, status: null, errorKind: 'network', errorMessage: '' };
+    } finally {
+      portalVoiceMemoStatusInFlight.delete(cacheKey);
+    }
+  })();
+  portalVoiceMemoStatusInFlight.set(cacheKey, promise);
+  return promise;
+}
+
+function usePortalVoiceMemoStatus({ enabled, userId, email }) {
+  const { t } = usePortalI18n();
+  const [loading, setLoading] = useState(Boolean(enabled && userId && email));
+  const [error, setError] = useState('');
+  const [status, setStatus] = useState(null);
+
+  useEffect(() => {
+    if (!enabled || !String(userId || '').trim() || !String(email || '').trim()) {
+      setLoading(false);
+      setError('');
+      setStatus(null);
+      return undefined;
+    }
+    let cancelled = false;
+    setLoading(true);
+    setError('');
+    loadPortalVoiceMemoStatusFromApi({ userId, email }).then((result) => {
+      if (cancelled) {
+        return;
+      }
+      if (!result.ok) {
+        setError(
+          result.errorMessage ||
+            (result.errorKind === 'network' ? t('voiceMemo.networkError') : t('voiceMemo.loadError')),
+        );
+        setStatus(null);
+      } else {
+        setStatus(result.status);
+        setError('');
+      }
+      setLoading(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [enabled, userId, email, t]);
+
+  return { loading, error, status };
+}
+
+async function loadPortalTeacherRosterFromApi() {
+  if (typeof window === 'undefined' || !isPortalSessionCompleteSync()) {
+    return { ok: false, classes: [], errorMessage: 'Could not load your class roster.' };
+  }
+  if (portalTeacherRosterInFlight) {
+    return portalTeacherRosterInFlight;
+  }
+  portalTeacherRosterInFlight = (async () => {
+    try {
+      const userId = readSessionField('studentPortalUserId');
+      const email = readSessionField('studentPortalEmail');
+      const response = await fetch('/api/portal-teacher-roster', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId, email }),
+      });
+      const data = await response.json();
+      if (!response.ok || !data.success) {
+        return {
+          ok: false,
+          classes: [],
+          errorMessage: (data && data.error) || 'Could not load your class roster.',
+        };
+      }
+      return {
+        ok: true,
+        classes: Array.isArray(data.classes) ? data.classes : [],
+        errorMessage: '',
+      };
+    } catch {
+      return { ok: false, classes: [], errorMessage: 'Could not load your class roster.' };
+    } finally {
+      portalTeacherRosterInFlight = null;
+    }
+  })();
+  return portalTeacherRosterInFlight;
+}
+
+async function loadPortalStudentGradesFromApi() {
+  if (typeof window === 'undefined' || !isPortalSessionCompleteSync()) {
+    return { ok: false, classes: [], errorMessage: 'Could not load your grades.' };
+  }
+  if (portalStudentGradesInFlight) {
+    return portalStudentGradesInFlight;
+  }
+  portalStudentGradesInFlight = (async () => {
+    try {
+      const userId = readSessionField('studentPortalUserId');
+      const email = readSessionField('studentPortalEmail');
+      const response = await fetch('/api/portal-student-grades', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId, email }),
+      });
+      const data = await response.json();
+      if (!response.ok || !data.success) {
+        return {
+          ok: false,
+          classes: [],
+          errorMessage: (data && data.error) || 'Could not load your grades.',
+        };
+      }
+      return {
+        ok: true,
+        classes: Array.isArray(data.classes) ? data.classes : [],
+        errorMessage: '',
+      };
+    } catch {
+      return { ok: false, classes: [], errorMessage: 'Could not load your grades.' };
+    } finally {
+      portalStudentGradesInFlight = null;
+    }
+  })();
+  return portalStudentGradesInFlight;
+}
+
+async function loadPortalDingHistoryFromApi({ userId, email }) {
+  const id = String(userId || '').trim();
+  const em = String(email || '').trim();
+  if (!id || !em) {
+    return { ok: false, entries: [], errorMessage: 'Could not load history.' };
+  }
+  const cacheKey = `${id}:${em}`;
+  if (portalDingHistoryInFlight.has(cacheKey)) {
+    return portalDingHistoryInFlight.get(cacheKey);
+  }
+  const promise = (async () => {
+    try {
+      const response = await fetch('/api/portal-ding-history', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: id, email: em }),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        return {
+          ok: false,
+          entries: [],
+          errorMessage: (data && data.error) || 'Could not load history.',
+        };
+      }
+      return {
+        ok: true,
+        entries: Array.isArray(data.entries) ? data.entries : [],
+        errorMessage: '',
+      };
+    } catch {
+      return { ok: false, entries: [], errorMessage: 'Network error. Please try again.' };
+    } finally {
+      portalDingHistoryInFlight.delete(cacheKey);
+    }
+  })();
+  portalDingHistoryInFlight.set(cacheKey, promise);
+  return promise;
+}
+
 function usePortalClassGrade() {
   const [studentClass, setStudentClass] = useState(() => readSessionField('studentPortalClass'));
   const [studentGrade, setStudentGrade] = useState(() => readSessionField('studentPortalGrade'));
@@ -917,32 +1130,16 @@ function useTeacherRoster(rosterEnabled) {
     }
     let cancelled = false;
     setState({ status: 'loading', classes: [], error: '' });
-    (async () => {
-      try {
-        const userId = readSessionField('studentPortalUserId');
-        const email = readSessionField('studentPortalEmail');
-        const response = await fetch('/api/portal-teacher-roster', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ userId, email }),
-        });
-        const data = await response.json();
-        if (cancelled) return;
-        if (!response.ok || !data.success) {
-          setState({
-            status: 'error',
-            classes: [],
-            error: (data && data.error) || 'Could not load your class roster.',
-          });
-          return;
-        }
-        setState({ status: 'ready', classes: Array.isArray(data.classes) ? data.classes : [], error: '' });
-      } catch {
-        if (!cancelled) {
-          setState({ status: 'error', classes: [], error: 'Could not load your class roster.' });
-        }
+    loadPortalTeacherRosterFromApi().then((result) => {
+      if (cancelled) {
+        return;
       }
-    })();
+      if (!result.ok) {
+        setState({ status: 'error', classes: [], error: result.errorMessage });
+        return;
+      }
+      setState({ status: 'ready', classes: result.classes, error: '' });
+    });
     return () => {
       cancelled = true;
     };
@@ -1073,36 +1270,16 @@ function useStudentGrades(isStudent) {
     }
     let cancelled = false;
     setState({ status: 'loading', classes: [], error: '' });
-    (async () => {
-      try {
-        const userId = readSessionField('studentPortalUserId');
-        const email = readSessionField('studentPortalEmail');
-        const response = await fetch('/api/portal-student-grades', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ userId, email }),
-        });
-        const data = await response.json();
-        if (cancelled) return;
-        if (!response.ok || !data.success) {
-          setState({
-            status: 'error',
-            classes: [],
-            error: (data && data.error) || 'Could not load your grades.',
-          });
-          return;
-        }
-        setState({
-          status: 'ready',
-          classes: Array.isArray(data.classes) ? data.classes : [],
-          error: '',
-        });
-      } catch {
-        if (!cancelled) {
-          setState({ status: 'error', classes: [], error: 'Could not load your grades.' });
-        }
+    loadPortalStudentGradesFromApi().then((result) => {
+      if (cancelled) {
+        return;
       }
-    })();
+      if (!result.ok) {
+        setState({ status: 'error', classes: [], error: result.errorMessage });
+        return;
+      }
+      setState({ status: 'ready', classes: result.classes, error: '' });
+    });
     return () => {
       cancelled = true;
     };
@@ -1630,6 +1807,24 @@ function formatPortalDingHistoryAt(atMs) {
   }
 }
 
+function useMagicLinkCooldownRemaining(userId = '') {
+  const trimmedUserId = String(userId || '').trim();
+  const [remainingMs, setRemainingMs] = useState(() =>
+    readMagicLinkCooldownRemainingMs(trimmedUserId),
+  );
+
+  useEffect(() => {
+    const tick = () => {
+      setRemainingMs(readMagicLinkCooldownRemainingMs(trimmedUserId));
+    };
+    tick();
+    const intervalId = window.setInterval(tick, 1000);
+    return () => window.clearInterval(intervalId);
+  }, [trimmedUserId]);
+
+  return remainingMs;
+}
+
 function MagicLinkRequestForm({ inputId, submitLabel }) {
   const { locale, t } = usePortalI18n();
   const resolvedSubmitLabel = submitLabel || t('magicLink.submit');
@@ -1637,8 +1832,13 @@ function MagicLinkRequestForm({ inputId, submitLabel }) {
   const [rememberUserId, setRememberUserId] = useState(() => readRememberUserIdEnabled());
   const [status, setStatus] = useState({ type: '', text: '' });
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const cooldownRemainingMs = useMagicLinkCooldownRemaining(userId);
+  const isCooldownActive = cooldownRemainingMs > 0;
 
-  const canSubmit = useMemo(() => userId.trim().length > 0 && !isSubmitting, [userId, isSubmitting]);
+  const canSubmit = useMemo(
+    () => userId.trim().length > 0 && !isSubmitting && !isCooldownActive,
+    [userId, isSubmitting, isCooldownActive],
+  );
 
   const handleUserIdChange = (event) => {
     const nextUserId = event.target.value;
@@ -1655,6 +1855,10 @@ function MagicLinkRequestForm({ inputId, submitLabel }) {
   };
 
   const requestMagicLink = async () => {
+    if (!canSubmit) {
+      return;
+    }
+
     const trimmedUserId = userId.trim();
 
     if (!trimmedUserId || trimmedUserId.length > 100) {
@@ -1670,7 +1874,7 @@ function MagicLinkRequestForm({ inputId, submitLabel }) {
 
       if (!result.ok) {
         setStatus({
-          type: result.clientCooldown ? 'success' : 'error',
+          type: result.clientCooldown || result.rateLimited ? 'success' : 'error',
           text: result.message,
         });
         return;
@@ -1722,7 +1926,7 @@ function MagicLinkRequestForm({ inputId, submitLabel }) {
         />
         <span>{t('magicLink.rememberId')}</span>
       </label>
-      <button type="button" onClick={requestMagicLink} disabled={!canSubmit}>
+      <button type="button" onClick={requestMagicLink} disabled={!canSubmit} aria-disabled={!canSubmit}>
         {resolvedSubmitLabel}
       </button>
       <div className={`status ${status.type || ''}`} aria-live="polite">
@@ -1780,6 +1984,10 @@ function VerifyMagicLinkApp() {
   const [linkToken, setLinkToken] = useState('');
   const [showIdForm, setShowIdForm] = useState(false);
   const [isResending, setIsResending] = useState(false);
+  const pendingMagicUserId = sessionStorage.getItem('studentPortalPendingMagicUserId') || '';
+  const cooldownRemainingMs = useMagicLinkCooldownRemaining(pendingMagicUserId);
+  const isCooldownActive = cooldownRemainingMs > 0;
+  const canSendAgain = !isResending && !isCooldownActive;
 
   useEffect(() => {
     const runVerification = async () => {
@@ -1896,7 +2104,7 @@ function VerifyMagicLinkApp() {
       if (!result.ok) {
         setStatus('Verification Failed');
         setMessage({
-          type: result.clientCooldown ? 'success' : 'error',
+          type: result.clientCooldown || result.rateLimited ? 'success' : 'error',
           text: result.message,
         });
         if (!result.clientCooldown) {
@@ -1921,7 +2129,7 @@ function VerifyMagicLinkApp() {
   };
 
   const handleSendAgain = async () => {
-    if (isResending) {
+    if (!canSendAgain) {
       return;
     }
 
@@ -1942,7 +2150,7 @@ function VerifyMagicLinkApp() {
           return;
         }
 
-        if (result.clientCooldown) {
+        if (result.clientCooldown || result.rateLimited) {
           setMessage({ type: 'success', text: result.message });
           return;
         }
@@ -1983,7 +2191,13 @@ function VerifyMagicLinkApp() {
       <div className={`message ${message.type || ''}`}>{message.text}</div>
       {verificationFailed && !showIdForm ? (
         <div className="verify-resend">
-          <button type="button" className="verify-resend-btn" onClick={handleSendAgain} disabled={isResending}>
+          <button
+            type="button"
+            className="verify-resend-btn"
+            onClick={handleSendAgain}
+            disabled={!canSendAgain}
+            aria-disabled={!canSendAgain}
+          >
             Send again
           </button>
         </div>
@@ -2492,14 +2706,32 @@ function PortalVoiceMemoLoading() {
 
 function PortalVoiceMemoSection({ studentUserId, studentEmail, enabled }) {
   const { locale, t } = usePortalI18n();
-  const [voiceMemoLoading, setVoiceMemoLoading] = useState(enabled);
-  const [voiceMemoError, setVoiceMemoError] = useState('');
+  const {
+    loading: voiceMemoLoading,
+    error: voiceMemoError,
+    status: fetchedVoiceMemoStatus,
+  } = usePortalVoiceMemoStatus({
+    enabled,
+    userId: studentUserId,
+    email: studentEmail,
+  });
   const [voiceMemoStatus, setVoiceMemoStatus] = useState(null);
   const [voiceMemoAudioError, setVoiceMemoAudioError] = useState('');
-  const [voiceMemoReloadKey, setVoiceMemoReloadKey] = useState(0);
   const [measuredDurationSeconds, setMeasuredDurationSeconds] = useState(null);
-  const voiceMemoRetryCountRef = useRef(0);
   const reportedDurationKeyRef = useRef('');
+
+  useEffect(() => {
+    if (!enabled) {
+      setVoiceMemoStatus(null);
+      setVoiceMemoAudioError('');
+      setMeasuredDurationSeconds(null);
+      reportedDurationKeyRef.current = '';
+      return;
+    }
+    setVoiceMemoStatus(fetchedVoiceMemoStatus);
+    setMeasuredDurationSeconds(null);
+    reportedDurationKeyRef.current = '';
+  }, [enabled, fetchedVoiceMemoStatus]);
 
   const voiceMemoStreamSrc = useMemo(() => {
     if (!voiceMemoStatus?.submitted || !voiceMemoStatus?.hasRecording || !enabled) {
@@ -2513,58 +2745,6 @@ function PortalVoiceMemoSection({ studentUserId, studentEmail, enabled }) {
     const params = new URLSearchParams({ st: streamToken });
     return `/api/portal-voice-memo/stream?${params.toString()}`;
   }, [voiceMemoStatus?.submitted, voiceMemoStatus?.hasRecording, voiceMemoStatus?.streamToken, enabled]);
-
-  useEffect(() => {
-    if (!enabled) {
-      setVoiceMemoStatus(null);
-      setVoiceMemoError('');
-      setVoiceMemoLoading(false);
-      setVoiceMemoAudioError('');
-      setMeasuredDurationSeconds(null);
-      reportedDurationKeyRef.current = '';
-      return undefined;
-    }
-    let cancelled = false;
-    setVoiceMemoLoading(true);
-    setVoiceMemoError('');
-    setVoiceMemoAudioError('');
-    setMeasuredDurationSeconds(null);
-    reportedDurationKeyRef.current = '';
-    (async () => {
-      try {
-        const response = await fetch('/api/portal-voice-memo/status', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            userId: studentUserId,
-            email: studentEmail,
-          }),
-        });
-        const data = await response.json();
-        if (cancelled) {
-          return;
-        }
-        if (!response.ok) {
-          setVoiceMemoError(data.error || t('voiceMemo.loadError'));
-          setVoiceMemoStatus(null);
-          return;
-        }
-        setVoiceMemoStatus(data);
-      } catch {
-        if (!cancelled) {
-          setVoiceMemoError(t('voiceMemo.networkError'));
-          setVoiceMemoStatus(null);
-        }
-      } finally {
-        if (!cancelled) {
-          setVoiceMemoLoading(false);
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [enabled, studentUserId, studentEmail, t, voiceMemoReloadKey]);
 
   const displayDurationSeconds =
     measuredDurationSeconds != null && Number.isFinite(measuredDurationSeconds)
@@ -2745,14 +2925,6 @@ function PortalVoiceMemoSection({ studentUserId, studentEmail, enabled }) {
                       }
                     }}
                     onError={() => {
-                      // A likely-expired token: refresh status once to mint
-                      // a fresh one before surfacing an error to the user.
-                      if (voiceMemoRetryCountRef.current < 1) {
-                        voiceMemoRetryCountRef.current += 1;
-                        setVoiceMemoAudioError('');
-                        setVoiceMemoReloadKey((key) => key + 1);
-                        return;
-                      }
                       setVoiceMemoAudioError(t('voiceMemo.audioPlayError'));
                     }}
                   >
@@ -2849,36 +3021,12 @@ function PortalVoiceMemoSection({ studentUserId, studentEmail, enabled }) {
 function PortalCalendarSection({ enabled, studentUserId, studentEmail }) {
   const { locale, t } = usePortalI18n();
   const calendarEntries = useMemo(() => getPortalApplicationCalendarEntries(locale), [locale]);
-  const [voiceNoteSubmitted, setVoiceNoteSubmitted] = useState(false);
-
-  useEffect(() => {
-    if (!enabled || !studentUserId || !studentEmail) {
-      setVoiceNoteSubmitted(false);
-      return undefined;
-    }
-    let cancelled = false;
-    (async () => {
-      try {
-        const response = await fetch('/api/portal-voice-memo/status', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ userId: studentUserId, email: studentEmail }),
-        });
-        const data = await response.json();
-        if (cancelled) {
-          return;
-        }
-        setVoiceNoteSubmitted(response.ok && data?.submitted === true);
-      } catch {
-        if (!cancelled) {
-          setVoiceNoteSubmitted(false);
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [enabled, studentUserId, studentEmail]);
+  const { status: voiceMemoStatus } = usePortalVoiceMemoStatus({
+    enabled,
+    userId: studentUserId,
+    email: studentEmail,
+  });
+  const voiceNoteSubmitted = voiceMemoStatus?.submitted === true;
 
   if (!enabled) {
     return null;
@@ -3328,15 +3476,53 @@ function PortalAdminApplicationCategoryRow({
   );
 }
 
+function PortalAdminApplicantListTable({ people, showRecordingColumn = false }) {
+  if (!Array.isArray(people) || people.length === 0) {
+    return <p className="portal-admin-status">No applicants in this category.</p>;
+  }
+  const showRecording =
+    showRecordingColumn ||
+    people.some((person) => person.durationLabel || person.fileName);
+  return (
+    <div className="portal-admin-table-wrap portal-admin-table-wrap--scroll">
+      <table className="portal-admin-table portal-admin-application-category-table">
+        <thead>
+          <tr>
+            <th scope="col">Name</th>
+            <th scope="col">AESOP ID</th>
+            <th scope="col">Email</th>
+            {showRecording ? <th scope="col">Recording</th> : null}
+          </tr>
+        </thead>
+        <tbody>
+          {people.map((person) => (
+            <tr key={person.aesopId}>
+              <td>{person.name || '—'}</td>
+              <td className="portal-admin-mono">{person.aesopId}</td>
+              <td>{person.email || '—'}</td>
+              {showRecording ? (
+                <td>
+                  {person.durationLabel
+                    ? person.durationLabel
+                    : person.fileName
+                      ? person.fileName
+                      : '—'}
+                </td>
+              ) : null}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 function PortalAdminApplicationCategoryPanel({ categoryKey, people, onEmailGroup }) {
   if (!categoryKey || !Array.isArray(people)) {
     return null;
   }
   const label = APPLICATION_STAT_CATEGORY_LABELS[categoryKey] || categoryKey;
   const emailableCount = people.filter((person) => String(person.email || '').trim()).length;
-  const showRecordingColumn = people.some(
-    (person) => person.durationLabel || person.fileName,
-  );
 
   return (
     <section className="portal-admin-application-category-panel" aria-label={label}>
@@ -3351,41 +3537,159 @@ function PortalAdminApplicationCategoryPanel({ categoryKey, people, onEmailGroup
           Compose email to this group ({emailableCount})
         </button>
       </div>
-      {people.length === 0 ? (
-        <p className="portal-admin-status">No applicants in this category.</p>
-      ) : (
-        <div className="portal-admin-table-wrap">
-          <table className="portal-admin-table portal-admin-application-category-table">
-            <thead>
-              <tr>
-                <th scope="col">Name</th>
-                <th scope="col">AESOP ID</th>
-                <th scope="col">Email</th>
-                {showRecordingColumn ? <th scope="col">Recording</th> : null}
-              </tr>
-            </thead>
-            <tbody>
-              {people.map((person) => (
-                <tr key={person.aesopId}>
-                  <td>{person.name || '—'}</td>
-                  <td className="portal-admin-mono">{person.aesopId}</td>
-                  <td>{person.email || '—'}</td>
-                  {showRecordingColumn ? (
-                    <td>
-                      {person.durationLabel
-                        ? person.durationLabel
-                        : person.fileName
-                          ? person.fileName
-                          : '—'}
-                    </td>
-                  ) : null}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+      <PortalAdminApplicantListTable people={people} showRecordingColumn />
     </section>
+  );
+}
+
+function PortalAdminApplicationIssuesPanel({ lists, onEmailGroup }) {
+  if (!lists || typeof lists !== 'object') {
+    return null;
+  }
+  const issueGroups = APPLICATION_STAT_ISSUE_CATEGORIES.map((categoryKey) => ({
+    categoryKey,
+    label: APPLICATION_STAT_CATEGORY_LABELS[categoryKey] || categoryKey,
+    people: Array.isArray(lists[categoryKey]) ? lists[categoryKey] : [],
+  })).filter((group) => group.people.length > 0);
+
+  if (issueGroups.length === 0) {
+    return null;
+  }
+
+  return (
+    <section className="portal-admin-application-issues" aria-label="Voice memo issues">
+      <h4 className="portal-admin-subheading">Voice memo issues</h4>
+      <p className="portal-admin-hint">
+        Applicants with recording problems. Use the AESOP ID to trace each person.
+      </p>
+      {issueGroups.map((group) => {
+        const emailableCount = group.people.filter((person) => String(person.email || '').trim()).length;
+        return (
+          <section
+            key={group.categoryKey}
+            className="portal-admin-application-issues-group"
+            aria-label={group.label}
+          >
+            <div className="portal-admin-application-category-panel-head">
+              <h5 className="portal-admin-application-issues-title">
+                {group.label} ({group.people.length})
+              </h5>
+              <button
+                type="button"
+                className="portal-btn portal-btn--secondary portal-admin-application-email-btn"
+                disabled={emailableCount === 0}
+                onClick={() => onEmailGroup(group.people, group.label)}
+              >
+                Compose email ({emailableCount})
+              </button>
+            </div>
+            <PortalAdminApplicantListTable people={group.people} showRecordingColumn />
+          </section>
+        );
+      })}
+    </section>
+  );
+}
+
+function PortalAdminVoiceMemoSyncIssuesPanel({ syncResult }) {
+  if (!syncResult) {
+    return null;
+  }
+  const duplicateAesopIds = Array.isArray(syncResult.duplicateAesopIds)
+    ? syncResult.duplicateAesopIds
+    : [];
+  const unmatchedFiles = Array.isArray(syncResult.unmatchedFiles) ? syncResult.unmatchedFiles : [];
+  const invalidFileNames = Array.isArray(syncResult.invalidFileNames)
+    ? syncResult.invalidFileNames
+    : [];
+  const warnings = Array.isArray(syncResult.warnings) ? syncResult.warnings : [];
+  const hasIssues =
+    warnings.length > 0 ||
+    duplicateAesopIds.length > 0 ||
+    unmatchedFiles.length > 0 ||
+    invalidFileNames.length > 0;
+
+  if (!hasIssues) {
+    return null;
+  }
+
+  return (
+    <div className="portal-admin-voice-memo-warnings" role="alert">
+      {warnings.length > 0 ? (
+        <>
+          <p className="portal-admin-voice-memo-warnings-title">Drive warnings</p>
+          <ul className="portal-admin-voice-memo-warnings-list">
+            {warnings.map((warning) => (
+              <li key={warning}>{warning}</li>
+            ))}
+          </ul>
+        </>
+      ) : null}
+      {duplicateAesopIds.length > 0 ? (
+        <section className="portal-admin-application-issues-group" aria-label="Duplicate AESOP IDs in Drive">
+          <h5 className="portal-admin-application-issues-title">
+            Duplicate AESOP IDs in Drive ({duplicateAesopIds.length})
+          </h5>
+          <div className="portal-admin-table-wrap portal-admin-table-wrap--scroll">
+            <table className="portal-admin-table portal-admin-application-category-table">
+              <thead>
+                <tr>
+                  <th scope="col">AESOP ID</th>
+                  <th scope="col">Files</th>
+                </tr>
+              </thead>
+              <tbody>
+                {duplicateAesopIds.map((entry) => (
+                  <tr key={entry.aesopId}>
+                    <td className="portal-admin-mono">{entry.aesopId}</td>
+                    <td>{(entry.files || []).map((file) => file.fileName).join(', ') || '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      ) : null}
+      {unmatchedFiles.length > 0 ? (
+        <section className="portal-admin-application-issues-group" aria-label="Voice notes with no matching applicant">
+          <h5 className="portal-admin-application-issues-title">
+            Voice notes with no matching applicant ({unmatchedFiles.length})
+          </h5>
+          <div className="portal-admin-table-wrap portal-admin-table-wrap--scroll">
+            <table className="portal-admin-table portal-admin-application-category-table">
+              <thead>
+                <tr>
+                  <th scope="col">AESOP ID</th>
+                  <th scope="col">File</th>
+                </tr>
+              </thead>
+              <tbody>
+                {unmatchedFiles.map((entry) => (
+                  <tr key={`${entry.aesopId}-${entry.fileName}`}>
+                    <td className="portal-admin-mono">{entry.aesopId}</td>
+                    <td>{entry.fileName || '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      ) : null}
+      {invalidFileNames.length > 0 ? (
+        <section className="portal-admin-application-issues-group" aria-label="Invalid voice note file names">
+          <h5 className="portal-admin-application-issues-title">
+            Ignored file names ({invalidFileNames.length})
+          </h5>
+          <ul className="portal-admin-voice-memo-warnings-list">
+            {invalidFileNames.map((fileName) => (
+              <li key={fileName} className="portal-admin-mono">
+                {fileName}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+    </div>
   );
 }
 
@@ -3906,43 +4210,7 @@ function PortalAdminPage() {
                       <dd>{voiceMemoSyncResult.driveFileCount ?? 0}</dd>
                     </div>
                   </dl>
-                  {Array.isArray(voiceMemoSyncResult.warnings) && voiceMemoSyncResult.warnings.length > 0 ? (
-                    <div className="portal-admin-voice-memo-warnings" role="alert">
-                      <p className="portal-admin-voice-memo-warnings-title">Drive warnings</p>
-                      <ul className="portal-admin-voice-memo-warnings-list">
-                        {voiceMemoSyncResult.warnings.map((warning) => (
-                          <li key={warning}>{warning}</li>
-                        ))}
-                      </ul>
-                      {Array.isArray(voiceMemoSyncResult.duplicateAesopIds) &&
-                      voiceMemoSyncResult.duplicateAesopIds.length > 0 ? (
-                        <details className="portal-admin-voice-memo-warnings-details">
-                          <summary>Duplicate AESOP IDs in Drive</summary>
-                          <ul className="portal-admin-voice-memo-warnings-list">
-                            {voiceMemoSyncResult.duplicateAesopIds.slice(0, 20).map((entry) => (
-                              <li key={entry.aesopId}>
-                                <strong>{entry.aesopId}</strong>:{' '}
-                                {(entry.files || []).map((file) => file.fileName).join(', ')}
-                              </li>
-                            ))}
-                          </ul>
-                        </details>
-                      ) : null}
-                      {Array.isArray(voiceMemoSyncResult.unmatchedFiles) &&
-                      voiceMemoSyncResult.unmatchedFiles.length > 0 ? (
-                        <details className="portal-admin-voice-memo-warnings-details">
-                          <summary>Voice notes with no matching applicant</summary>
-                          <ul className="portal-admin-voice-memo-warnings-list">
-                            {voiceMemoSyncResult.unmatchedFiles.slice(0, 20).map((entry) => (
-                              <li key={`${entry.aesopId}-${entry.fileName}`}>
-                                {entry.fileName} (AESOP ID {entry.aesopId})
-                              </li>
-                            ))}
-                          </ul>
-                        </details>
-                      ) : null}
-                    </div>
-                  ) : null}
+                  <PortalAdminVoiceMemoSyncIssuesPanel syncResult={voiceMemoSyncResult} />
                 </>
               ) : null}
             </div>
@@ -4060,7 +4328,13 @@ function PortalAdminPage() {
                     </>
                   ) : null}
                 </dl>
-                {activeApplicationCategory && round1StatsResult.lists ? (
+                <PortalAdminApplicationIssuesPanel
+                  lists={round1StatsResult.lists}
+                  onEmailGroup={openBulkEmailForApplicantList}
+                />
+                {activeApplicationCategory &&
+                round1StatsResult.lists &&
+                !APPLICATION_STAT_ISSUE_CATEGORIES.includes(activeApplicationCategory) ? (
                   <PortalAdminApplicationCategoryPanel
                     categoryKey={activeApplicationCategory}
                     people={round1StatsResult.lists[activeApplicationCategory] || []}
@@ -7807,34 +8081,22 @@ function PortalProfilePage() {
     let cancelled = false;
     setDingHistoryLoading(true);
     setDingHistoryError('');
-    (async () => {
-      try {
-        const response = await fetch('/api/portal-ding-history', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ userId: studentUserId, email: studentEmail }),
-        });
-        const data = await response.json();
-        if (cancelled) {
-          return;
-        }
-        if (!response.ok) {
-          setDingHistoryError(data.error || 'Could not load history.');
-          setDingHistoryEntries([]);
-          return;
-        }
-        setDingHistoryEntries(Array.isArray(data.entries) ? data.entries : []);
-      } catch {
-        if (!cancelled) {
-          setDingHistoryError('Network error. Please try again.');
-          setDingHistoryEntries([]);
-        }
-      } finally {
-        if (!cancelled) {
-          setDingHistoryLoading(false);
-        }
+    loadPortalDingHistoryFromApi({ userId: studentUserId, email: studentEmail }).then((result) => {
+      if (cancelled) {
+        return;
       }
-    })();
+      if (!result.ok) {
+        setDingHistoryError(result.errorMessage);
+        setDingHistoryEntries([]);
+        return;
+      }
+      setDingHistoryEntries(result.entries);
+      setDingHistoryError('');
+    }).finally(() => {
+      if (!cancelled) {
+        setDingHistoryLoading(false);
+      }
+    });
     return () => {
       cancelled = true;
     };

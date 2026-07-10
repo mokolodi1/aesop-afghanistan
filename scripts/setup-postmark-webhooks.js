@@ -138,6 +138,39 @@ async function upsertWebhook({ url, messageStream, existing }) {
   });
 }
 
+async function clearLegacyServerHooks() {
+  const server = await postmarkRequest("/server");
+  const legacyFields = [
+    "BounceHookUrl",
+    "OpenHookUrl",
+    "DeliveryHookUrl",
+    "ClickHookUrl",
+  ];
+  const active = legacyFields.filter((field) => String(server[field] || "").trim() !== "");
+  if (active.length === 0) {
+    console.log("Legacy server-level webhook URLs already cleared.");
+    return;
+  }
+
+  if (dryRun) {
+    console.log(
+      `[dry-run] Would clear legacy server hooks: ${active.map((field) => `${field}=${server[field]}`).join(", ")}`,
+    );
+    return;
+  }
+
+  await postmarkRequest("/server", {
+    method: "PUT",
+    body: JSON.stringify({
+      BounceHookUrl: "",
+      OpenHookUrl: "",
+      DeliveryHookUrl: "",
+      ClickHookUrl: "",
+    }),
+  });
+  console.log(`Cleared legacy server hooks: ${active.join(", ")}`);
+}
+
 async function main() {
   const url = resolveWebhookUrl();
   const secret = getWebhookSecret();
@@ -161,6 +194,8 @@ async function main() {
       `${existing ? "Updated" : "Created"} ${messageStream} webhook (ID ${result.ID || existing?.ID || "?"})`,
     );
   }
+
+  await clearLegacyServerHooks();
 }
 
 main().catch((error) => {

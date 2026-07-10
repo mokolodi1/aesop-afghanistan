@@ -23,6 +23,42 @@ const BATCH_INTERVAL_MS = 5 * 60 * 1000;
 const SEND_PRIORITY_TRANSACTIONAL = 0;
 const SEND_PRIORITY_BROADCAST = 1;
 
+/**
+ * Print AESOP IDs to server logs in fixed-size lots for grep-friendly tracing.
+ * @param {string} prefix
+ * @param {string} label
+ * @param {Array<{ aesopId?: string, id?: number, email?: string }>} rows
+ * @param {{ lotSize?: number, includeEmail?: boolean }} [options]
+ */
+function logCampaignRecipientIdsInLots(prefix, label, rows, options = {}) {
+  const lotSize = options.lotSize ?? 40;
+  const includeEmail = options.includeEmail === true;
+  const entries = rows
+    .map((row) => {
+      const aesopId = String(row?.aesopId || "").trim();
+      const fallback = row?.id != null ? `recipient#${row.id}` : "";
+      const id = aesopId || fallback;
+      if (!id) {
+        return "";
+      }
+      if (includeEmail) {
+        const email = String(row?.email || "").trim();
+        return email ? `${id} <${email}>` : id;
+      }
+      return id;
+    })
+    .filter(Boolean);
+  if (entries.length === 0) {
+    return;
+  }
+  const totalLots = Math.ceil(entries.length / lotSize);
+  for (let lotIndex = 0; lotIndex < totalLots; lotIndex += 1) {
+    const lot = entries.slice(lotIndex * lotSize, (lotIndex + 1) * lotSize);
+    const lotLabel = totalLots > 1 ? ` (lot ${lotIndex + 1}/${totalLots})` : "";
+    console.warn(`${prefix} ${label}${lotLabel}: ${lot.join(", ")}`);
+  }
+}
+
 function estimateCampaignDurationMs(totalRecipients) {
   if (totalRecipients <= 0) {
     return 0;
@@ -925,6 +961,8 @@ async function processSingleCampaignBatch(campaign) {
     let sentCount = 0;
     let failedCount = 0;
     const now = new Date();
+    /** @type {Array<{ aesopId?: string|null, id?: number, email?: string, error?: string }>} */
+    const failedRecipients = [];
 
     try {
       const results = await sendPostmarkBatch(messages);
@@ -946,30 +984,64 @@ async function processSingleCampaignBatch(campaign) {
             .where(eq(emailCampaignRecipients.id, row.id));
         } else {
           failedCount += 1;
+          const errorMessage = result?.Message || "Postmark send failed.";
+          failedRecipients.push({
+            aesopId: row.aesopId,
+            id: row.id,
+            email: row.email,
+            error: errorMessage,
+          });
           await db
             .update(emailCampaignRecipients)
             .set({
               status: "failed",
               sentAt: now,
               batchNumber,
-              error: result?.Message || "Postmark send failed.",
+              error: errorMessage,
             })
             .where(eq(emailCampaignRecipients.id, row.id));
         }
       }
     } catch (error) {
       failedCount = messageRecipients.length;
+      const errorMessage = error.message || "Postmark batch send failed.";
       for (const row of messageRecipients) {
+        failedRecipients.push({
+          aesopId: row.aesopId,
+          id: row.id,
+          email: row.email,
+          error: errorMessage,
+        });
         await db
           .update(emailCampaignRecipients)
           .set({
             status: "failed",
             sentAt: now,
             batchNumber,
-            error: error.message || "Postmark batch send failed.",
+            error: errorMessage,
           })
           .where(eq(emailCampaignRecipients.id, row.id));
       }
+    }
+
+    if (failedRecipients.length > 0) {
+      console.warn(
+        `[email-campaigns] campaign ${campaign.id} batch ${batchNumber}: ${failedRecipients.length} failed`,
+      );
+      for (const row of failedRecipients) {
+        const recipientLabel =
+          String(row.aesopId || "").trim() ||
+          (row.id != null ? `recipient#${row.id}` : "unknown-recipient");
+        const email = String(row.email || "").trim();
+        console.warn(
+          `[email-campaigns] failed ${recipientLabel}${email ? ` <${email}>` : ""}: ${row.error}`,
+        );
+      }
+      logCampaignRecipientIdsInLots(
+        "[email-campaigns]",
+        `campaign ${campaign.id} batch ${batchNumber} failed AESOP IDs`,
+        failedRecipients,
+      );
     }
 
     const remainingRows = await db

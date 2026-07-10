@@ -1,5 +1,15 @@
 /** Supported voice memo filename extensions (without dots). */
-const DEFAULT_VOICE_MEMO_FILE_EXTENSIONS = ["m4a", "aac", "mp3", "ogg", "opus"];
+const DEFAULT_VOICE_MEMO_FILE_EXTENSIONS = [
+  "m4a",
+  "aac",
+  "acc",
+  "mp3",
+  "ogg",
+  "opus",
+  "wav",
+  "mpga",
+  "mpg",
+];
 
 const DEFAULT_VOICE_MEMO_FILE_EXTENSIONS_CSV = DEFAULT_VOICE_MEMO_FILE_EXTENSIONS.join(",");
 
@@ -41,6 +51,18 @@ function parseVoiceMemoFileExtensions(value, fallback = DEFAULT_VOICE_MEMO_FILE_
  * @param {string[]} extensions
  * @returns {string}
  */
+/**
+ * @param {string} fileName
+ * @returns {string|null}
+ */
+function voiceMemoExtensionFromFileName(fileName) {
+  const match = String(fileName || "")
+    .trim()
+    .toLowerCase()
+    .match(/\.([a-z0-9]+)$/i);
+  return match ? match[1].toLowerCase() : null;
+}
+
 function formatVoiceMemoExtensionHint(extensions) {
   const list = parseVoiceMemoFileExtensions(extensions);
   if (list.length === 0) {
@@ -60,5 +82,6 @@ module.exports = {
   DEFAULT_VOICE_MEMO_FILE_EXTENSIONS,
   DEFAULT_VOICE_MEMO_FILE_EXTENSIONS_CSV,
   parseVoiceMemoFileExtensions,
+  voiceMemoExtensionFromFileName,
   formatVoiceMemoExtensionHint,
 };

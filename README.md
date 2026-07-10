@@ -4,6 +4,16 @@ This repo contains various scripts used to manage the AESOP Afghanistan organiza
 
 [For more information about AESOP Afghanistan, please refer to our website: aesopafghanistan.org](https://aesopafghanistan.org/about)
 
+## Key commands
+
+```bash
+# Live tail
+flyctl logs -a aesop-afghanistan
+
+# Failed requests only (4xx/5xx)
+flyctl logs -a aesop-afghanistan | grep '"type":"access"' | grep -E '"status":(4|5)'
+```
+
 ## Deployment
 
 This application is automatically deployed to Fly.io via GitHub Actions when changes are pushed to the `main` or `master` branch.
