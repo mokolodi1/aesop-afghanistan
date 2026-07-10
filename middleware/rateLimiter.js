@@ -188,7 +188,7 @@ function logRateLimitBlock(req, key, name) {
  */
 function createRateLimiter({
   windowMs = 15 * 60 * 1000,
-  max = 5,
+  max = 50,
   name = 'default',
   resolveKeySuffix = null,
   message = 'Too many requests. Please try again later.',

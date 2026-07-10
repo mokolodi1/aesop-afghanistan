@@ -1,9 +1,8 @@
 /**
  * Resolve the end-user IP behind Fly.io's proxy.
  *
- * With `trust proxy: 1`, Express often sets req.ip to the Fly proxy address
- * (e.g. 66.x) rather than the browser. Fly documents `Fly-Client-IP` as the
- * reliable client address when Fly Proxy is the only reverse proxy in front.
+ * Fly sets req.ip to the proxy hop (66.x) when trust proxy is enabled. The
+ * leftmost X-Forwarded-For entry is the client; Fly-Client-IP is a fallback.
  */
 
 function isFlyRuntime() {
@@ -26,6 +25,11 @@ function firstHeaderIp(value) {
  * @returns {string}
  */
 function getClientIp(req) {
+  const xffClientIp = firstHeaderIp(req.get('x-forwarded-for'));
+  if (xffClientIp) {
+    return xffClientIp;
+  }
+
   if (isFlyRuntime()) {
     const flyClientIp = firstHeaderIp(req.get('fly-client-ip'));
     if (flyClientIp) {

@@ -405,6 +405,8 @@ app.get('/health', (req, res) => {
 
 const MAGIC_LINK_COOLDOWN_MS = 2 * 60 * 1000;
 const MAGIC_LINK_REQUEST_WINDOW_MS = 15 * 60 * 1000;
+const RATE_LIMIT_WINDOW_15M_MS = 15 * 60 * 1000;
+const RATE_LIMIT_MIN_PER_15M = 50;
 
 function magicLinkRequestSubjectKey(req) {
   const userId = sanitizeIdentifier(req.body?.userId);
@@ -430,7 +432,7 @@ const magicLinkRequestCooldownLimiter = createRateLimiter({
 const magicLinkRequestIdLimiter = createRateLimiter({
   name: 'magic-link-request',
   windowMs: MAGIC_LINK_REQUEST_WINDOW_MS,
-  max: 5,
+  max: RATE_LIMIT_MIN_PER_15M,
   resolveKeySuffix: magicLinkRequestSubjectKey,
   message: 'Too many login link requests for this AESOP ID. Please wait and try again later.',
 });
@@ -438,7 +440,7 @@ const magicLinkRequestIdLimiter = createRateLimiter({
 const magicLinkRequestIpLimiter = createRateLimiter({
   name: 'magic-link-request-ip',
   windowMs: MAGIC_LINK_REQUEST_WINDOW_MS,
-  max: 30,
+  max: 150,
   message: 'Too many login link requests from this network. Please wait and try again later.',
 });
 
@@ -453,7 +455,7 @@ const magicLinkResendCooldownLimiter = createRateLimiter({
 const magicLinkResendLimiter = createRateLimiter({
   name: 'magic-link-resend',
   windowMs: MAGIC_LINK_REQUEST_WINDOW_MS,
-  max: 5,
+  max: RATE_LIMIT_MIN_PER_15M,
   resolveKeySuffix: magicLinkResendSubjectKey,
   message: 'Too many resend attempts for this login link. Please wait and try again later.',
 });
@@ -461,7 +463,7 @@ const magicLinkResendLimiter = createRateLimiter({
 const magicLinkResendIpLimiter = createRateLimiter({
   name: 'magic-link-resend-ip',
   windowMs: MAGIC_LINK_REQUEST_WINDOW_MS,
-  max: 20,
+  max: 100,
   message: 'Too many login link resend attempts from this network. Please wait and try again later.',
 });
 
@@ -546,7 +548,11 @@ app.post(
 );
 
 // Rate limiter for token verification (10 attempts per 15 minutes per IP)
-const verifyRateLimiter = createRateLimiter({ name: 'verify-magic-link', windowMs: 15 * 60 * 1000, max: 10 });
+const verifyRateLimiter = createRateLimiter({
+  name: 'verify-magic-link',
+  windowMs: RATE_LIMIT_WINDOW_15M_MS,
+  max: RATE_LIMIT_MIN_PER_15M,
+});
 
 // Verify magic link (changed to POST to prevent token exposure in URLs/logs)
 app.post('/api/verify-magic-link', verifyRateLimiter, async (req, res) => {
@@ -711,75 +717,75 @@ function portalSubjectKey(req) {
 // Rate limiter for updating ding number from the portal
 const dingUpdateRateLimiter = createRateLimiter({
   name: 'update-ding',
-  windowMs: 15 * 60 * 1000,
-  max: 20,
+  windowMs: RATE_LIMIT_WINDOW_15M_MS,
+  max: RATE_LIMIT_MIN_PER_15M,
   resolveKeySuffix: portalSubjectKey,
 });
 
 const portalDingHelpRateLimiter = createRateLimiter({
   name: 'portal-ding-help',
-  windowMs: 15 * 60 * 1000,
-  max: 8,
+  windowMs: RATE_LIMIT_WINDOW_15M_MS,
+  max: RATE_LIMIT_MIN_PER_15M,
   resolveKeySuffix: portalSubjectKey,
 });
 
 const portalDingHistoryRateLimiter = createRateLimiter({
   name: 'portal-ding-history',
-  windowMs: 15 * 60 * 1000,
-  max: 40,
+  windowMs: RATE_LIMIT_WINDOW_15M_MS,
+  max: RATE_LIMIT_MIN_PER_15M,
   resolveKeySuffix: portalSubjectKey,
 });
 
 const portalClassGradeRateLimiter = createRateLimiter({
   name: 'portal-class-grade',
-  windowMs: 15 * 60 * 1000,
-  max: 40,
+  windowMs: RATE_LIMIT_WINDOW_15M_MS,
+  max: RATE_LIMIT_MIN_PER_15M,
   resolveKeySuffix: portalSubjectKey,
 });
 
 const portalTeacherRosterRateLimiter = createRateLimiter({
   name: 'portal-teacher-roster',
-  windowMs: 15 * 60 * 1000,
-  max: 20,
+  windowMs: RATE_LIMIT_WINDOW_15M_MS,
+  max: RATE_LIMIT_MIN_PER_15M,
   resolveKeySuffix: portalSubjectKey,
 });
 
 const portalStudentGradesRateLimiter = createRateLimiter({
   name: 'portal-student-grades',
-  windowMs: 15 * 60 * 1000,
-  max: 20,
+  windowMs: RATE_LIMIT_WINDOW_15M_MS,
+  max: RATE_LIMIT_MIN_PER_15M,
   resolveKeySuffix: portalSubjectKey,
 });
 
 const portalAdminRateLimiter = createRateLimiter({
   name: 'portal-admin',
-  windowMs: 15 * 60 * 1000,
+  windowMs: RATE_LIMIT_WINDOW_15M_MS,
   max: 200,
   resolveKeySuffix: portalSubjectKey,
 });
 
 const portalVoiceMemoRateLimiter = createRateLimiter({
   name: 'portal-voice-memo',
-  windowMs: 15 * 60 * 1000,
+  windowMs: RATE_LIMIT_WINDOW_15M_MS,
   max: 15 * 10,
   resolveKeySuffix: portalSubjectKey,
 });
 const portalVoiceMemoStreamRateLimiter = createRateLimiter({
   name: 'portal-voice-memo-stream',
-  windowMs: 15 * 60 * 1000,
+  windowMs: RATE_LIMIT_WINDOW_15M_MS,
   max: 120,
   resolveKeySuffix: portalSubjectKey,
 });
 const portalCalendarRateLimiter = createRateLimiter({
   name: 'portal-calendar',
-  windowMs: 15 * 60 * 1000,
-  max: 40,
+  windowMs: RATE_LIMIT_WINDOW_15M_MS,
+  max: RATE_LIMIT_MIN_PER_15M,
   resolveKeySuffix: portalSubjectKey,
 });
 const portalReviewsRateLimiter = createRateLimiter({
   name: 'portal-reviews',
-  windowMs: 15 * 60 * 1000,
-  max: 40,
+  windowMs: RATE_LIMIT_WINDOW_15M_MS,
+  max: RATE_LIMIT_MIN_PER_15M,
   resolveKeySuffix: portalSubjectKey,
 });
 // Postmark sends many events per campaign from a few source IPs; keep this
