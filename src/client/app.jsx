@@ -2397,6 +2397,22 @@ const VOICE_MEMO_SIGNAL_VIDEO_2_URL = 'https://youtu.be/OAfPYU2Ozs4';
 const VOICE_MEMO_SIGNAL_CONTACT_URL =
   'https://signal.me/#eu/HQE6GTyq7KsEe7hRCzxDaZiySUygv1OcQG9_G1dFCi49lRW1BANKL4V7BS3DIdHf';
 
+function PortalVoiceMemoPrompt({ prompt }) {
+  const { t } = usePortalI18n();
+  const text = String(prompt || '').trim();
+  if (!text) {
+    return null;
+  }
+  return (
+    <div className="portal-voice-memo-prompt">
+      <p className="portal-voice-memo-prompt-title">{t('voiceMemo.promptTitle')}</p>
+      <p className="portal-voice-memo-prompt-body" dir="auto">
+        {text}
+      </p>
+    </div>
+  );
+}
+
 function PortalVoiceMemoInstructions({ aesopId }) {
   const { t } = usePortalI18n();
   return (
@@ -2645,6 +2661,7 @@ function PortalVoiceMemoSection({ studentUserId, studentEmail, enabled }) {
                 {voiceMemoError}
               </p>
             ) : null}
+            <PortalVoiceMemoPrompt prompt={voiceMemoStatus.round2Prompt} />
             {voiceMemoDurationWarning && displayDurationStatus === 'too_short' ? (
               <p className="portal-voice-memo-duration-warning" role="alert">
                 {voiceMemoDurationWarning}
@@ -2719,6 +2736,15 @@ function PortalVoiceMemoSection({ studentUserId, studentEmail, enabled }) {
                 <li>{renderPortalRichText(t('voiceMemo.goodToKnow3'))}</li>
               </ul>
             </div>
+            <div className="portal-voice-memo-why">
+              <p className="portal-voice-memo-why-title">{t('voiceMemo.whyTitle')}</p>
+              <ul className="portal-voice-memo-why-list">
+                <li>{renderPortalRichText(t('voiceMemo.why1'))}</li>
+                <li>{renderPortalRichText(t('voiceMemo.why2'))}</li>
+                <li>{renderPortalRichText(t('voiceMemo.why3'))}</li>
+                <li>{renderPortalRichText(t('voiceMemo.why4'))}</li>
+              </ul>
+            </div>
             <a
               className="portal-voice-memo-resubmit-btn"
               href={VOICE_MEMO_SIGNAL_CONTACT_URL}
@@ -2740,8 +2766,18 @@ function PortalVoiceMemoSection({ studentUserId, studentEmail, enabled }) {
             <p className="portal-voice-memo-warning-lead">{t('voiceMemo.noneLead')}</p>
           </div>
           <div className="portal-voice-memo-panel">
+            <PortalVoiceMemoPrompt prompt={voiceMemoStatus.round2Prompt} />
             <h4 className="portal-voice-memo-instructions-title">{t('voiceMemo.instrTitle')}</h4>
             <PortalVoiceMemoInstructions aesopId={studentUserId} />
+            <div className="portal-voice-memo-why portal-voice-memo-why--warning">
+              <p className="portal-voice-memo-why-title">{t('voiceMemo.whyTitle')}</p>
+              <ul className="portal-voice-memo-why-list">
+                <li>{renderPortalRichText(t('voiceMemo.why1'))}</li>
+                <li>{renderPortalRichText(t('voiceMemo.why2'))}</li>
+                <li>{renderPortalRichText(t('voiceMemo.why3'))}</li>
+                <li>{renderPortalRichText(t('voiceMemo.why4'))}</li>
+              </ul>
+            </div>
             <div className="portal-voice-memo-why">
               <p className="portal-voice-memo-why-title">{t('voiceMemo.whyTitle2')}</p>
               <ul className="portal-voice-memo-why-list">
@@ -2750,6 +2786,18 @@ function PortalVoiceMemoSection({ studentUserId, studentEmail, enabled }) {
                 <li>{renderPortalRichText(t('voiceMemo.goodToKnow3'))}</li>
               </ul>
             </div>
+            <p className="portal-voice-memo-review-request">
+              {t('voiceMemo.reviewRequest1')}{' '}
+              <a
+                className="portal-ltr"
+                href={VOICE_MEMO_SIGNAL_CONTACT_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                noreplyaesop.55
+              </a>{' '}
+              {renderPortalRichText(t('voiceMemo.reviewRequest2'))}
+            </p>
           </div>
         </>
       )}

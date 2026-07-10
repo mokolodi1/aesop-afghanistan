@@ -1008,7 +1008,7 @@ function isApplicantsMirrorFresh(applicant) {
 
 /**
  * @param {import('../db/schema').applicants.$inferSelect} applicant
- * @returns {{ aesopId: string, round1: string, round2: string, links: string, submittedAt: string, email: string, driveFileId: string|null, driveFileName: string|null, driveDurationSeconds: number|null }}
+ * @returns {{ aesopId: string, round1: string, round2: string, links: string, submittedAt: string, email: string, driveFileId: string|null, driveFileName: string|null, driveDurationSeconds: number|null, round2Prompt: string }}
  */
 function applicantRowFromDb(applicant) {
   return {
@@ -1020,6 +1020,7 @@ function applicantRowFromDb(applicant) {
     email: String(applicant.email || "").trim(),
     age: String(applicant.age ?? "").trim(),
     essay: String(applicant.essay ?? "").trim(),
+    round2Prompt: String(applicant.round2Prompt ?? "").trim(),
     driveFileId: applicant.driveFileId ? String(applicant.driveFileId).trim() : null,
     driveFileName: applicant.driveFileName ? String(applicant.driveFileName).trim() : null,
     driveDurationSeconds:
@@ -1065,6 +1066,7 @@ async function getApplicantRowByAesopIdFromDb(aesopId) {
  *   essay?: string,
  *   round1?: string,
  *   round2?: string,
+ *   round2Prompt?: string,
  *   applicantLinks?: string,
  *   submittedAt?: string,
  *   driveFileId?: string|null,
@@ -1090,9 +1092,9 @@ async function upsertApplicantFromMirror(fields) {
   const result = await pool.query(
     `INSERT INTO applicants (
        aesop_id, email, name, applied_level, age, essay,
-       round1, round2, applicant_links, submitted_at,
+       round1, round2, round2_prompt, applicant_links, submitted_at,
        drive_file_id, drive_file_name, drive_duration_seconds, synced_at
-     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
      ON CONFLICT (aesop_id) DO UPDATE SET
        email = COALESCE(EXCLUDED.email, applicants.email),
        name = EXCLUDED.name,
@@ -1101,6 +1103,7 @@ async function upsertApplicantFromMirror(fields) {
        essay = EXCLUDED.essay,
        round1 = EXCLUDED.round1,
        round2 = EXCLUDED.round2,
+       round2_prompt = EXCLUDED.round2_prompt,
        applicant_links = EXCLUDED.applicant_links,
        submitted_at = EXCLUDED.submitted_at,
        drive_file_id = EXCLUDED.drive_file_id,
@@ -1117,6 +1120,7 @@ async function upsertApplicantFromMirror(fields) {
       fields.essay ?? "",
       fields.round1 ?? "",
       fields.round2 ?? "",
+      fields.round2Prompt ?? "",
       fields.applicantLinks ?? "",
       fields.submittedAt ?? "",
       fields.driveFileId || null,

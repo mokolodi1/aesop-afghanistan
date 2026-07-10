@@ -91,38 +91,42 @@ const TRANSLATIONS = {
     'voiceMemo.noneTitle': 'No voice note submitted',
     'voiceMemo.noneLead':
       'You still need to submit your Round 2 voice note. Please do this as soon as possible using the instructions you received by email, or the instructions below.',
-    'voiceMemo.whyTitle': 'Why we haven\'t received your voice note:',
-    'voiceMemo.why1':
-      'You get ONE voice note, and we\'ll take the longest and most recent one you send.',
-    'voiceMemo.why2': 'You can submit again if you would like to change your voice note.',
-    'voiceMemo.why3': 'If it\'s less than 30 seconds, it\'s TOO SHORT and will be rejected.',
-    'voiceMemo.why4': 'If you send another one, we\'ll update it within 3 days.',
+    'voiceMemo.whyTitle': 'Why haven\'t you received my voice note?',
+    'voiceMemo.why1': 'You have not sent a message to **noreplyaesop.55** on Signal.',
+    'voiceMemo.why2': 'It has been less than three days since you sent your messages.',
+    'voiceMemo.why3': 'You submitted a voice note but did not send your AESOP ID.',
+    'voiceMemo.why4':
+      'You sent a message on Signal with your AESOP ID but did not send a voice note.',
     'voiceMemo.whyTitle2': 'Good to know:',
     'voiceMemo.goodToKnow1':
       'Please submit **ONE** voice note for your application. We will review the most recent and longest voice note you send.',
     'voiceMemo.goodToKnow2':
-      'Voice notes must be at least **30 seconds** long. Submissions shorter than **30 seconds** may not be accepted.',
+      'Voice notes must be at least **30 seconds** long. Submissions shorter than **30 seconds** will be rejected automatically.',
     'voiceMemo.goodToKnow3':
       'If you send a new voice note later, your submission will be updated within **3 days**.',
+    'voiceMemo.reviewRequest1':
+      'If you believe you have followed all the steps above, please send a message on Signal to',
+    'voiceMemo.reviewRequest2': 'saying "Please review my voice note" **in English**.',
     'voiceMemo.durationWithin': 'This is within the required range of 30 seconds to 2 minutes.',
     'voiceMemo.durationExceeding': 'You\'re exceeding expectations!',
     'voiceMemo.resubmitButton': 'Resubmit on Signal',
     'voiceMemo.instrTitle': 'How to submit your Round 2 voice note',
+    'voiceMemo.promptTitle': 'Your Round 2 prompt',
     'voiceMemo.instrDeadline':
-      'Complete every step by 11:59 pm Afghanistan time on Wednesday, July 15, 2026.',
-    'voiceMemo.instrStep1Title': '1. Create a Signal account',
+      'Complete every step by 11:59 pm Afghanistan time on Thursday, July 16, 2026.',
+    'voiceMemo.instrStep1Title': 'Create a Signal account',
     'voiceMemo.instrStep1Body': 'Download the Signal app from',
     'voiceMemo.instrStep1Help': 'New to Signal? Watch how to set up an account:',
     'voiceMemo.instrVideo1': 'Video 1',
     'voiceMemo.instrVideo2': 'Video 2',
-    'voiceMemo.instrStep2Title': '2. Send two messages to noreplyaesop.55 on Signal',
+    'voiceMemo.instrStep2Title': 'Send two messages to noreplyaesop.55 on Signal',
     'voiceMemo.instrStep2Open': 'Open this link to start the chat:',
     'voiceMemo.instrStep2Link': 'Message noreplyaesop.55',
     'voiceMemo.instrStep2Intro': 'Then send these two messages:',
     'voiceMemo.instrStep2Id': 'Your AESOP ID number:',
     'voiceMemo.instrStep2Voice':
-      'A voice note in your own best English answering the prompt from your Round 2 email. It must be between 30 seconds and 2 minutes. Do NOT use ChatGPT or grammar checkers. Anything under 30 seconds is too short and will be rejected.',
-    'voiceMemo.instrStep3Title': '3. Check your status here',
+      'A voice note in your own best English answering the Round 2 prompt above. It must be between 30 seconds and 2 minutes. Do NOT use ChatGPT or grammar checkers. Anything under 30 seconds is too short and will be rejected.',
+    'voiceMemo.instrStep3Title': 'Check your status here',
     'voiceMemo.instrStep3Body':
       'This page updates automatically — you will not get a reply on Signal, and all updates come by email. A new voice note can take up to 3 days to appear here.',
     'voiceMemo.doneTitle': 'You\'re all set!',
@@ -146,7 +150,7 @@ const TRANSLATIONS = {
     'voiceMemo.accordionAria': 'Voice memo',
     'voiceMemo.audioUnsupported': 'Your browser does not support audio playback.',
     'voiceMemo.tooShort':
-      'Your voice memo is shorter than {{minSeconds}} seconds. Please record again and resubmit a memo between {{minSeconds}} seconds and {{maxMinutes}} minutes. Applications with voice memos shorter than {{minSeconds}} seconds will be rejected immediately.',
+      'Your voice memo is shorter than {{minSeconds}} seconds. Please record again and resubmit a memo between {{minSeconds}} seconds and {{maxMinutes}} minutes. Applications with voice memos shorter than {{minSeconds}} seconds will be rejected automatically.',
     'voiceMemo.tooLong':
       'Your voice memo is longer than {{maxMinutes}} minutes. Please record again and resubmit a memo between {{minSeconds}} seconds and {{maxMinutes}} minutes.',
 
@@ -170,6 +174,8 @@ const TRANSLATIONS = {
     'calendar.event.classesStart': 'Classes Start',
     'calendar.event.classesEnd': 'Classes End',
     'calendar.note.round2Results':
+      'You will receive an email with your Round 2 result with next steps for the application process.',
+    'calendar.note.round3InterviewsBegin':
       'More information about Round 3 Interviews will be shared with an email if you are selected.',
     'calendar.note.round2VoiceResubmit':
       'You may resubmit voice notes up to 11:59 pm on the deadline. Note that it can take up to 3 days for your voice note to update on the Portal.',
@@ -362,38 +368,43 @@ const TRANSLATIONS = {
     'voiceMemo.noneTitle': 'هیچ یادداشت صوتی ثبت نشده است',
     'voiceMemo.noneLead':
       'شما هنوز باید یادداشت صوتی دور دوم خود را ارسال کنید. لطفاً هرچه زودتر با استفاده از دستورالعمل‌هایی که از طریق ایمیل دریافت کرده‌اید، یا دستورالعمل‌های زیر، این کار را انجام دهید.',
-    'voiceMemo.whyTitle': 'چرا یادداشت صوتی شما را دریافت نکرده‌ایم:',
-    'voiceMemo.why1':
-      'شما فقط یک یادداشت صوتی دارید و طولانی‌ترین و جدیدترین موردی را که می‌فرستید در نظر می‌گیریم.',
-    'voiceMemo.why2': 'اگر بخواهید یادداشت صوتی خود را تغییر دهید، می‌توانید دوباره ارسال کنید.',
-    'voiceMemo.why3': 'اگر کمتر از ۳۰ ثانیه باشد، بسیار کوتاه است و رد خواهد شد.',
-    'voiceMemo.why4': 'اگر مورد دیگری بفرستید، ظرف ۳ روز آن را به‌روزرسانی می‌کنیم.',
+    'voiceMemo.whyTitle': 'چرا یادداشت صوتی مرا دریافت نکرده‌اید؟',
+    'voiceMemo.why1': 'در Signal پیامی به **noreplyaesop.55** نفرستاده‌اید.',
+    'voiceMemo.why2': 'از زمان ارسال پیام‌های شما کمتر از سه روز گذشته است.',
+    'voiceMemo.why3': 'یادداشت صوتی فرستاده‌اید اما شمارهٔ شناسایی ایساپ خود را نفرستاده‌اید.',
+    'voiceMemo.why4':
+      'در Signal پیامی با شمارهٔ شناسایی ایساپ خود فرستاده‌اید اما یادداشت صوتی نفرستاده‌اید.',
     'voiceMemo.whyTitle2': 'خوب است بدانید:',
     'voiceMemo.goodToKnow1':
       'لطفاً **یک** یادداشت صوتی برای درخواست خود ارسال کنید. ما جدیدترین و طولانی‌ترین یادداشت صوتی را که می‌فرستید بررسی می‌کنیم.',
     'voiceMemo.goodToKnow2':
-      'یادداشت‌های صوتی باید حداقل **۳۰ ثانیه** باشند. ارسال‌های کوتاه‌تر از **۳۰ ثانیه** ممکن است پذیرفته نشوند.',
+      'یادداشت‌های صوتی باید حداقل **۳۰ ثانیه** باشند. ارسال‌های کوتاه‌تر از **۳۰ ثانیه** به‌صورت خودکار رد می‌شوند.',
     'voiceMemo.goodToKnow3':
       'اگر بعداً یادداشت صوتی جدیدی بفرستید، ارسال شما ظرف **۳ روز** به‌روزرسانی می‌شود.',
+    'voiceMemo.reviewRequest1':
+      'اگر فکر می‌کنید همهٔ مراحل بالا را انجام داده‌اید، لطفاً در Signal پیامی به',
+    'voiceMemo.reviewRequest2':
+      'بفرستید و در آن **به انگلیسی** بنویسید: «Please review my voice note»',
     'voiceMemo.durationWithin': 'این مدت در محدودهٔ لازم، یعنی بین ۳۰ ثانیه تا ۲ دقیقه است.',
     'voiceMemo.durationExceeding': 'شما فراتر از انتظار عمل کردید!',
     'voiceMemo.resubmitButton': 'ارسال دوباره در Signal',
     'voiceMemo.instrTitle': 'چگونه یادداشت صوتی مرحلهٔ دوم خود را ارسال کنید',
+    'voiceMemo.promptTitle': 'سؤال مرحلهٔ دوم شما',
     'voiceMemo.instrDeadline':
-      'تمام مراحل را تا ساعت ۱۱:۵۹ شب به وقت افغانستان، روز چهارشنبه ۱۵ جولای ۲۰۲۶ تکمیل کنید.',
-    'voiceMemo.instrStep1Title': '۱. یک حساب Signal بسازید',
+      'تمام مراحل را تا ساعت ۱۱:۵۹ شب به وقت افغانستان، روز پنجشنبه ۱۶ جولای ۲۰۲۶ تکمیل کنید.',
+    'voiceMemo.instrStep1Title': 'یک حساب Signal بسازید',
     'voiceMemo.instrStep1Body': 'اپلیکیشن Signal را از این آدرس دانلود کنید:',
     'voiceMemo.instrStep1Help': 'با Signal آشنا نیستید؟ طرز ساختن حساب را ببینید:',
     'voiceMemo.instrVideo1': 'ویدیوی ۱',
     'voiceMemo.instrVideo2': 'ویدیوی ۲',
-    'voiceMemo.instrStep2Title': '۲. در Signal دو پیام به noreplyaesop.55 بفرستید',
+    'voiceMemo.instrStep2Title': 'در Signal دو پیام به noreplyaesop.55 بفرستید',
     'voiceMemo.instrStep2Open': 'برای شروع گفتگو این لینک را باز کنید:',
     'voiceMemo.instrStep2Link': 'پیام به noreplyaesop.55',
     'voiceMemo.instrStep2Intro': 'سپس این دو پیام را بفرستید:',
     'voiceMemo.instrStep2Id': 'شمارهٔ شناسایی ایساپ شما:',
     'voiceMemo.instrStep2Voice':
-      'یک پیام صوتی به بهترین زبان انگلیسی خودتان در پاسخ به موضوع ایمیل مرحلهٔ دوم. باید بین ۳۰ ثانیه تا ۲ دقیقه باشد. از ChatGPT یا برنامه‌های تصحیح گرامر استفاده نکنید. هر پیام کوتاه‌تر از ۳۰ ثانیه بسیار کوتاه است و رد خواهد شد.',
-    'voiceMemo.instrStep3Title': '۳. وضعیت خود را همین‌جا بررسی کنید',
+      'یک پیام صوتی به بهترین زبان انگلیسی خودتان در پاسخ به سؤال مرحلهٔ دوم در بالا. باید بین ۳۰ ثانیه تا ۲ دقیقه باشد. از ChatGPT یا برنامه‌های تصحیح گرامر استفاده نکنید. هر پیام کوتاه‌تر از ۳۰ ثانیه بسیار کوتاه است و رد خواهد شد.',
+    'voiceMemo.instrStep3Title': 'وضعیت خود را همین‌جا بررسی کنید',
     'voiceMemo.instrStep3Body':
       'این صفحه به‌طور خودکار به‌روزرسانی می‌شود؛ در Signal پاسخی دریافت نخواهید کرد و همهٔ به‌روزرسانی‌ها از طریق ایمیل ارسال می‌شود. ممکن است تا ۳ روز طول بکشد تا یادداشت صوتی جدید این‌جا نمایش داده شود.',
     'voiceMemo.doneTitle': 'کارتان تمام شد!',
@@ -417,7 +428,7 @@ const TRANSLATIONS = {
     'voiceMemo.accordionAria': 'یادداشت صوتی',
     'voiceMemo.audioUnsupported': 'مرورگر شما از پخش صدا پشتیبانی نمی‌کند.',
     'voiceMemo.tooShort':
-      'یادداشت صوتی شما کوتاه‌تر از {{minSeconds}} ثانیه است. لطفاً دوباره ضبط کنید و یادداشتی بین {{minSeconds}} ثانیه تا {{maxMinutes}} دقیقه بفرستید. درخواست‌هایی با یادداشت صوتی کوتاه‌تر از {{minSeconds}} ثانیه فوراً رد می‌شوند.',
+      'یادداشت صوتی شما کوتاه‌تر از {{minSeconds}} ثانیه است. لطفاً دوباره ضبط کنید و یادداشتی بین {{minSeconds}} ثانیه تا {{maxMinutes}} دقیقه بفرستید. درخواست‌هایی با یادداشت صوتی کوتاه‌تر از {{minSeconds}} ثانیه به‌صورت خودکار رد می‌شوند.',
     'voiceMemo.tooLong':
       'یادداشت صوتی شما بیش از {{maxMinutes}} دقیقه است. لطفاً دوباره ضبط کنید و یادداشتی بین {{minSeconds}} ثانیه تا {{maxMinutes}} دقیقه بفرستید.',
 
@@ -441,6 +452,8 @@ const TRANSLATIONS = {
     'calendar.event.classesStart': 'شروع صنف‌ها',
     'calendar.event.classesEnd': 'پایان صنف‌ها',
     'calendar.note.round2Results':
+      'نتیجهٔ دور دوم خود را همراه با مراحل بعدی درخواست از طریق ایمیل دریافت خواهید کرد.',
+    'calendar.note.round3InterviewsBegin':
       'اگر انتخاب شوید، معلومات بیشتر دربارهٔ مصاحبه‌های دور سوم از طریق ایمیل با شما در میان گذاشته می‌شود.',
     'calendar.note.round2VoiceResubmit':
       'می‌توانید تا ساعت ۱۱:۵۹ شب در روز مهلت، پیام صوتی خود را دوباره ارسال کنید. توجه داشته باشید که ممکن است تا ۳ روز طول بکشد تا پیام صوتی شما در پورتال به‌روزرسانی شود.',

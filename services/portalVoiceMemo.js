@@ -328,6 +328,7 @@ async function resolveVoiceMemoRecordingFromApplicant(applicant, durationLimits,
  *   submittedAt: string|null,
  *   fileName: string|null,
  *   submissionInstructions: string,
+ *   round2Prompt: string,
  *   hasRecording: boolean,
  *   durationSeconds: number|null,
  *   durationLabel: string|null,
@@ -394,6 +395,7 @@ async function getPortalVoiceMemoStatus({ userId, email, refreshDuration = false
     fileId,
     hasRecording,
     submissionInstructions,
+    round2Prompt: String(applicant.round2Prompt || "").trim(),
     // Short-lived signed token the <audio> element uses to stream, so the URL
     // carries no email/ID (keeps PII out of access logs and browser history).
     streamToken: hasRecording ? mintVoiceStreamToken(profile.id || userId) : null,

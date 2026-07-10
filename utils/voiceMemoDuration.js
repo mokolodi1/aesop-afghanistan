@@ -30,7 +30,7 @@ function voiceMemoDurationWarning(status, limits = {}) {
   const minSeconds = limits.minSeconds ?? VOICE_MEMO_MIN_DURATION_SEC;
   const maxSeconds = limits.maxSeconds ?? VOICE_MEMO_MAX_DURATION_SEC;
   if (status === "too_short") {
-    return `Your voice memo is shorter than ${minSeconds} seconds. Please record again and resubmit a memo between ${minSeconds} seconds and ${Math.floor(maxSeconds / 60)} minutes. Applications with voice memos shorter than ${minSeconds} seconds will be rejected immediately.`;
+    return `Your voice memo is shorter than ${minSeconds} seconds. Please record again and resubmit a memo between ${minSeconds} seconds and ${Math.floor(maxSeconds / 60)} minutes. Applications with voice memos shorter than ${minSeconds} seconds will be rejected automatically.`;
   }
   if (status === "too_long") {
     return `Your voice memo is longer than ${Math.floor(maxSeconds / 60)} minutes. Please record again and resubmit a memo between ${minSeconds} seconds and ${Math.floor(maxSeconds / 60)} minutes.`;

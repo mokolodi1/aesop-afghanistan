@@ -13,7 +13,7 @@ const PORTAL_APPLICATION_CALENDAR_ENTRY_DEFS = [
   {
     processKey: "calendar.event.round2VoiceDeadline",
     process: "Round 2 Voice Note Submission Deadline",
-    date: "Wednesday, July 16, 2026",
+    date: "Thursday, July 16, 2026",
     dynamicNote: "voiceCompleted",
     noteKey: "calendar.note.round2VoiceResubmit",
     note: "You may resubmit voice notes up to 11:59 pm on the deadline. Note that it can take up to 3 days for your voice note to update on the Portal.",
@@ -22,12 +22,14 @@ const PORTAL_APPLICATION_CALENDAR_ENTRY_DEFS = [
     processKey: "calendar.event.round2Results",
     process: "Round 2 Results Shared by Email",
     date: "Friday, July 24, 2026",
+    noteKey: "calendar.note.round2Results",
+    note: "You will receive an email with your Round 2 result with next steps for the application process.",
   },
   {
     processKey: "calendar.event.round3InterviewsBegin",
     process: "Round 3 Interviews Begin",
     date: "Saturday, July 25, 2026",
-    noteKey: "calendar.note.round2Results",
+    noteKey: "calendar.note.round3InterviewsBegin",
     note: "More information about Round 3 Interviews will be shared with an email if you are selected.",
   },
   {

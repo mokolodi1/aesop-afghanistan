@@ -64,6 +64,7 @@ const applicants = pgTable(
     essay: text("essay"),
     round1: varchar("round1", { length: 64 }),
     round2: varchar("round2", { length: 64 }),
+    round2Prompt: text("round2_prompt"),
     applicantLinks: text("applicant_links"),
     submittedAt: varchar("submitted_at", { length: 128 }),
     driveFileId: varchar("drive_file_id", { length: 128 }),

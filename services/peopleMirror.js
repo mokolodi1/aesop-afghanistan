@@ -21,6 +21,7 @@ const {
   loadApplicantAesopIdSetFromSheets,
   getVoiceMemoDriveScanOptions,
   findVoiceMemoInScan,
+  readApplicantRound2Prompt,
 } = require("./voiceMemoSync");
 const { scanVoiceMemoFolder, resolveVoiceMemoDurationsMap } = require("./googleDrive");
 
@@ -511,6 +512,7 @@ async function mirrorApplicantsAndDriveFromSheets() {
     const essay = String(rowData[essayColumnIndex] ?? "").trim();
     const round1 = String(rowData[columns.round1] ?? "").trim();
     const round2 = String(rowData[columns.round2] ?? "").trim();
+    const round2Prompt = readApplicantRound2Prompt(rowData, columns);
     const applicantLinks = String(rowData[columns.links] ?? "").trim();
     const submittedAt = String(rowData[columns.date] ?? "").trim();
     const driveFile = findVoiceMemoInScan(memoById, aesopId);
@@ -531,6 +533,7 @@ async function mirrorApplicantsAndDriveFromSheets() {
       essay,
       round1,
       round2,
+      round2Prompt,
       applicantLinks,
       submittedAt,
       driveFileId,

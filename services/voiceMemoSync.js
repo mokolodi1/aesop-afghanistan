@@ -34,6 +34,41 @@ const VOICE_NOTE_DATE_HEADERS = [
   "Date of Submission",
   "Date of submission",
 ];
+const ROUND2_PROMPT_HEADERS = ["Round 2 Prompt"];
+
+/**
+ * @param {string[]} headerValues
+ * @param {string|string[]} labels
+ * @returns {number}
+ */
+function resolveOptionalHeaderColumnIndex(headerValues, labels) {
+  const candidates = (Array.isArray(labels) ? labels : [labels])
+    .map((label) => String(label || "").trim())
+    .filter(Boolean);
+  for (const label of candidates) {
+    const want = label.toLowerCase();
+    const idx = headerValues.findIndex(
+      (header) => String(header || "").trim().toLowerCase() === want,
+    );
+    if (idx >= 0) {
+      return idx;
+    }
+  }
+  return -1;
+}
+
+/**
+ * @param {string[]} rowData
+ * @param {{ round2Prompt?: number }} columns
+ * @returns {string}
+ */
+function readApplicantRound2Prompt(rowData, columns) {
+  const columnIndex = columns.round2Prompt;
+  if (columnIndex == null || columnIndex < 0) {
+    return "";
+  }
+  return String(rowData[columnIndex] ?? "").trim();
+}
 
 /**
  * @param {string[]} headerValues
@@ -110,6 +145,7 @@ async function loadApplicantsDataForStats() {
       headerValues,
       voiceMemoHeaderCandidates(cfg.dateHeader, VOICE_NOTE_DATE_HEADERS),
     ),
+    round2Prompt: resolveOptionalHeaderColumnIndex(headerValues, ROUND2_PROMPT_HEADERS),
   };
 
   const sheetId = String(config.googleSheets?.sheetId || "").trim();
@@ -517,6 +553,7 @@ async function loadApplicantsWorksheet() {
       headerValues,
       voiceMemoHeaderCandidates(cfg.dateHeader, VOICE_NOTE_DATE_HEADERS),
     ),
+    round2Prompt: resolveOptionalHeaderColumnIndex(headerValues, ROUND2_PROMPT_HEADERS),
   };
 
   return { worksheet, headerValues, columns, cfg };
@@ -545,6 +582,7 @@ async function getApplicantRowByAesopId(aesopId) {
           email: fromDb.email,
           age: fromDb.age,
           essay: fromDb.essay,
+          round2Prompt: fromDb.round2Prompt,
           driveFileId: fromDb.driveFileId,
           driveFileName: fromDb.driveFileName,
           driveDurationSeconds: fromDb.driveDurationSeconds,
@@ -573,6 +611,7 @@ async function getApplicantRowByAesopId(aesopId) {
       links: String(rowData[columns.links] ?? "").trim(),
       submittedAt: String(rowData[columns.date] ?? "").trim(),
       email: String(rowData[cfg.emailColumnIndex] ?? "").trim(),
+      round2Prompt: readApplicantRound2Prompt(rowData, columns),
       driveFileId: null,
       driveFileName: null,
       driveDurationSeconds: null,
@@ -802,4 +841,5 @@ module.exports = {
   getRound1ApplicationStats,
   buildVoiceMemoDriveWarnings,
   findVoiceMemoInScan,
+  readApplicantRound2Prompt,
 };
