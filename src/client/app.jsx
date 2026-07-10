@@ -30,6 +30,7 @@ import {
   postMagicLinkRequest,
   postResendMagicLink,
 } from './magicLinkClient.js';
+import './styles.css';
 
 const PortalLanguageContext = React.createContext({
   locale: 'en',
