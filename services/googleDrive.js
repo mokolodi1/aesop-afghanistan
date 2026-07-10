@@ -311,6 +311,34 @@ async function streamVoiceMemoFile(fileId, rangeHeader) {
   };
 }
 
+/** Voice notes are small; reading the whole file avoids wrong lengths from partial m4a/ogg probes. */
+const VOICE_MEMO_FULL_DURATION_PROBE_MAX_BYTES = 8 * 1024 * 1024;
+
+/**
+ * @param {string} fileName
+ * @param {string} [mimeType]
+ * @returns {boolean}
+ */
+function isLikelyAudioVoiceMemo(fileName, mimeType) {
+  const name = String(fileName || "").trim().toLowerCase();
+  if (/\.(m4a|aac|mp3|ogg|opus|wav|flac|mp4)$/i.test(name)) {
+    return true;
+  }
+  const mime = String(mimeType || "").trim().toLowerCase();
+  return mime.startsWith("audio/");
+}
+
+/**
+ * @param {number|null|undefined} duration
+ * @returns {number|null}
+ */
+function normalizeParsedDurationSeconds(duration) {
+  if (duration == null || !Number.isFinite(duration) || duration < 0) {
+    return null;
+  }
+  return duration;
+}
+
 /**
  * @param {string} fileId
  * @param {{ timeoutMs?: number }} [options]
@@ -322,7 +350,7 @@ async function getVoiceMemoDurationSeconds(fileId, options = {}) {
     return null;
   }
 
-  const timeoutMs = Number.isFinite(options.timeoutMs) ? options.timeoutMs : 15000;
+  const timeoutMs = Number.isFinite(options.timeoutMs) ? options.timeoutMs : 30000;
 
   try {
     return await Promise.race([
@@ -334,6 +362,24 @@ async function getVoiceMemoDurationSeconds(fileId, options = {}) {
   } catch {
     return null;
   }
+}
+
+/**
+ * @param {Buffer} buffer
+ * @param {{ mimeType: string, size?: number }} fileInfo
+ * @returns {Promise<number|null>}
+ */
+async function parseDurationFromAudioBuffer(buffer, fileInfo) {
+  const { parseBuffer } = await import("music-metadata");
+  const metadata = await parseBuffer(
+    buffer,
+    {
+      mimeType: fileInfo.mimeType,
+      size: Number.isFinite(fileInfo.size) ? fileInfo.size : buffer.length,
+    },
+    { duration: true },
+  );
+  return normalizeParsedDurationSeconds(metadata?.format?.duration);
 }
 
 /**
@@ -351,43 +397,39 @@ async function readVoiceMemoDurationSeconds(fileId) {
   });
   recordDriveFilesGet(1);
 
-  const durationMillis = meta.data.videoMediaMetadata?.durationMillis;
-  if (durationMillis != null && Number.isFinite(Number(durationMillis)) && Number(durationMillis) > 0) {
-    return Number(durationMillis) / 1000;
-  }
-
   const fileName = String(meta.data.name || "");
-  const mimeType = resolveVoiceMemoStreamMimeType(fileName, meta.data.mimeType);
+  const driveMimeType = String(meta.data.mimeType || "");
+  const mimeType = resolveVoiceMemoStreamMimeType(fileName, driveMimeType);
   const sizeRaw = meta.data.size;
   const size =
     sizeRaw != null && String(sizeRaw).trim() !== "" ? Number.parseInt(String(sizeRaw), 10) : undefined;
+  const knownSize = Number.isFinite(size) ? size : undefined;
+
+  // Drive's videoMediaMetadata is often wrong for Signal/voice m4a uploads.
+  // Only trust it for non-audio files.
+  if (!isLikelyAudioVoiceMemo(fileName, driveMimeType)) {
+    const durationMillis = meta.data.videoMediaMetadata?.durationMillis;
+    if (durationMillis != null && Number.isFinite(Number(durationMillis)) && Number(durationMillis) > 0) {
+      return Number(durationMillis) / 1000;
+    }
+  }
+
+  // Download the full file into a buffer for accurate duration (moov/tags may be at end).
+  if (knownSize != null && knownSize > VOICE_MEMO_FULL_DURATION_PROBE_MAX_BYTES) {
+    return null;
+  }
 
   const media = await drive.files.get(
     { fileId, alt: "media", supportsAllDrives: true },
-    {
-      responseType: "stream",
-      headers: { Range: "bytes=0-262143" },
-    },
+    { responseType: "arraybuffer" },
   );
   recordDriveFilesGet(1);
 
-  try {
-    const { parseStream } = await import("music-metadata");
-    const metadata = await parseStream(
-      media.data,
-      { mimeType, size: Number.isFinite(size) ? size : undefined },
-      { duration: true },
-    );
-    const duration = metadata?.format?.duration;
-    if (duration == null || !Number.isFinite(duration) || duration < 0) {
-      return null;
-    }
-    return duration;
-  } finally {
-    if (media.data && typeof media.data.destroy === "function") {
-      media.data.destroy();
-    }
-  }
+  const buffer = Buffer.from(media.data);
+  return parseDurationFromAudioBuffer(buffer, {
+    mimeType,
+    size: knownSize ?? buffer.length,
+  });
 }
 
 /**

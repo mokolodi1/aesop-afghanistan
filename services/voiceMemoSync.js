@@ -23,7 +23,10 @@ const {
 } = require("./googleSheets");
 const { recordSheetsApiCall, recordSheetsApiError } = require("./portalMetrics");
 const { isDatabaseEnabled } = require("../db/index");
-const { getApplicantRowByAesopIdFromDb } = require("./classroomDb");
+const {
+  getApplicantRowByAesopIdFromDb,
+  getApplicantVoiceMemoDurationsMapFromDb,
+} = require("./classroomDb");
 
 const VOICE_NOTE_LINK_HEADERS = ["Voice note link", "Links"];
 const VOICE_NOTE_DATE_HEADERS = [
@@ -347,9 +350,31 @@ async function getRound1ApplicationStats() {
   let tooLong = 0;
   let unknownDuration = 0;
   /** @type {Set<string>} */
-  const memoFileIds = new Set();
-  /** @type {Array<{ person: ApplicationStatPerson, memo: { fileId: string, fileName: string } }>} */
+  const memoFileIdsNeedingProbe = new Set();
+  /** @type {Array<{ person: ApplicationStatPerson, memo: { fileId: string, fileName: string }, cachedDurationSeconds: number|null }>} */
   const memoEntries = [];
+
+  /** @type {Map<string, number>} */
+  let cachedDurationByFileId = new Map();
+  /** @type {Map<string, { fileId: string|null, durationSeconds: number }>} */
+  let cachedDurationByAesopId = new Map();
+  if (isDatabaseEnabled()) {
+    try {
+      const cached = await getApplicantVoiceMemoDurationsMapFromDb();
+      if (cached) {
+        cachedDurationByFileId = cached.byFileId;
+        cachedDurationByAesopId = cached.byAesopId;
+        console.info(
+          `[application-stats] loaded ${cachedDurationByFileId.size} cached Drive duration(s) from DB`,
+        );
+      }
+    } catch (error) {
+      console.warn(
+        "[application-stats] could not load cached voice memo durations:",
+        error.message || error,
+      );
+    }
+  }
 
   for (const entry of applicantRows) {
     if (!entry.round1Accepted) {
@@ -368,21 +393,48 @@ async function getRound1ApplicationStats() {
       continue;
     }
 
-    memoFileIds.add(entry.memo.fileId);
+    const aesopKey = String(entry.person.aesopId || "").trim().toLowerCase();
+    const cachedByFile = cachedDurationByFileId.get(entry.memo.fileId);
+    const cachedByApplicant = cachedDurationByAesopId.get(aesopKey);
+    // Prefer DB cache when it matches this Drive file id (includes browser-corrected lengths).
+    let cachedDurationSeconds =
+      cachedByFile != null && Number.isFinite(cachedByFile) ? cachedByFile : null;
+    if (
+      cachedDurationSeconds == null &&
+      cachedByApplicant &&
+      cachedByApplicant.fileId &&
+      cachedByApplicant.fileId === entry.memo.fileId &&
+      Number.isFinite(cachedByApplicant.durationSeconds)
+    ) {
+      cachedDurationSeconds = cachedByApplicant.durationSeconds;
+    }
+
     memoEntries.push({
       person: entry.person,
       memo: entry.memo,
+      cachedDurationSeconds,
     });
+    if (cachedDurationSeconds == null) {
+      memoFileIdsNeedingProbe.add(entry.memo.fileId);
+    }
   }
 
   const durationStartedAt = Date.now();
-  const durationByFileId = await resolveVoiceMemoDurationsMap([...memoFileIds]);
+  const durationByFileId = await resolveVoiceMemoDurationsMap([...memoFileIdsNeedingProbe]);
   console.info(
-    `[application-stats] resolved ${memoFileIds.size} voice memo duration(s) in ${Date.now() - durationStartedAt}ms`,
+    `[application-stats] probed ${memoFileIdsNeedingProbe.size} missing duration(s) in ${Date.now() - durationStartedAt}ms`,
   );
 
   for (const entry of memoEntries) {
-    const durationSeconds = durationByFileId.get(entry.memo.fileId) ?? null;
+    const probedDuration = durationByFileId.has(entry.memo.fileId)
+      ? durationByFileId.get(entry.memo.fileId)
+      : null;
+    const durationSeconds =
+      entry.cachedDurationSeconds != null
+        ? entry.cachedDurationSeconds
+        : probedDuration != null && Number.isFinite(probedDuration)
+          ? probedDuration
+          : null;
     const durationStatus = classifyVoiceMemoDuration(durationSeconds, durationLimits);
     const personWithDuration = {
       ...entry.person,
