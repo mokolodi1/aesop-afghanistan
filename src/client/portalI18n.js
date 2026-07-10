@@ -92,7 +92,8 @@ const TRANSLATIONS = {
     'voiceMemo.noneLead':
       'You still need to submit your Round 2 voice note. Please do this as soon as possible using the instructions you received by email, or the instructions below.',
     'voiceMemo.whyTitle': 'Why haven\'t you received my voice note?',
-    'voiceMemo.why1': 'You have not sent a message to **noreplyaesop.55** on Signal.',
+    'voiceMemo.why1Before': 'You have not sent a message to',
+    'voiceMemo.why1After': ' on Signal.',
     'voiceMemo.why2': 'It has been less than three days since you sent your messages.',
     'voiceMemo.why3': 'You submitted a voice note but did not send your AESOP ID.',
     'voiceMemo.why4':
@@ -369,7 +370,8 @@ const TRANSLATIONS = {
     'voiceMemo.noneLead':
       'شما هنوز باید یادداشت صوتی دور دوم خود را ارسال کنید. لطفاً هرچه زودتر با استفاده از دستورالعمل‌هایی که از طریق ایمیل دریافت کرده‌اید، یا دستورالعمل‌های زیر، این کار را انجام دهید.',
     'voiceMemo.whyTitle': 'چرا یادداشت صوتی مرا دریافت نکرده‌اید؟',
-    'voiceMemo.why1': 'در Signal پیامی به **noreplyaesop.55** نفرستاده‌اید.',
+    'voiceMemo.why1Before': 'در Signal پیامی به',
+    'voiceMemo.why1After': ' نفرستاده‌اید.',
     'voiceMemo.why2': 'از زمان ارسال پیام‌های شما کمتر از سه روز گذشته است.',
     'voiceMemo.why3': 'یادداشت صوتی فرستاده‌اید اما شمارهٔ شناسایی ایساپ خود را نفرستاده‌اید.',
     'voiceMemo.why4':

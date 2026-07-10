@@ -561,39 +561,24 @@ async function loadApplicantsWorksheet() {
 
 /**
  * @param {string} aesopId
- * @returns {Promise<{ aesopId: string, round1: string, round2: string, links: string, submittedAt: string, email: string }|null>}
+ * @returns {Promise<{
+ *   aesopId: string,
+ *   round1: string,
+ *   round2: string,
+ *   links: string,
+ *   submittedAt: string,
+ *   email: string,
+ *   round2Prompt: string,
+ *   driveFileId: string|null,
+ *   driveFileName: string|null,
+ *   driveDurationSeconds: number|null,
+ * }|null>}
  */
-async function getApplicantRowByAesopId(aesopId) {
-  const idKey = String(aesopId || "").trim();
-  if (!idKey) {
+async function getApplicantRowFromSheet(aesopId) {
+  const idKeyLower = String(aesopId || "").trim().toLowerCase();
+  if (!idKeyLower) {
     return null;
   }
-
-  if (isDatabaseEnabled()) {
-    try {
-      const fromDb = await getApplicantRowByAesopIdFromDb(idKey);
-      if (fromDb) {
-        return {
-          aesopId: fromDb.aesopId,
-          round1: fromDb.round1,
-          round2: fromDb.round2,
-          links: fromDb.links,
-          submittedAt: fromDb.submittedAt,
-          email: fromDb.email,
-          age: fromDb.age,
-          essay: fromDb.essay,
-          round2Prompt: fromDb.round2Prompt,
-          driveFileId: fromDb.driveFileId,
-          driveFileName: fromDb.driveFileName,
-          driveDurationSeconds: fromDb.driveDurationSeconds,
-        };
-      }
-    } catch (error) {
-      console.warn("Applicants DB lookup failed:", error.message);
-    }
-  }
-
-  const idKeyLower = idKey.toLowerCase();
 
   const { worksheet, columns, cfg } = await loadApplicantsWorksheet();
   const rows = await worksheet.getRows();
@@ -619,6 +604,52 @@ async function getApplicantRowByAesopId(aesopId) {
   }
 
   return null;
+}
+
+/**
+ * @param {string} aesopId
+ * @returns {Promise<{ aesopId: string, round1: string, round2: string, links: string, submittedAt: string, email: string, round2Prompt: string }|null>}
+ */
+async function getApplicantRowByAesopId(aesopId) {
+  const idKey = String(aesopId || "").trim();
+  if (!idKey) {
+    return null;
+  }
+
+  if (isDatabaseEnabled()) {
+    try {
+      const fromDb = await getApplicantRowByAesopIdFromDb(idKey);
+      if (fromDb) {
+        let round2Prompt = fromDb.round2Prompt;
+        if (!round2Prompt) {
+          try {
+            const fromSheet = await getApplicantRowFromSheet(idKey);
+            round2Prompt = fromSheet?.round2Prompt || "";
+          } catch (error) {
+            console.warn("Applicants sheet prompt lookup failed:", error.message);
+          }
+        }
+        return {
+          aesopId: fromDb.aesopId,
+          round1: fromDb.round1,
+          round2: fromDb.round2,
+          links: fromDb.links,
+          submittedAt: fromDb.submittedAt,
+          email: fromDb.email,
+          age: fromDb.age,
+          essay: fromDb.essay,
+          round2Prompt,
+          driveFileId: fromDb.driveFileId,
+          driveFileName: fromDb.driveFileName,
+          driveDurationSeconds: fromDb.driveDurationSeconds,
+        };
+      }
+    } catch (error) {
+      console.warn("Applicants DB lookup failed:", error.message);
+    }
+  }
+
+  return getApplicantRowFromSheet(idKey);
 }
 
 /**
@@ -833,6 +864,7 @@ module.exports = {
   loadApplicantsWorksheet,
   loadApplicantsDataForStats,
   getApplicantRowByAesopId,
+  getApplicantRowFromSheet,
   loadApplicantAesopIdSetFromSheets,
   getVoiceMemoSheetConfig,
   getVoiceMemoDriveScanOptions,

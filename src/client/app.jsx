@@ -2397,6 +2397,24 @@ const VOICE_MEMO_SIGNAL_VIDEO_2_URL = 'https://youtu.be/OAfPYU2Ozs4';
 const VOICE_MEMO_SIGNAL_CONTACT_URL =
   'https://signal.me/#eu/HQE6GTyq7KsEe7hRCzxDaZiySUygv1OcQG9_G1dFCi49lRW1BANKL4V7BS3DIdHf';
 
+function PortalVoiceMemoWhySignalItem() {
+  const { t } = usePortalI18n();
+  return (
+    <li>
+      {t('voiceMemo.why1Before')}{' '}
+      <a
+        className="portal-ltr"
+        href={VOICE_MEMO_SIGNAL_CONTACT_URL}
+        target="_blank"
+        rel="noopener noreferrer"
+      >
+        noreplyaesop.55
+      </a>
+      {t('voiceMemo.why1After')}
+    </li>
+  );
+}
+
 function PortalVoiceMemoPrompt({ prompt }) {
   const { t } = usePortalI18n();
   const text = String(prompt || '').trim();
@@ -2413,10 +2431,11 @@ function PortalVoiceMemoPrompt({ prompt }) {
   );
 }
 
-function PortalVoiceMemoInstructions({ aesopId }) {
+function PortalVoiceMemoInstructions({ aesopId, round2Prompt }) {
   const { t } = usePortalI18n();
   return (
     <div className="portal-voice-memo-instructions">
+      <PortalVoiceMemoPrompt prompt={round2Prompt} />
       <p className="portal-voice-memo-instructions-deadline">{t('voiceMemo.instrDeadline')}</p>
       <ol className="portal-voice-memo-steps">
         <li className="portal-voice-memo-step">
@@ -2739,7 +2758,7 @@ function PortalVoiceMemoSection({ studentUserId, studentEmail, enabled }) {
             <div className="portal-voice-memo-why">
               <p className="portal-voice-memo-why-title">{t('voiceMemo.whyTitle')}</p>
               <ul className="portal-voice-memo-why-list">
-                <li>{renderPortalRichText(t('voiceMemo.why1'))}</li>
+                <PortalVoiceMemoWhySignalItem />
                 <li>{renderPortalRichText(t('voiceMemo.why2'))}</li>
                 <li>{renderPortalRichText(t('voiceMemo.why3'))}</li>
                 <li>{renderPortalRichText(t('voiceMemo.why4'))}</li>
@@ -2755,7 +2774,10 @@ function PortalVoiceMemoSection({ studentUserId, studentEmail, enabled }) {
             </a>
             <details className="portal-voice-memo-resubmit">
               <summary>{t('voiceMemo.resubmitSummary')}</summary>
-              <PortalVoiceMemoInstructions aesopId={studentUserId} />
+              <PortalVoiceMemoInstructions
+                aesopId={studentUserId}
+                round2Prompt={voiceMemoStatus.round2Prompt}
+              />
             </details>
           </div>
         </>
@@ -2766,13 +2788,15 @@ function PortalVoiceMemoSection({ studentUserId, studentEmail, enabled }) {
             <p className="portal-voice-memo-warning-lead">{t('voiceMemo.noneLead')}</p>
           </div>
           <div className="portal-voice-memo-panel">
-            <PortalVoiceMemoPrompt prompt={voiceMemoStatus.round2Prompt} />
             <h4 className="portal-voice-memo-instructions-title">{t('voiceMemo.instrTitle')}</h4>
-            <PortalVoiceMemoInstructions aesopId={studentUserId} />
+            <PortalVoiceMemoInstructions
+              aesopId={studentUserId}
+              round2Prompt={voiceMemoStatus.round2Prompt}
+            />
             <div className="portal-voice-memo-why portal-voice-memo-why--warning">
               <p className="portal-voice-memo-why-title">{t('voiceMemo.whyTitle')}</p>
               <ul className="portal-voice-memo-why-list">
-                <li>{renderPortalRichText(t('voiceMemo.why1'))}</li>
+                <PortalVoiceMemoWhySignalItem />
                 <li>{renderPortalRichText(t('voiceMemo.why2'))}</li>
                 <li>{renderPortalRichText(t('voiceMemo.why3'))}</li>
                 <li>{renderPortalRichText(t('voiceMemo.why4'))}</li>
@@ -3124,7 +3148,12 @@ function PortalHubPage() {
             <PortalVoiceMemoSection
               studentUserId={studentUserId}
               studentEmail={studentEmail}
-              enabled={signedIn && studentUserId.length > 0 && studentEmail.length > 0}
+              enabled={
+                signedIn &&
+                isRound1Accepted &&
+                studentUserId.length > 0 &&
+                studentEmail.length > 0
+              }
             />
             <PortalCalendarSection
               enabled={signedIn && isRound1Accepted}
