@@ -2,13 +2,22 @@ const { getPool, isDatabaseEnabled } = require("../db/index");
 
 const BUCKET_SECONDS = 10;
 const FLUSH_INTERVAL_MS = 5_000;
-const RETENTION_MS = 24 * 60 * 60 * 1000;
+const RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+const RECENT_ERROR_LIMIT = 1000;
+
+/** @type {Array<{ id: string, at: string, method: string, path: string, statusCode: number, statusClass: string, pageType: string, latencyMs: number, instance?: string }>} */
+const recentErrors = [];
+let recentErrorSeq = 0;
 
 const WINDOW_MS = {
   "1m": 60_000,
   "5m": 5 * 60_000,
   "15m": 15 * 60_000,
   "1h": 60 * 60_000,
+  "6h": 6 * 60 * 60_000,
+  "24h": 24 * 60 * 60_000,
+  "3d": 3 * 24 * 60 * 60_000,
+  "1w": 7 * 24 * 60 * 60_000,
 };
 
 const PAGE_TYPES = ["login", "verify", "profile", "ding", "admin", "reviewer", "other"];
@@ -80,16 +89,57 @@ function recordMetric(metric, amount = 1, labels = {}, nowMs = Date.now()) {
  * @param {number} statusCode
  * @param {number} latencyMs
  */
+/**
+ * @param {number} statusCode
+ * @returns {"2xx"|"3xx"|"4xx"|"5xx"}
+ */
+function statusClassForCode(statusCode) {
+  if (statusCode >= 500) {
+    return "5xx";
+  }
+  if (statusCode >= 400) {
+    return "4xx";
+  }
+  if (statusCode >= 300) {
+    return "3xx";
+  }
+  return "2xx";
+}
+
+/**
+ * @param {{ at: string, method: string, path: string, statusCode: number, pageType: string, latencyMs: number }} entry
+ */
+function recordRecentError(entry) {
+  recentErrorSeq += 1;
+  const instance = process.env.FLY_MACHINE_ID || "local";
+  recentErrors.push({
+    id: `${instance}:${recentErrorSeq}`,
+    statusClass: statusClassForCode(entry.statusCode),
+    instance,
+    ...entry,
+  });
+  if (recentErrors.length > RECENT_ERROR_LIMIT) {
+    recentErrors.splice(0, recentErrors.length - RECENT_ERROR_LIMIT);
+  }
+}
+
+/**
+ * @returns {Array<{ id: string, at: string, method: string, path: string, statusCode: number, statusClass: string, pageType: string, latencyMs: number, instance?: string }>}
+ */
+function getRecentErrors() {
+  return recentErrors.slice().reverse();
+}
+
+function isRequestLogEnabled() {
+  const value = String(process.env.REQUEST_LOG || "")
+    .trim()
+    .toLowerCase();
+  return value === "1" || value === "true" || value === "yes";
+}
+
 function recordPageServe(pageType, statusCode, latencyMs) {
   const type = PAGE_TYPES.includes(pageType) ? pageType : "other";
-  let statusClass = "2xx";
-  if (statusCode >= 500) {
-    statusClass = "5xx";
-  } else if (statusCode >= 400) {
-    statusClass = "4xx";
-  } else if (statusCode >= 300) {
-    statusClass = "3xx";
-  }
+  const statusClass = statusClassForCode(statusCode);
   recordMetric("page.serve", 1, { pageType: type, statusClass });
   if (Number.isFinite(latencyMs) && latencyMs >= 0) {
     recordMetric("page.latency_ms", latencyMs, { pageType: type, kind: "sum" });
@@ -254,7 +304,51 @@ function createPortalMetricsMiddleware(options = {}) {
     const pageType = classifyPageType(req.path, { isPortalHost });
 
     res.on("finish", () => {
-      recordPageServe(pageType, res.statusCode || 200, Date.now() - startedAt);
+      const statusCode = res.statusCode || 200;
+      const latencyMs = Date.now() - startedAt;
+      recordPageServe(pageType, statusCode, latencyMs);
+      if (statusCode >= 400) {
+        recordRecentError({
+          at: new Date().toISOString(),
+          method: req.method,
+          path: req.path,
+          statusCode,
+          pageType,
+          latencyMs,
+        });
+      }
+    });
+    next();
+  };
+}
+
+/**
+ * Log each request as a JSON line to stdout when REQUEST_LOG=true.
+ * View with: flyctl logs -a aesop-afghanistan
+ */
+function createRequestLogMiddleware() {
+  return function requestLogMiddleware(req, res, next) {
+    if (!isRequestLogEnabled() || shouldSkipPath(req.path)) {
+      return next();
+    }
+    const startedAt = Date.now();
+    const pageType = classifyPageType(req.path);
+
+    res.on("finish", () => {
+      const statusCode = res.statusCode || 200;
+      console.log(
+        JSON.stringify({
+          type: "access",
+          at: new Date().toISOString(),
+          method: req.method,
+          path: req.path,
+          status: statusCode,
+          pageType,
+          ms: Date.now() - startedAt,
+          ip: req.ip || undefined,
+          instance: process.env.FLY_MACHINE_ID || undefined,
+        }),
+      );
     });
     next();
   };
@@ -376,15 +470,47 @@ function resolveWindowMs(windowKey) {
 }
 
 /**
+ * Coarser buckets for long dashboard windows keep chart point counts reasonable.
+ * @param {number} windowMs
+ * @returns {number}
+ */
+function resolveChartBucketSeconds(windowMs) {
+  if (windowMs <= 60 * 60_000) {
+    return BUCKET_SECONDS;
+  }
+  if (windowMs <= 6 * 60 * 60_000) {
+    return 60;
+  }
+  if (windowMs <= 24 * 60 * 60_000) {
+    return 5 * 60;
+  }
+  if (windowMs <= 3 * 24 * 60 * 60_000) {
+    return 15 * 60;
+  }
+  return 60 * 60;
+}
+
+/**
+ * @param {number} nowMs
+ * @param {number} bucketSeconds
+ * @returns {Date}
+ */
+function floorBucketStartForSeconds(nowMs, bucketSeconds) {
+  const ms = Math.floor(nowMs / (bucketSeconds * 1000)) * bucketSeconds * 1000;
+  return new Date(ms);
+}
+
+/**
  * @param {Date} from
  * @param {Date} to
+ * @param {number} [bucketSeconds]
  * @returns {Date[]}
  */
-function buildBucketTimeline(from, to) {
-  const start = floorBucketStart(from.getTime());
-  const end = floorBucketStart(to.getTime());
+function buildBucketTimeline(from, to, bucketSeconds = BUCKET_SECONDS) {
+  const start = floorBucketStartForSeconds(from.getTime(), bucketSeconds);
+  const end = floorBucketStartForSeconds(to.getTime(), bucketSeconds);
   const points = [];
-  for (let t = start.getTime(); t <= end.getTime(); t += BUCKET_SECONDS * 1000) {
+  for (let t = start.getTime(); t <= end.getTime(); t += bucketSeconds * 1000) {
     points.push(new Date(t));
   }
   return points;
@@ -413,11 +539,14 @@ function normalizeDbRows(rows) {
  * @param {Array<{ bucketStart: Date, metric: string, labels: Record<string, string>, value: number }>} rows
  * @param {string} metric
  * @param {(labels: Record<string, string>) => boolean} [labelFilter]
+ * @param {number} [displayBucketSeconds]
  * @returns {Map<string, number>}
  */
-function seriesMapForMetric(rows, metric, labelFilter) {
+function seriesMapForMetric(rows, metric, labelFilter, displayBucketSeconds = BUCKET_SECONDS) {
   /** @type {Map<string, number>} */
   const map = new Map();
+  const bucketMs = displayBucketSeconds * 1000;
+  const aggregate = displayBucketSeconds > BUCKET_SECONDS;
   for (const row of rows) {
     if (row.metric !== metric) {
       continue;
@@ -425,7 +554,9 @@ function seriesMapForMetric(rows, metric, labelFilter) {
     if (labelFilter && !labelFilter(row.labels)) {
       continue;
     }
-    const key = row.bucketStart.toISOString();
+    const key = aggregate
+      ? floorBucketStartForSeconds(row.bucketStart.getTime(), displayBucketSeconds).toISOString()
+      : row.bucketStart.toISOString();
     map.set(key, (map.get(key) || 0) + row.value);
   }
   return map;
@@ -450,9 +581,10 @@ function mapToSeries(timeline, valueMap) {
 async function getPortalStats(windowKey = "5m") {
   const resolvedWindow = WINDOW_MS[windowKey] ? windowKey : "5m";
   const windowMs = resolveWindowMs(resolvedWindow);
+  const chartBucketSeconds = resolveChartBucketSeconds(windowMs);
   const now = new Date();
   const from = new Date(now.getTime() - windowMs);
-  const timeline = buildBucketTimeline(from, now);
+  const timeline = buildBucketTimeline(from, now, chartBucketSeconds);
 
   /** @type {Array<{ bucketStart: Date, metric: string, labels: Record<string, string>, value: number }>} */
   let rows = [];
@@ -466,13 +598,29 @@ async function getPortalStats(windowKey = "5m") {
     );
     try {
       const pool = getPool();
-      const result = await pool.query(
-        `SELECT bucket_start, metric, labels, value
-         FROM portal_metric_buckets
-         WHERE bucket_start >= $1
-         ORDER BY bucket_start ASC`,
-        [from.toISOString()],
-      );
+      const result =
+        chartBucketSeconds > BUCKET_SECONDS
+          ? await pool.query(
+              `SELECT
+                 to_timestamp(
+                   floor(extract(epoch from bucket_start) / $2::double precision) * $2::double precision
+                 ) AS bucket_start,
+                 metric,
+                 labels,
+                 SUM(value) AS value
+               FROM portal_metric_buckets
+               WHERE bucket_start >= $1
+               GROUP BY 1, 2, 3
+               ORDER BY 1 ASC`,
+              [from.toISOString(), chartBucketSeconds],
+            )
+          : await pool.query(
+              `SELECT bucket_start, metric, labels, value
+               FROM portal_metric_buckets
+               WHERE bucket_start >= $1
+               ORDER BY bucket_start ASC`,
+              [from.toISOString()],
+            );
       rows = [...normalizeDbRows(result.rows), ...localAfterFlush];
     } catch (error) {
       console.warn("[portal-metrics] query failed:", error.message || error);
@@ -498,8 +646,8 @@ async function getPortalStats(windowKey = "5m") {
   }
   const allRows = [...merged.values()];
 
-  const loginSuccessMap = seriesMapForMetric(allRows, "login.success");
-  const loginFailedMap = seriesMapForMetric(allRows, "login.failed");
+  const loginSuccessMap = seriesMapForMetric(allRows, "login.success", undefined, chartBucketSeconds);
+  const loginFailedMap = seriesMapForMetric(allRows, "login.failed", undefined, chartBucketSeconds);
   const loginSuccessSeries = mapToSeries(timeline, loginSuccessMap);
   const loginFailedSeries = mapToSeries(timeline, loginFailedMap);
 
@@ -515,26 +663,31 @@ async function getPortalStats(windowKey = "5m") {
       allRows,
       "page.serve",
       (labels) => labels.pageType === pageType && labels.statusClass === "2xx",
+      chartBucketSeconds,
     );
     const error4xxMap = seriesMapForMetric(
       allRows,
       "page.serve",
       (labels) => labels.pageType === pageType && labels.statusClass === "4xx",
+      chartBucketSeconds,
     );
     const error5xxMap = seriesMapForMetric(
       allRows,
       "page.serve",
       (labels) => labels.pageType === pageType && labels.statusClass === "5xx",
+      chartBucketSeconds,
     );
     const latencySumMap = seriesMapForMetric(
       allRows,
       "page.latency_ms",
       (labels) => labels.pageType === pageType && labels.kind === "sum",
+      chartBucketSeconds,
     );
     const latencyCountMap = seriesMapForMetric(
       allRows,
       "page.latency_ms",
       (labels) => labels.pageType === pageType && labels.kind === "count",
+      chartBucketSeconds,
     );
 
     let success = 0;
@@ -566,9 +719,24 @@ async function getPortalStats(windowKey = "5m") {
     latencySeries[pageType] = pageLatencySeries;
   }
 
-  const allSuccessMap = seriesMapForMetric(allRows, "page.serve", (labels) => labels.statusClass === "2xx");
-  const all4xxMap = seriesMapForMetric(allRows, "page.serve", (labels) => labels.statusClass === "4xx");
-  const all5xxMap = seriesMapForMetric(allRows, "page.serve", (labels) => labels.statusClass === "5xx");
+  const allSuccessMap = seriesMapForMetric(
+    allRows,
+    "page.serve",
+    (labels) => labels.statusClass === "2xx",
+    chartBucketSeconds,
+  );
+  const all4xxMap = seriesMapForMetric(
+    allRows,
+    "page.serve",
+    (labels) => labels.statusClass === "4xx",
+    chartBucketSeconds,
+  );
+  const all5xxMap = seriesMapForMetric(
+    allRows,
+    "page.serve",
+    (labels) => labels.statusClass === "5xx",
+    chartBucketSeconds,
+  );
   const errorRateSeries = timeline.map((bucket) => {
     const key = bucket.toISOString();
     const success = allSuccessMap.get(key) || 0;
@@ -577,9 +745,9 @@ async function getPortalStats(windowKey = "5m") {
     return { t: key, v: total > 0 ? error / total : 0 };
   });
 
-  const filesListMap = seriesMapForMetric(allRows, "drive.files_list");
-  const filesGetMap = seriesMapForMetric(allRows, "drive.files_get");
-  const sheetsMap = seriesMapForMetric(allRows, "sheets.api");
+  const filesListMap = seriesMapForMetric(allRows, "drive.files_list", undefined, chartBucketSeconds);
+  const filesGetMap = seriesMapForMetric(allRows, "drive.files_get", undefined, chartBucketSeconds);
+  const sheetsMap = seriesMapForMetric(allRows, "sheets.api", undefined, chartBucketSeconds);
   const filesListSeries = mapToSeries(timeline, filesListMap);
   const filesGetSeries = mapToSeries(timeline, filesGetMap);
   const sheetsSeries = mapToSeries(timeline, sheetsMap);
@@ -608,7 +776,7 @@ async function getPortalStats(windowKey = "5m") {
   const incidentSeries = {};
   for (const key of INCIDENT_SERIES_KEYS) {
     const metricName = incidentMetricByKey[key];
-    const valueMap = seriesMapForMetric(allRows, metricName);
+    const valueMap = seriesMapForMetric(allRows, metricName, undefined, chartBucketSeconds);
     const series = mapToSeries(timeline, valueMap);
     incidentSeries[key] = series;
     incidentTotals[key] = series.reduce((sum, p) => sum + p.v, 0);
@@ -626,7 +794,8 @@ async function getPortalStats(windowKey = "5m") {
 
   return {
     window: resolvedWindow,
-    bucketSeconds: BUCKET_SECONDS,
+    bucketSeconds: chartBucketSeconds,
+    storageBucketSeconds: BUCKET_SECONDS,
     generatedAt: now.toISOString(),
     logins: {
       successful: loginSuccessSeries.reduce((sum, p) => sum + p.v, 0),
@@ -668,8 +837,11 @@ module.exports = {
   WINDOW_MS,
   PAGE_TYPES,
   INCIDENT_SERIES_KEYS,
+  RECENT_ERROR_LIMIT,
   recordMetric,
   recordPageServe,
+  recordRecentError,
+  getRecentErrors,
   recordLoginSuccess,
   recordLoginFailed,
   recordVerifyError,
@@ -684,7 +856,9 @@ module.exports = {
   recordSheetsApiError,
   classifyPageType,
   shouldSkipPath,
+  isRequestLogEnabled,
   createPortalMetricsMiddleware,
+  createRequestLogMiddleware,
   startPortalMetricsFlusher,
   flushMetricsToDatabase,
   getPortalStats,

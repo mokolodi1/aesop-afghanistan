@@ -8,6 +8,7 @@ const {
   isDatabaseEnabled,
   getApplicantsReviewFieldsMapFromDb,
   isReviewerAssignedToApplicantFromDb,
+  isListedAsApplicantReviewerFromDb,
   getReviewAssignmentsForReviewerFromDb,
   getApplicantReviewRowFromDb,
   upsertApplicantReviewFromMirror,
@@ -721,6 +722,16 @@ async function isListedAsApplicantReviewer(reviewerAesopId) {
   const reviewerKey = normalizeAesopIdKey(reviewerAesopId);
   if (!reviewerKey) {
     return false;
+  }
+
+  if (isDatabaseEnabled()) {
+    try {
+      const fromDb = await isListedAsApplicantReviewerFromDb(reviewerAesopId);
+      return fromDb === true;
+    } catch (error) {
+      console.warn("ApplicantReviews reviewer DB lookup failed:", error.message);
+      return false;
+    }
   }
 
   const reviewsCfg = getApplicantReviewsConfig();

@@ -113,7 +113,9 @@ const TRANSLATIONS = {
     'voiceMemo.durationExceeding': 'You\'re exceeding expectations!',
     'voiceMemo.resubmitButton': 'Resubmit on Signal',
     'voiceMemo.instrTitle': 'How to submit your Round 2 voice note',
-    'voiceMemo.promptTitle': 'Your Round 2 prompt',
+    'voiceMemo.promptTitle': 'Round 2 Prompt',
+    'voiceMemo.promptLead':
+      'Your voice note should answer this prompt in your own best English.',
     'voiceMemo.instrDeadline':
       'Complete every step by 11:59 pm Afghanistan time on Thursday, July 16, 2026.',
     'voiceMemo.instrStep1Title': 'Create a Signal account',
@@ -127,7 +129,7 @@ const TRANSLATIONS = {
     'voiceMemo.instrStep2Intro': 'Then send these two messages:',
     'voiceMemo.instrStep2Id': 'Your AESOP ID number:',
     'voiceMemo.instrStep2Voice':
-      'A voice note in your own best English answering the Round 2 prompt above. It must be between 30 seconds and 2 minutes. Do NOT use ChatGPT or grammar checkers. Anything under 30 seconds is too short and will be rejected.',
+      'A voice note in your own best English answering the Round 2 Prompt above. It must be between 30 seconds and 2 minutes. Do NOT use ChatGPT or grammar checkers. Anything under 30 seconds is too short and will be rejected.',
     'voiceMemo.instrStep3Title': 'Check your status here',
     'voiceMemo.instrStep3Body':
       'This page updates automatically — you will not get a reply on Signal, and all updates come by email. A new voice note can take up to 3 days to appear here.',
@@ -197,6 +199,12 @@ const TRANSLATIONS = {
       'Please click the login link that has been sent to your email on file.',
     'magicLink.sending': 'Checking your ID and sending a login link...',
     'magicLink.networkError': 'Internal error. Please try again.',
+    'magicLink.alreadySentWait':
+      'We already sent a login link to your email. Please check your inbox (and spam). You can request another in {{wait}}.',
+    'magicLink.rateLimited': 'Too many login link requests. Please try again in {{wait}}.',
+    'magicLink.waitAboutOneMinute': 'about 1 minute',
+    'magicLink.waitAboutMinutes': 'about {{minutes}} minutes',
+    'magicLink.resendFailed': 'Unable to send a new login link. Enter your AESOP ID below.',
 
     'profile.applicantBlockedTitle': 'Not available for applicants',
     'profile.applicantBlockedPrefix':
@@ -393,7 +401,9 @@ const TRANSLATIONS = {
     'voiceMemo.durationExceeding': 'شما فراتر از انتظار عمل کردید!',
     'voiceMemo.resubmitButton': 'ارسال دوباره در Signal',
     'voiceMemo.instrTitle': 'چگونه یادداشت صوتی مرحلهٔ دوم خود را ارسال کنید',
-    'voiceMemo.promptTitle': 'سؤال مرحلهٔ دوم شما',
+    'voiceMemo.promptTitle': 'سؤال مرحلهٔ دوم',
+    'voiceMemo.promptLead':
+      'یادداشت صوتی شما باید به این سؤال در بهترین زبان انگلیسی خودتان پاسخ دهد.',
     'voiceMemo.instrDeadline':
       'تمام مراحل را تا ساعت ۱۱:۵۹ شب به وقت افغانستان، روز پنجشنبه ۱۶ جولای ۲۰۲۶ تکمیل کنید.',
     'voiceMemo.instrStep1Title': 'یک حساب Signal بسازید',
@@ -477,6 +487,12 @@ const TRANSLATIONS = {
       'لطفاً روی لینک ورودی که به ایمیل ثبت‌شده شما ارسال شده کلیک کنید.',
     'magicLink.sending': 'در حال بررسی AESOP ID و ارسال لینک ورود…',
     'magicLink.networkError': 'خطای داخلی. لطفاً دوباره تلاش کنید.',
+    'magicLink.alreadySentWait':
+      'ما قبلاً یک لینک ورود به ایمیل شما فرستاده‌ایم. لطفاً صندوق ورودی (و هرزنامه) را بررسی کنید. می‌توانید پس از {{wait}} دوباره درخواست دهید.',
+    'magicLink.rateLimited': 'درخواست‌های زیاد برای لینک ورود. لطفاً پس از {{wait}} دوباره تلاش کنید.',
+    'magicLink.waitAboutOneMinute': 'حدود ۱ دقیقه',
+    'magicLink.waitAboutMinutes': 'حدود {{minutes}} دقیقه',
+    'magicLink.resendFailed': 'ارسال لینک ورود جدید ممکن نشد. AESOP ID خود را در زیر وارد کنید.',
 
     'profile.applicantBlockedTitle': 'برای متقاضیان در دسترس نیست',
     'profile.applicantBlockedPrefix':

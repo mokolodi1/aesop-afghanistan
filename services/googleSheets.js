@@ -4,7 +4,7 @@ const { buildServiceAccountJwt } = require("./googleAuth");
 const { formatGoogleSheetsOperationError } = require("../utils/errorLogging");
 const { dateToGoogleSheetsSerial, formatEasternSheetTimestamp, sheetDatetimeCellTextToUtcMillis } = require("../utils/dingSheetTime");
 const { isDatabaseEnabled } = require("../db/index");
-const { getPersonByAesopId, isPeopleIdentityFresh, personRowToProfile } = require("./classroomDb");
+const { getPersonByAesopId, isPeopleIdentityFresh, personRowToProfile, findLatestDingNumberByAesopIdFromDb } = require("./classroomDb");
 const { recordSheetsApiCall, recordSheetsApiError } = require("./portalMetrics");
 
 let doc = null;
@@ -861,83 +861,6 @@ async function findEmailById(userId) {
 }
 
 /**
- * Find name and email (per configured columns) for a user row matching email.
- * @param {string} email - Email to lookup (pre-sanitized)
- * @returns {Promise<{ name: string, email: string, id: string, phone: string, portalRole: string }|null>}
- */
-async function findProfileByEmail(email) {
-  try {
-    const sheet = await initGoogleSheets();
-    const sheetName = config.googleSheets.sheetName || "People";
-    const worksheet = sheet.sheetsByTitle[sheetName];
-    if (!worksheet) {
-      throw new Error(`Sheet "${sheetName}" not found.`);
-    }
-
-    await preparePeopleWorksheet(worksheet);
-    const rows = await worksheet.getRows();
-    const idColumnIndex = resolveColumnIndex(config.googleSheets.idColumn || "B");
-    const emailColumnIndex = resolveColumnIndex(config.googleSheets.emailColumn || "D");
-    const nameColumnIndex = resolveColumnIndex(config.googleSheets.nameColumn || "C");
-    const phoneColumnIndex = resolvePeoplePhoneColumnIndex();
-    const roleColumnIndex = resolvePeopleRoleColumnIndex();
-    const typeColumnIndex = resolvePeopleTypeColumnIndex();
-    const reviewerColumnIndex = resolvePeopleReviewerColumnIndex();
-    const statusColumnIndex = resolvePeopleStatusColumnIndex();
-    const emailLower = email.toLowerCase().trim();
-    const applicantIdSet = await require("./voiceMemoSync").loadApplicantAesopIdSetFromSheets();
-
-    for (const row of rows) {
-      const rowData = Array.isArray(row._rawData) ? row._rawData : [];
-      const rowEmail = String(rowData[emailColumnIndex] || "").trim().toLowerCase();
-
-      if (rowEmail === emailLower) {
-        const phoneRaw =
-          phoneColumnIndex !== null ? String(rowData[phoneColumnIndex] ?? "").trim() : "";
-        const aesopId = String(rowData[idColumnIndex] || "").trim();
-        const adminRole = readPeoplePortalRoleFromRow(row, rowData, roleColumnIndex);
-        const peopleType = readPeopleTypeFromRow(row, rowData, typeColumnIndex);
-        return {
-          name: String(rowData[nameColumnIndex] || "").trim(),
-          email: String(rowData[emailColumnIndex] || "").trim(),
-          id: aesopId,
-          phone: phoneRaw,
-          portalRole:
-            resolvePortalRoleFromPeopleSheet(
-              { id: aesopId, peopleType, portalRole: adminRole },
-              applicantIdSet,
-            ) || "",
-          reviewerRole: readPeopleReviewerRoleFromRow(row, rowData, reviewerColumnIndex),
-          peopleStatus: resolvePeopleStatus(
-            aesopId,
-            readPeopleStatusFromRow(row, rowData, statusColumnIndex),
-          ),
-        };
-      }
-    }
-
-    return null;
-  } catch (error) {
-    const formattedError = formatGoogleSheetsOperationError(error);
-    console.error("Error finding profile by email in Google Sheet:", formattedError);
-    throw new Error(formattedError, { cause: error });
-  }
-}
-
-/**
- * Find user display name by email in configured sheet.
- * @param {string} email - Email to lookup (pre-sanitized)
- * @returns {Promise<string|null>} Name if found, otherwise null
- */
-async function findNameByEmail(email) {
-  const profile = await findProfileByEmail(email);
-  if (!profile) {
-    return null;
-  }
-  return profile.name || null;
-}
-
-/**
  * Parse a cell value as a time for "most recent" comparison (ms since epoch).
  * @param {unknown} raw
  * @returns {number}
@@ -986,6 +909,20 @@ function parseSheetTimestamp(raw) {
  * @returns {Promise<string|null>}
  */
 async function findLatestDingNumberById(userId) {
+  const idKey = String(userId || "").trim();
+  if (!idKey) {
+    return null;
+  }
+
+  if (isDatabaseEnabled()) {
+    try {
+      return await findLatestDingNumberByAesopIdFromDb(idKey);
+    } catch (error) {
+      console.warn("Latest Ding DB lookup failed:", error.message);
+      return null;
+    }
+  }
+
   try {
     const sheet = await initGoogleSheets();
     const dingSheetName = config.googleSheets.dingChangesSheetName || "Ding changes";
@@ -2743,8 +2680,6 @@ module.exports = {
   buildLatestDingNumberByUserIdMap,
   findEmailById,
   findLatestDingNumberById,
-  findNameByEmail,
-  findProfileByEmail,
   findProfileById,
   recordPeopleLastLogin,
   getClassroomTabStats,

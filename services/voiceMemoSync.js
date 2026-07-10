@@ -618,34 +618,10 @@ async function getApplicantRowByAesopId(aesopId) {
 
   if (isDatabaseEnabled()) {
     try {
-      const fromDb = await getApplicantRowByAesopIdFromDb(idKey);
-      if (fromDb) {
-        let round2Prompt = fromDb.round2Prompt;
-        if (!round2Prompt) {
-          try {
-            const fromSheet = await getApplicantRowFromSheet(idKey);
-            round2Prompt = fromSheet?.round2Prompt || "";
-          } catch (error) {
-            console.warn("Applicants sheet prompt lookup failed:", error.message);
-          }
-        }
-        return {
-          aesopId: fromDb.aesopId,
-          round1: fromDb.round1,
-          round2: fromDb.round2,
-          links: fromDb.links,
-          submittedAt: fromDb.submittedAt,
-          email: fromDb.email,
-          age: fromDb.age,
-          essay: fromDb.essay,
-          round2Prompt,
-          driveFileId: fromDb.driveFileId,
-          driveFileName: fromDb.driveFileName,
-          driveDurationSeconds: fromDb.driveDurationSeconds,
-        };
-      }
+      return await getApplicantRowByAesopIdFromDb(idKey);
     } catch (error) {
       console.warn("Applicants DB lookup failed:", error.message);
+      return null;
     }
   }
 

@@ -4,7 +4,6 @@ const config = require('./config/secrets');
 const { checkIdAndSendMagicLink } = require('./services/auth');
 const { verifyMagicLink, resendMagicLinkByToken, isFlyProduction } = require('./services/magicLink');
 const {
-  findProfileByEmail,
   findProfileById,
   findLatestDingNumberById,
   recordPeopleLastLogin,
@@ -22,7 +21,7 @@ const {
 } = require('./services/googleSheets');
 const { getTeacherRoster, getStudentGrades } = require('./services/classroomSync');
 const { isDatabaseEnabled, checkDatabaseHealth } = require('./db/index');
-const { getRoleByEmailFromDb, getGradesByEmailFromDb, getPersonByAesopId, getMirrorCacheStatus, personRowToProfile } = require('./services/classroomDb');
+const { getRoleByEmailFromDb, getGradesByEmailFromDb, getPersonByAesopId, getMirrorCacheStatus, personRowToProfile, recordPortalDingChangeInDb } = require('./services/classroomDb');
 const {
   isPortalAdmin,
   resolvePortalReviewerAccess,
@@ -94,6 +93,7 @@ const { sendDingNumberUpdatedEmail, sendPortalDingHelpRequestEmail } = require('
 const { formatErrorForLog, formatGoogleSheetsWriteErrorForLog, isGoogleSheetsForbidden, formatDbErrorMessage } = require('./utils/errorLogging');
 const {
   createPortalMetricsMiddleware,
+  createRequestLogMiddleware,
   startPortalMetricsFlusher,
   recordLoginSuccess,
   recordLoginFailed,
@@ -101,6 +101,8 @@ const {
   recordMagicLinkRequest,
   recordPortalClassGradeFail,
   getPortalStats,
+  getRecentErrors,
+  isRequestLogEnabled,
 } = require('./services/portalMetrics');
 
 /** Value for Ding changes sheet column D when the student updates Ding via the portal (not their personal name). */
@@ -324,6 +326,11 @@ app.use(securityHeaders());
 app.use(express.json({ limit: '10kb' })); // Limit JSON payload size
 app.use(express.urlencoded({ extended: true, limit: '10kb' }));
 
+app.use(createRequestLogMiddleware());
+if (isRequestLogEnabled()) {
+  console.log('[request-log] access logging enabled (REQUEST_LOG); view with: flyctl logs -a aesop-afghanistan');
+}
+
 /** Hostname the client asked for (Fly and many CDNs set X-Forwarded-Host). */
 function getInboundHostname(req) {
   const forwarded = (req.get('x-forwarded-host') || '').split(',')[0].trim();
@@ -392,11 +399,75 @@ app.get('/health', (req, res) => {
   });
 });
 
-// Rate limiter for magic link requests (5 requests per 15 minutes per IP)
-const magicLinkRateLimiter = createRateLimiter({ name: 'magic-link', windowMs: 15 * 60 * 1000, max: 5 });
+const MAGIC_LINK_COOLDOWN_MS = 2 * 60 * 1000;
+const MAGIC_LINK_REQUEST_WINDOW_MS = 15 * 60 * 1000;
+
+function magicLinkRequestSubjectKey(req) {
+  const userId = sanitizeIdentifier(req.body?.userId);
+  return userId ? `id:${userId}` : `ip:${req.ip || req.connection?.remoteAddress || 'unknown'}`;
+}
+
+function magicLinkResendSubjectKey(req) {
+  const token = typeof req.body?.token === 'string' ? req.body.token.trim() : '';
+  if (isValidToken(token)) {
+    return `token:${token}`;
+  }
+  return `ip:${req.ip || req.connection?.remoteAddress || 'unknown'}`;
+}
+
+const magicLinkRequestCooldownLimiter = createRateLimiter({
+  name: 'magic-link-request-cooldown',
+  windowMs: MAGIC_LINK_COOLDOWN_MS,
+  max: 1,
+  resolveKeySuffix: magicLinkRequestSubjectKey,
+  message: 'A login link was sent recently. Please wait a couple of minutes before requesting another.',
+});
+
+const magicLinkRequestIdLimiter = createRateLimiter({
+  name: 'magic-link-request',
+  windowMs: MAGIC_LINK_REQUEST_WINDOW_MS,
+  max: 5,
+  resolveKeySuffix: magicLinkRequestSubjectKey,
+  message: 'Too many login link requests for this AESOP ID. Please wait and try again later.',
+});
+
+const magicLinkRequestIpLimiter = createRateLimiter({
+  name: 'magic-link-request-ip',
+  windowMs: MAGIC_LINK_REQUEST_WINDOW_MS,
+  max: 30,
+  message: 'Too many login link requests from this network. Please wait and try again later.',
+});
+
+const magicLinkResendCooldownLimiter = createRateLimiter({
+  name: 'magic-link-resend-cooldown',
+  windowMs: MAGIC_LINK_COOLDOWN_MS,
+  max: 1,
+  resolveKeySuffix: magicLinkResendSubjectKey,
+  message: 'A login link was sent recently. Please wait a couple of minutes before requesting another.',
+});
+
+const magicLinkResendLimiter = createRateLimiter({
+  name: 'magic-link-resend',
+  windowMs: MAGIC_LINK_REQUEST_WINDOW_MS,
+  max: 5,
+  resolveKeySuffix: magicLinkResendSubjectKey,
+  message: 'Too many resend attempts for this login link. Please wait and try again later.',
+});
+
+const magicLinkResendIpLimiter = createRateLimiter({
+  name: 'magic-link-resend-ip',
+  windowMs: MAGIC_LINK_REQUEST_WINDOW_MS,
+  max: 20,
+  message: 'Too many login link resend attempts from this network. Please wait and try again later.',
+});
 
 // Request magic link
-app.post('/api/request-magic-link', magicLinkRateLimiter, async (req, res) => {
+app.post(
+  '/api/request-magic-link',
+  magicLinkRequestCooldownLimiter,
+  magicLinkRequestIdLimiter,
+  magicLinkRequestIpLimiter,
+  async (req, res) => {
   try {
     let { userId } = req.body;
     
@@ -436,10 +507,16 @@ app.post('/api/request-magic-link', magicLinkRateLimiter, async (req, res) => {
     console.error('Error requesting magic link:', formatErrorForLog(error));
     res.status(500).json({ error: 'An error occurred. Please try again later.' });
   }
-});
+  },
+);
 
-// Resend magic link for an expired or used token (same rate limit as new requests)
-app.post('/api/resend-magic-link', magicLinkRateLimiter, async (req, res) => {
+// Resend magic link for an expired or used token
+app.post(
+  '/api/resend-magic-link',
+  magicLinkResendCooldownLimiter,
+  magicLinkResendLimiter,
+  magicLinkResendIpLimiter,
+  async (req, res) => {
   try {
     const { token } = req.body;
 
@@ -461,7 +538,8 @@ app.post('/api/resend-magic-link', magicLinkRateLimiter, async (req, res) => {
     console.error('Error resending magic link:', formatErrorForLog(error));
     res.status(500).json({ error: 'An error occurred sending the link.' });
   }
-});
+  },
+);
 
 // Rate limiter for token verification (10 attempts per 15 minutes per IP)
 const verifyRateLimiter = createRateLimiter({ name: 'verify-magic-link', windowMs: 15 * 60 * 1000, max: 10 });
@@ -493,11 +571,8 @@ app.post('/api/verify-magic-link', verifyRateLimiter, async (req, res) => {
             profile = await findProfileById(idKey);
           }
         }
-        if (!profile) {
-          profile = await findProfileByEmail(sanitizedEmail);
-        }
       } catch (profileError) {
-        console.warn('Profile sheet lookup failed during verify; using token/DB fallback:', formatErrorForLog(profileError));
+        console.warn('Profile lookup failed during verify; using token/DB fallback:', formatErrorForLog(profileError));
       }
       if (!profile && result.userId && isDatabaseEnabled()) {
         try {
@@ -698,6 +773,10 @@ app.post('/api/update-ding-number', dingUpdateRateLimiter, async (req, res) => {
       displayName: PORTAL_DING_CHANGE_SOURCE_LABEL,
       portalNote,
       phone: typeof profile.phone === 'string' ? profile.phone.trim() : '',
+    });
+
+    recordPortalDingChangeInDb(idForSheet, ding, when).catch((dbErr) => {
+      console.warn('Ding change saved to Sheets but DB mirror update failed:', formatErrorForLog(dbErr));
     });
 
     try {
@@ -1014,7 +1093,7 @@ app.post('/api/portal-admin/stats', portalAdminRateLimiter, async (req, res) => 
     }
     const windowKey = typeof req.body.window === 'string' ? req.body.window : '5m';
     const stats = await getPortalStats(windowKey);
-    res.json({ success: true, ...stats });
+    res.json({ success: true, ...stats, recentErrors: getRecentErrors() });
   } catch (error) {
     console.error('Error loading portal admin stats:', formatErrorForLog(error));
     res.status(500).json({ error: 'Could not load portal stats.' });

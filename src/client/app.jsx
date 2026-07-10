@@ -26,7 +26,10 @@ import {
   formatVoiceMemoDurationLabel,
   voiceMemoDurationsDiffer,
 } from '../../utils/voiceMemoDuration.js';
-import './styles.css';
+import {
+  postMagicLinkRequest,
+  postResendMagicLink,
+} from './magicLinkClient.js';
 
 const PortalLanguageContext = React.createContext({
   locale: 'en',
@@ -1662,29 +1665,20 @@ function MagicLinkRequestForm({ inputId, submitLabel }) {
     setIsSubmitting(true);
 
     try {
-      const response = await fetch('/api/request-magic-link', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: trimmedUserId }),
-      });
+      const result = await postMagicLinkRequest(trimmedUserId, { t });
 
-      const data = await response.json();
-
-      if (!response.ok) {
-        const errText =
-          response.status >= 500
-            ? data.error || t('magicLink.networkError')
-            : data.error || data.message || 'Request failed.';
-        setStatus({ type: 'error', text: errText });
+      if (!result.ok) {
+        setStatus({
+          type: result.clientCooldown ? 'success' : 'error',
+          text: result.message,
+        });
         return;
       }
 
-      // Use the localized neutral message (the server's `message` is English-only).
       setStatus({
         type: 'success',
         text: t('magicLink.linkSent'),
       });
-      sessionStorage.setItem('studentPortalPendingMagicUserId', trimmedUserId);
       persistRememberUserId(trimmedUserId, rememberUserId);
     } catch {
       setStatus({ type: 'error', text: t('magicLink.networkError') });
@@ -1776,6 +1770,7 @@ function RequestMagicLinkApp() {
 }
 
 function VerifyMagicLinkApp() {
+  const t = (key, params) => translatePortalText(getStoredPortalLocale(), key, params);
   const [status, setStatus] = useState('Verifying login link...');
   const [message, setMessage] = useState({ type: '', text: '' });
   const [showSpinner, setShowSpinner] = useState(true);
@@ -1892,36 +1887,32 @@ function VerifyMagicLinkApp() {
 
   const requestMagicLinkByUserId = async (userId) => {
     setIsResending(true);
-    setMessage({ type: 'loading', text: 'Sending a new login link...' });
+    setMessage({ type: 'loading', text: t('magicLink.sending') });
 
     try {
-      const response = await fetch('/api/request-magic-link', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId }),
-      });
-      const data = await response.json();
+      const result = await postMagicLinkRequest(userId, { t });
 
-      if (!response.ok || data.success === false) {
+      if (!result.ok) {
         setStatus('Verification Failed');
         setMessage({
-          type: 'error',
-          text: data.error || data.message || 'Unable to send a new login link. Enter your AESOP ID below.',
+          type: result.clientCooldown ? 'success' : 'error',
+          text: result.message,
         });
-        setShowIdForm(true);
+        if (!result.clientCooldown) {
+          setShowIdForm(true);
+        }
         return;
       }
 
       setStatus('Check your email');
       setMessage({
         type: 'success',
-        text: data.message || 'A new login link has been sent to your registered email.',
+        text: t('magicLink.linkSent'),
       });
       setVerificationFailed(false);
-      sessionStorage.setItem('studentPortalPendingMagicUserId', userId);
     } catch {
       setStatus('Error');
-      setMessage({ type: 'error', text: 'An error occurred sending the link. Please try again.' });
+      setMessage({ type: 'error', text: t('magicLink.networkError') });
       setShowIdForm(true);
     } finally {
       setIsResending(false);
@@ -1935,23 +1926,23 @@ function VerifyMagicLinkApp() {
 
     if (canResendByToken && linkToken) {
       setIsResending(true);
-      setMessage({ type: 'loading', text: 'Sending a new login link...' });
+      setMessage({ type: 'loading', text: t('magicLink.sending') });
 
       try {
-        const response = await fetch('/api/resend-magic-link', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ token: linkToken }),
-        });
-        const data = await response.json();
+        const result = await postResendMagicLink(linkToken, { t });
 
-        if (response.ok && data.success) {
+        if (result.ok) {
           setStatus('Check your email');
           setMessage({
             type: 'success',
-            text: data.message || 'A new login link has been sent to your registered email.',
+            text: result.data?.message || t('magicLink.linkSent'),
           });
           setVerificationFailed(false);
+          return;
+        }
+
+        if (result.clientCooldown) {
+          setMessage({ type: 'success', text: result.message });
           return;
         }
 
@@ -1963,11 +1954,11 @@ function VerifyMagicLinkApp() {
 
         setMessage({
           type: 'error',
-          text: data.error || 'Unable to resend from this link. Enter your AESOP ID below.',
+          text: result.message || t('magicLink.resendFailed'),
         });
         setShowIdForm(true);
       } catch {
-        setMessage({ type: 'error', text: 'An error occurred sending the link. Please try again.' });
+        setMessage({ type: 'error', text: t('magicLink.networkError') });
         setShowIdForm(true);
       } finally {
         setIsResending(false);
@@ -2427,15 +2418,15 @@ function PortalVoiceMemoPrompt({ prompt }) {
       <p className="portal-voice-memo-prompt-body" dir="auto">
         {text}
       </p>
+      <p className="portal-voice-memo-prompt-lead">{t('voiceMemo.promptLead')}</p>
     </div>
   );
 }
 
-function PortalVoiceMemoInstructions({ aesopId, round2Prompt }) {
+function PortalVoiceMemoInstructions({ aesopId }) {
   const { t } = usePortalI18n();
   return (
     <div className="portal-voice-memo-instructions">
-      <PortalVoiceMemoPrompt prompt={round2Prompt} />
       <p className="portal-voice-memo-instructions-deadline">{t('voiceMemo.instrDeadline')}</p>
       <ol className="portal-voice-memo-steps">
         <li className="portal-voice-memo-step">
@@ -2804,10 +2795,7 @@ function PortalVoiceMemoSection({ studentUserId, studentEmail, enabled }) {
             </a>
             <details className="portal-voice-memo-resubmit">
               <summary>{t('voiceMemo.resubmitSummary')}</summary>
-              <PortalVoiceMemoInstructions
-                aesopId={studentUserId}
-                round2Prompt={voiceMemoStatus.round2Prompt}
-              />
+              <PortalVoiceMemoInstructions aesopId={studentUserId} />
             </details>
           </div>
         </>
@@ -2817,12 +2805,10 @@ function PortalVoiceMemoSection({ studentUserId, studentEmail, enabled }) {
             <p className="portal-voice-memo-warning-title">{t('voiceMemo.noneTitle')}</p>
             <p className="portal-voice-memo-warning-lead">{t('voiceMemo.noneLead')}</p>
           </div>
+          <PortalVoiceMemoPrompt prompt={voiceMemoStatus.round2Prompt} />
           <div className="portal-voice-memo-panel">
             <h3 className="portal-voice-memo-instructions-title">{t('voiceMemo.instrTitle')}</h3>
-            <PortalVoiceMemoInstructions
-              aesopId={studentUserId}
-              round2Prompt={voiceMemoStatus.round2Prompt}
-            />
+            <PortalVoiceMemoInstructions aesopId={studentUserId} />
             <div className="portal-voice-memo-why portal-voice-memo-why--warning">
               <p className="portal-voice-memo-why-title">{t('voiceMemo.whyTitle')}</p>
               <ul className="portal-voice-memo-why-list">
@@ -5121,6 +5107,10 @@ const STATS_WINDOWS = [
   { id: '5m', label: '5 mins' },
   { id: '15m', label: '15 mins' },
   { id: '1h', label: '1 hour' },
+  { id: '6h', label: '6 hours' },
+  { id: '24h', label: '24 hours' },
+  { id: '3d', label: '3 days' },
+  { id: '1w', label: '1 week' },
 ];
 
 const STATS_PAGE_TYPE_LABELS = {
@@ -5178,6 +5168,25 @@ function formatStatsClockTime(iso) {
   return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' });
 }
 
+function formatStatsAxisTime(iso, windowKey) {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) {
+    return '';
+  }
+  if (windowKey === '3d' || windowKey === '1w') {
+    return date.toLocaleString([], {
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+    });
+  }
+  if (windowKey === '6h' || windowKey === '24h') {
+    return date.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+  }
+  return formatStatsClockTime(iso);
+}
+
 function pickStatsAxisIndexes(count, maxLabels = 5) {
   if (count <= 0) {
     return [];
@@ -5197,7 +5206,7 @@ function pickStatsAxisIndexes(count, maxLabels = 5) {
  * @param {Array<{ t: string, v: number|null }>} series
  * @param {{ color?: string, height?: number, width?: number, yMax?: number|null, formatY?: (n: number) => string }} [options]
  */
-function PortalStatsLineChart({ series, color = '#1f7a6c', height = 180, width = 560, yMax = null, formatY }) {
+function PortalStatsLineChart({ series, color = '#1f7a6c', height = 180, width = 560, yMax = null, formatY, windowKey = '5m' }) {
   const points = Array.isArray(series) ? series : [];
   const values = points.map((p) => (p && Number.isFinite(p.v) ? Number(p.v) : null)).filter((v) => v != null);
   const maxY = yMax != null && Number.isFinite(yMax) ? yMax : Math.max(1, ...values, 0);
@@ -5273,7 +5282,7 @@ function PortalStatsLineChart({ series, color = '#1f7a6c', height = 180, width =
           const x = points.length <= 1 ? padLeft + innerW / 2 : padLeft + (index / (points.length - 1)) * innerW;
           return (
             <text key={`x-${index}`} x={x} y={height - 8} textAnchor="middle" className="portal-stats-chart-tick">
-              {formatStatsClockTime(point.t)}
+              {formatStatsAxisTime(point.t, windowKey)}
             </text>
           );
         })}
@@ -5290,7 +5299,7 @@ function PortalStatsLineChart({ series, color = '#1f7a6c', height = 180, width =
  * @param {Array<{ id: string, label: string, color: string, series: Array<{ t: string, v: number|null }> }>} lines
  * @param {{ height?: number, width?: number, formatY?: (n: number) => string }} [options]
  */
-function PortalStatsMultiLineChart({ lines, height = 200, width = 600, formatY }) {
+function PortalStatsMultiLineChart({ lines, height = 200, width = 600, formatY, windowKey = '5m' }) {
   const safeLines = Array.isArray(lines) ? lines.filter((line) => Array.isArray(line.series) && line.series.length) : [];
   const allValues = safeLines.flatMap((line) =>
     line.series.map((p) => (p && Number.isFinite(p.v) ? Number(p.v) : null)).filter((v) => v != null),
@@ -5368,7 +5377,7 @@ function PortalStatsMultiLineChart({ lines, height = 200, width = 600, formatY }
           const x = pointCount <= 1 ? padLeft + innerW / 2 : padLeft + (index / (pointCount - 1)) * innerW;
           return (
             <text key={`x-${index}`} x={x} y={height - 8} textAnchor="middle" className="portal-stats-chart-tick">
-              {formatStatsClockTime(point.t)}
+              {formatStatsAxisTime(point.t, windowKey)}
             </text>
           );
         })}
@@ -5432,6 +5441,40 @@ function PortalAdminStatsPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [lastUpdated, setLastUpdated] = useState('');
+  const [liveErrors, setLiveErrors] = useState([]);
+  const sessionStartedAtRef = useRef(Date.now());
+  const seenErrorIdsRef = useRef(new Set());
+
+  const mergeRecentErrors = useCallback((incoming) => {
+    if (!Array.isArray(incoming) || incoming.length === 0) {
+      return;
+    }
+    const sessionStart = sessionStartedAtRef.current;
+    const fresh = incoming.filter((entry) => {
+      if (!entry || entry.id == null) {
+        return false;
+      }
+      if (seenErrorIdsRef.current.has(entry.id)) {
+        return false;
+      }
+      const atMs = Date.parse(entry.at);
+      if (!Number.isFinite(atMs) || atMs < sessionStart) {
+        return false;
+      }
+      return true;
+    });
+    if (fresh.length === 0) {
+      return;
+    }
+    for (const entry of fresh) {
+      seenErrorIdsRef.current.add(entry.id);
+    }
+    setLiveErrors((prev) => {
+      const merged = [...fresh, ...prev];
+      merged.sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
+      return merged.slice(0, 1000);
+    });
+  }, []);
 
   useEffect(() => {
     if (!signedIn || !isAdmin) {
@@ -5452,6 +5495,7 @@ function PortalAdminStatsPage() {
         if (!cancelled) {
           setStats(data);
           setLastUpdated(data.generatedAt || new Date().toISOString());
+          mergeRecentErrors(data.recentErrors);
         }
       } catch (err) {
         if (!cancelled) {
@@ -5471,7 +5515,7 @@ function PortalAdminStatsPage() {
       cancelled = true;
       window.clearInterval(intervalId);
     };
-  }, [signedIn, isAdmin, windowKey]);
+  }, [signedIn, isAdmin, windowKey, mergeRecentErrors]);
 
   if (!isAdmin) {
     return (
@@ -5647,7 +5691,11 @@ function PortalAdminStatsPage() {
                 </span>
               ))}
             </div>
-            <PortalStatsMultiLineChart lines={incidentLines} formatY={(n) => String(Math.round(n))} />
+            <PortalStatsMultiLineChart
+              lines={incidentLines}
+              formatY={(n) => String(Math.round(n))}
+              windowKey={windowKey}
+            />
           </PortalStatsPanel>
 
           <PortalStatsPanel title="Logins" subtitle="Successful vs failed verifies">
@@ -5671,6 +5719,7 @@ function PortalAdminStatsPage() {
                 },
               ]}
               formatY={(n) => String(Math.round(n))}
+              windowKey={windowKey}
             />
           </PortalStatsPanel>
 
@@ -5680,6 +5729,7 @@ function PortalAdminStatsPage() {
               color={STATS_CHART_COLORS.errorRate}
               yMax={1}
               formatY={(n) => formatStatsPercent(n)}
+              windowKey={windowKey}
             />
           </PortalStatsPanel>
 
@@ -5718,7 +5768,11 @@ function PortalAdminStatsPage() {
                 </tbody>
               </table>
             </div>
-            <PortalStatsMultiLineChart lines={serveLines} formatY={(n) => String(Math.round(n))} />
+            <PortalStatsMultiLineChart
+              lines={serveLines}
+              formatY={(n) => String(Math.round(n))}
+              windowKey={windowKey}
+            />
           </PortalStatsPanel>
 
           <PortalStatsPanel title="Serve time by page" subtitle="How long responses take (milliseconds)">
@@ -5730,7 +5784,11 @@ function PortalAdminStatsPage() {
                 </span>
               ))}
             </div>
-            <PortalStatsMultiLineChart lines={latencyLines} formatY={(n) => `${Math.round(n)} ms`} />
+            <PortalStatsMultiLineChart
+              lines={latencyLines}
+              formatY={(n) => `${Math.round(n)} ms`}
+              windowKey={windowKey}
+            />
           </PortalStatsPanel>
 
           <PortalStatsPanel title="Google APIs" subtitle="Drive folder scans, file reads, and Sheets calls">
@@ -5761,9 +5819,57 @@ function PortalAdminStatsPage() {
                 },
               ]}
               formatY={(n) => String(Math.round(n))}
+              windowKey={windowKey}
             />
           </PortalStatsPanel>
         </div>
+
+        <PortalStatsPanel
+          title="Live error log"
+          subtitle="4xx/5xx responses since you opened this page (up to 1,000). Refreshes every 10s. With multiple Fly machines, each instance keeps its own buffer."
+          wide
+        >
+          {liveErrors.length === 0 ? (
+            <p className="portal-admin-hint portal-stats-error-log-empty">
+              No errors recorded yet this session. Leave this page open to collect them as they happen.
+            </p>
+          ) : (
+            <div className="portal-stats-error-log-wrap">
+              <table className="portal-stats-table portal-stats-error-log-table">
+                <thead>
+                  <tr>
+                    <th scope="col">Time</th>
+                    <th scope="col">Status</th>
+                    <th scope="col">Method</th>
+                    <th scope="col">Path</th>
+                    <th scope="col">Page</th>
+                    <th scope="col">Time (ms)</th>
+                    <th scope="col">Instance</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {liveErrors.map((entry) => (
+                    <tr key={entry.id}>
+                      <td>{new Date(entry.at).toLocaleTimeString()}</td>
+                      <td>
+                        <span
+                          className={`portal-stats-status-badge portal-stats-status-badge--${entry.statusClass || '4xx'}`}
+                        >
+                          {entry.statusCode}
+                        </span>
+                      </td>
+                      <td>{entry.method}</td>
+                      <td className="portal-stats-error-path">{entry.path}</td>
+                      <td>{STATS_PAGE_TYPE_LABELS[entry.pageType] || entry.pageType || 'Other'}</td>
+                      <td>{entry.latencyMs ?? '—'}</td>
+                      <td className="portal-stats-error-instance">{entry.instance || '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </PortalStatsPanel>
       </div>
     </PortalLayout>
   );

@@ -1977,8 +1977,12 @@ html[dir='rtl'] .portal-class-accordion-chevron {
   color: var(--aesop-ink);
 }
 
-.portal-voice-memo-prompt + .portal-voice-memo-instructions-deadline {
-  margin-top: 22px;
+.portal-voice-memo-warning + .portal-voice-memo-prompt {
+  margin-top: 14px;
+}
+
+.portal-voice-memo-prompt + .portal-voice-memo-panel {
+  margin-top: 18px;
 }
 
 .portal-voice-memo-prompt {
@@ -1997,11 +2001,19 @@ html[dir='rtl'] .portal-class-accordion-chevron {
 }
 
 .portal-voice-memo-prompt-body {
-  margin: 0;
+  margin: 0 0 10px;
   font-size: 1.05rem;
   line-height: 1.55;
   color: #1e40af;
   white-space: pre-wrap;
+}
+
+.portal-voice-memo-prompt-lead {
+  margin: 0;
+  font-size: 1rem;
+  line-height: 1.5;
+  font-weight: 600;
+  color: #1e3a8a;
 }
 
 .portal-voice-memo-steps {
@@ -3170,6 +3182,58 @@ html[dir='rtl'] .portal-voice-memo-substeps {
   letter-spacing: 0.04em;
   color: var(--aesop-text-muted, var(--aesop-muted));
   font-weight: 600;
+}
+
+.portal-stats-error-log-wrap {
+  max-height: 420px;
+  overflow: auto;
+  border-radius: 12px;
+  border: 1px solid hsla(180, 12%, 70%, 0.2);
+}
+
+.portal-stats-error-log-table td {
+  font-size: 0.82rem;
+  vertical-align: top;
+}
+
+.portal-stats-error-log-table .portal-stats-error-path {
+  white-space: normal;
+}
+
+.portal-stats-error-path {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.78rem;
+  word-break: break-all;
+}
+
+.portal-stats-error-instance {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.72rem;
+  color: var(--aesop-text-muted, var(--aesop-muted));
+}
+
+.portal-stats-error-log-empty {
+  margin: 0;
+}
+
+.portal-stats-status-badge {
+  display: inline-block;
+  min-width: 2.4rem;
+  padding: 0.12rem 0.35rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-align: center;
+}
+
+.portal-stats-status-badge--4xx {
+  background: hsla(24, 55%, 92%, 1);
+  color: hsla(16, 55%, 38%, 1);
+}
+
+.portal-stats-status-badge--5xx {
+  background: hsla(0, 60%, 93%, 1);
+  color: hsla(0, 55%, 40%, 1);
 }
 
 .portal-stats-chart {

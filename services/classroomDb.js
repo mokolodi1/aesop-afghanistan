@@ -557,6 +557,62 @@ async function getCurrentDingNumberFromDb(personId) {
   return rows[0] || null;
 }
 
+/**
+ * Latest current Ding number for an AESOP ID from the Postgres mirror.
+ * @param {string} aesopId
+ * @returns {Promise<string|null>}
+ */
+async function findLatestDingNumberByAesopIdFromDb(aesopId) {
+  const person = await getPersonByAesopId(aesopId);
+  if (!person?.id) {
+    return null;
+  }
+  const current = await getCurrentDingNumberFromDb(person.id);
+  const number = current?.number != null ? String(current.number).trim() : "";
+  return number || null;
+}
+
+/**
+ * Keep Postgres Ding mirror in sync after a portal write to Google Sheets.
+ * @param {string} aesopId
+ * @param {string} dingNumber
+ * @param {Date} [changedAt]
+ */
+async function recordPortalDingChangeInDb(aesopId, dingNumber, changedAt = new Date()) {
+  if (!isDatabaseEnabled()) {
+    return;
+  }
+  const db = getDb();
+  if (!db) {
+    return;
+  }
+  const person = await getPersonByAesopId(aesopId);
+  if (!person?.id) {
+    return;
+  }
+  const number = String(dingNumber || "").trim();
+  if (!number) {
+    return;
+  }
+  const when = changedAt instanceof Date ? changedAt : new Date(changedAt);
+
+  await db.update(dingNumbers).set({ isCurrent: false }).where(eq(dingNumbers.personId, person.id));
+  await db.insert(dingNumbers).values({
+    personId: person.id,
+    number,
+    isCurrent: true,
+    source: "student_portal",
+    updatedAt: when,
+  });
+  await db.insert(dingChangeHistory).values({
+    personId: person.id,
+    dingNumber: number,
+    changedAt: when,
+    source: "student_portal",
+    sheetRowKey: `portal:${when.toISOString()}`,
+  });
+}
+
 async function getDingHistoryFromDb(personId, maxRows = 10) {
   const db = getDb();
   if (!db || !(await isPeopleMirrorFresh())) {
@@ -1307,6 +1363,30 @@ async function isReviewerAssignedToApplicantFromDb(reviewerAesopId, applicantAes
   return result.rows.length > 0;
 }
 
+/**
+ * @param {string} reviewerAesopId
+ * @returns {Promise<boolean|null>} null when DB pool is unavailable
+ */
+async function isListedAsApplicantReviewerFromDb(reviewerAesopId) {
+  const pool = getPool();
+  if (!pool) {
+    return null;
+  }
+  const reviewerKey = typeof reviewerAesopId === "string" ? reviewerAesopId.trim().toLowerCase() : "";
+  if (!reviewerKey) {
+    return false;
+  }
+
+  const result = await pool.query(
+    `SELECT 1
+     FROM applicant_reviews
+     WHERE lower(reviewer_a) = $1 OR lower(reviewer_b) = $1
+     LIMIT 1`,
+    [reviewerKey],
+  );
+  return result.rows.length > 0;
+}
+
 /** @returns {Promise<boolean>} */
 async function isApplicantReviewsMirrorFresh() {
   const pool = getPool();
@@ -1475,6 +1555,7 @@ module.exports = {
   getApplicantsReviewFieldsMapFromDb,
   getApplicantVoiceMemoDurationsMapFromDb,
   isReviewerAssignedToApplicantFromDb,
+  isListedAsApplicantReviewerFromDb,
   isApplicantReviewsMirrorFresh,
   personRowToProfile,
   applicantRowFromDb,
@@ -1496,6 +1577,8 @@ module.exports = {
   getHighGradeStudentsFromDb,
   lookupPersonGradesAndRoleFromDb,
   getDingHistoryFromDb,
+  findLatestDingNumberByAesopIdFromDb,
+  recordPortalDingChangeInDb,
   persistClassroomSync,
   updateSyncRunBackupKey,
   exportSnapshotFromDb,
