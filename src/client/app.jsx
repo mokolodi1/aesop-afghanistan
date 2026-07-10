@@ -2576,6 +2576,9 @@ function PortalVoiceMemoSection({ studentUserId, studentEmail, enabled }) {
     minSeconds: voiceMemoStatus?.minDurationSeconds,
     maxSeconds: voiceMemoStatus?.maxDurationSeconds,
   });
+  const hasShortSubmissionIssue =
+    displayDurationStatus === 'too_short' ||
+    (displayDurationStatus === 'unknown' && voiceMemoStatus?.durationStatus === 'too_short');
 
   const voiceMemoDurationWarning = useMemo(() => {
     if (!displayDurationStatus || displayDurationStatus === 'unknown') {
@@ -2671,8 +2674,17 @@ function PortalVoiceMemoSection({ studentUserId, studentEmail, enabled }) {
         </div>
       ) : voiceMemoStatus.submitted ? (
         <>
-          <div className="portal-voice-memo-status portal-voice-memo-status--submitted" role="status">
-            {t('voiceMemo.submitted')}
+          <div
+            className={`portal-voice-memo-status${
+              hasShortSubmissionIssue
+                ? ' portal-voice-memo-status--issues'
+                : ' portal-voice-memo-status--submitted'
+            }`}
+            role="status"
+          >
+            {hasShortSubmissionIssue
+              ? t('voiceMemo.submittedWithIssues')
+              : t('voiceMemo.submitted')}
           </div>
           <div className="portal-voice-memo-panel">
             {voiceMemoError ? (
@@ -2681,7 +2693,7 @@ function PortalVoiceMemoSection({ studentUserId, studentEmail, enabled }) {
               </p>
             ) : null}
             <PortalVoiceMemoPrompt prompt={voiceMemoStatus.round2Prompt} />
-            {voiceMemoDurationWarning && displayDurationStatus === 'too_short' ? (
+            {voiceMemoDurationWarning && hasShortSubmissionIssue ? (
               <p className="portal-voice-memo-duration-warning" role="alert">
                 {voiceMemoDurationWarning}
               </p>
@@ -2741,7 +2753,7 @@ function PortalVoiceMemoSection({ studentUserId, studentEmail, enabled }) {
             ) : (
               <p className="portal-field-hint">{t('voiceMemo.audioUnavailable')}</p>
             )}
-            {displayDurationStatus !== 'too_short' ? (
+            {!hasShortSubmissionIssue ? (
               <div className="portal-voice-memo-done">
                 <p className="portal-voice-memo-done-title">{t('voiceMemo.doneTitle')}</p>
                 <p className="portal-voice-memo-done-lead">{t('voiceMemo.doneLead')}</p>

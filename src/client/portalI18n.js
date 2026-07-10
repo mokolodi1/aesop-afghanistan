@@ -87,6 +87,7 @@ const TRANSLATIONS = {
 
     'voiceMemo.checking': 'Checking voice memo status…',
     'voiceMemo.submitted': 'Submitted',
+    'voiceMemo.submittedWithIssues': 'Submitted with issues',
     'voiceMemo.notSubmitted': 'Not submitted yet',
     'voiceMemo.noneTitle': 'No voice note submitted',
     'voiceMemo.noneLead':
@@ -365,6 +366,7 @@ const TRANSLATIONS = {
 
     'voiceMemo.checking': 'در حال بررسی یادداشت صوتی…',
     'voiceMemo.submitted': 'ثبت شده',
+    'voiceMemo.submittedWithIssues': 'ثبت شده با مشکل',
     'voiceMemo.notSubmitted': 'هنوز ثبت نشده',
     'voiceMemo.noneTitle': 'هیچ یادداشت صوتی ثبت نشده است',
     'voiceMemo.noneLead':

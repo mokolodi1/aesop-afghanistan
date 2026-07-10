@@ -1865,6 +1865,12 @@ html[dir='rtl'] .portal-class-accordion-chevron {
   border: 1px solid #86efac;
 }
 
+.portal-voice-memo-status--issues {
+  color: #78350f;
+  background: #fef3c7;
+  border: 1px solid #fcd34d;
+}
+
 .portal-voice-memo-status--pending {
   color: #78350f;
   background: #fef3c7;
