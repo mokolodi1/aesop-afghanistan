@@ -3343,6 +3343,49 @@ html[dir='rtl'] .portal-voice-memo-substeps {
   }
 }
 
+/* ——— FAQ and help requests ——— */
+.portal-ticket-lead { margin: 0 0 20px; color: var(--aesop-muted); line-height: 1.6; }
+.portal-faq-list { display: grid; gap: 10px; margin-block: 20px; }
+.portal-faq-item { border: 1px solid rgba(0,107,111,.18); border-radius: var(--aesop-radius-md); background: #fff; }
+.portal-faq-item summary { min-height: 44px; padding: 13px 16px; cursor: pointer; color: var(--aesop-ink); font-weight: 700; }
+.portal-faq-item p { margin: 0; padding: 0 16px 16px; color: var(--aesop-muted); line-height: 1.6; }
+.portal-ticket-primary-link { display: inline-flex; min-height: 44px; align-items: center; padding: 0 18px; border-radius: 8px; background: var(--aesop-teal); color: #fff; font-weight: 700; text-decoration: none; }
+.portal-ticket-form { display: grid; gap: 14px; margin-block: 20px; padding: 18px; border: 1px solid rgba(0,107,111,.18); border-radius: var(--aesop-radius-md); background: rgba(255,255,255,.8); }
+.portal-ticket-form h3 { margin: 0; }
+.portal-ticket-form label, .portal-ticket-filter { display: grid; gap: 6px; color: var(--aesop-ink); font-weight: 650; }
+.portal-ticket-form input, .portal-ticket-form select, .portal-ticket-form textarea, .portal-ticket-filter select { width: 100%; min-height: 44px; padding: 10px 12px; box-sizing: border-box; border: 1px solid #aeb8b8; border-radius: 8px; background: #fff; color: var(--aesop-ink); font: inherit; text-align: start; }
+.portal-ticket-form textarea { resize: vertical; line-height: 1.5; }
+.portal-ticket-form button, .portal-ticket-actions button { min-height: 44px; padding: 9px 16px; border: 0; border-radius: 8px; background: var(--aesop-teal); color: #fff; font: inherit; font-weight: 700; cursor: pointer; }
+.portal-ticket-form button:disabled { opacity: .6; cursor: wait; }
+.portal-ticket-form :focus-visible, .portal-ticket-actions button:focus-visible, .portal-ticket-list a:focus-visible, .portal-ticket-primary-link:focus-visible { outline: 3px solid rgba(0,107,111,.35); outline-offset: 2px; }
+.portal-ticket-list { display: grid; gap: 8px; margin-block: 12px 24px; }
+.portal-ticket-list > a { display: flex; justify-content: space-between; align-items: center; gap: 16px; min-height: 56px; padding: 12px 14px; border: 1px solid rgba(0,107,111,.16); border-radius: 9px; color: var(--aesop-ink); text-decoration: none; background: #fff; }
+.portal-ticket-list > a:hover { border-color: var(--aesop-teal); }
+.portal-ticket-list > a > span:first-child { display: grid; gap: 4px; min-width: 0; }
+.portal-ticket-list small { color: var(--aesop-muted); }
+.portal-ticket-status { display: inline-flex; align-items: center; width: fit-content; padding: 4px 9px; border-radius: 999px; font-size: .78rem; font-weight: 750; white-space: nowrap; border: 1px solid currentColor; }
+.portal-ticket-status.is-open { color: #08644e; background: #ecfdf5; }
+.portal-ticket-status.is-waiting { color: #8a4b08; background: #fff7ed; }
+.portal-ticket-status.is-resolved, .portal-ticket-status.is-closed { color: #53606d; background: #f2f4f6; }
+.portal-ticket-detail-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; margin-block: 16px; color: var(--aesop-muted); }
+.portal-ticket-thread { display: grid; gap: 14px; margin-block: 20px; }
+.portal-ticket-message { max-width: min(85%, 680px); padding: 14px 16px; border-radius: 12px; border: 1px solid rgba(0,107,111,.14); background: #f7fbfb; }
+.portal-ticket-message.is-student { margin-inline-start: auto; background: #eef8f7; }
+.portal-ticket-message.is-operations { margin-inline-end: auto; background: #fff; }
+.portal-ticket-message header { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; font-size: .82rem; }
+.portal-ticket-message time { color: var(--aesop-muted); }
+.portal-ticket-message p { margin: 9px 0 0; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
+.portal-ticket-internal { display: block; margin-block-start: 10px; padding-block-start: 8px; border-block-start: 1px dashed #ccd4d4; color: #6b4d10; }
+.portal-ticket-hint { margin: -4px 0 0; color: var(--aesop-muted); font-size: .85rem; }
+.portal-ticket-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.portal-ticket-actions button { background: #566565; }
+.portal-ticket-filter { max-width: 300px; margin-block: 16px; }
+@media (max-width: 620px) {
+  .portal-ticket-message { max-width: 94%; }
+  .portal-ticket-list > a { align-items: flex-start; flex-direction: column; }
+  .portal-ticket-form { padding: 14px; }
+}
+
 @media (max-width: 520px) {
   .portal-stats-kpi-grid {
     grid-template-columns: 1fr;

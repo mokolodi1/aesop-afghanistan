@@ -359,6 +359,55 @@ const portalMetricBuckets = pgTable(
   }),
 );
 
+const tickets = pgTable(
+  "tickets",
+  {
+    id: serial("id").primaryKey(),
+    creatorPersonId: integer("creator_person_id").notNull().references(() => people.id, { onDelete: "restrict" }),
+    subject: varchar("subject", { length: 200 }).notNull(),
+    category: varchar("category", { length: 64 }),
+    status: varchar("status", { length: 20 }).notNull().default("open"),
+    assignedToPersonId: integer("assigned_to_person_id").references(() => people.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    lastMessageAt: timestamp("last_message_at", { withTimezone: true }).notNull().defaultNow(),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+  },
+  (table) => ({
+    creatorUpdatedIdx: index("tickets_creator_updated_idx").on(table.creatorPersonId, table.updatedAt),
+    statusLastMessageIdx: index("tickets_status_last_message_idx").on(table.status, table.lastMessageAt),
+  }),
+);
+
+const ticketMessages = pgTable(
+  "ticket_messages",
+  {
+    id: serial("id").primaryKey(),
+    ticketId: integer("ticket_id").notNull().references(() => tickets.id, { onDelete: "cascade" }),
+    authorPersonId: integer("author_person_id").notNull().references(() => people.id, { onDelete: "restrict" }),
+    authorDisplayRole: varchar("author_display_role", { length: 32 }).notNull(),
+    body: text("body").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    ticketCreatedIdx: index("ticket_messages_ticket_created_idx").on(table.ticketId, table.createdAt, table.id),
+  }),
+);
+
+const portalTicketSessions = pgTable(
+  "portal_ticket_sessions",
+  {
+    tokenHash: varchar("token_hash", { length: 64 }).primaryKey(),
+    personId: integer("person_id").notNull().references(() => people.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  },
+  (table) => ({
+    personIdx: index("portal_ticket_sessions_person_idx").on(table.personId, table.expiresAt),
+    expiryIdx: index("portal_ticket_sessions_expiry_idx").on(table.expiresAt),
+  }),
+);
+
 module.exports = {
   syncRuns,
   people,
@@ -377,4 +426,7 @@ module.exports = {
   emailCampaigns,
   emailCampaignRecipients,
   portalMetricBuckets,
+  tickets,
+  ticketMessages,
+  portalTicketSessions,
 };

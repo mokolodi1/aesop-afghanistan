@@ -334,6 +334,23 @@ function sanitizePortalDingHelpNote(value) {
 const PORTAL_DING_HELP_NEED_DETAIL_MESSAGE =
   'Enter the phone number you need for Ding, or add a short note so we can help.';
 
+function sanitizeTicketText(value, maxLength) {
+  if (typeof value !== 'string') return '';
+  let out = '';
+  for (const ch of value.slice(0, maxLength + 1)) {
+    const code = ch.charCodeAt(0);
+    if (ch === '\n' || ch === '\t' || (code >= 32 && code !== 127)) out += ch;
+  }
+  return out.trim().slice(0, maxLength);
+}
+
+function sanitizeTicketSubject(value) { return sanitizeTicketText(value, 200); }
+function sanitizeTicketMessage(value) { return sanitizeTicketText(value, 5000); }
+function sanitizeTicketCategory(value) { return sanitizeTicketText(value, 64); }
+function isValidTicketStatus(value) {
+  return ['open', 'waiting', 'resolved', 'closed'].includes(value);
+}
+
 module.exports = {
   isValidEmail,
   sanitizeEmail,
@@ -356,4 +373,8 @@ module.exports = {
   sanitizePortalDingHelpPhone,
   sanitizePortalDingHelpNote,
   PORTAL_DING_HELP_NEED_DETAIL_MESSAGE,
+  sanitizeTicketSubject,
+  sanitizeTicketMessage,
+  sanitizeTicketCategory,
+  isValidTicketStatus,
 };

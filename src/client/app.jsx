@@ -91,6 +91,9 @@ function getPortalRouteSegment() {
   if (pathname === '/admin/campaigns') return 'admin-campaigns';
   if (pathname === '/admin/stats') return 'admin-stats';
   if (pathname === '/reviews') return 'reviews';
+  if (pathname === '/tickets' || pathname.startsWith('/tickets/')) return 'tickets';
+  if (pathname === '/operations/tickets' || pathname.startsWith('/operations/tickets/')) return 'operations-tickets';
+  if (pathname === '/faq' || pathname.startsWith('/faq/')) return 'faq';
   if (pathname === '/admin' || pathname.startsWith('/admin/')) return 'admin';
   return 'hub';
 }
@@ -116,8 +119,12 @@ function shouldMountPortalSpa() {
     p === '/admin/campaigns' ||
     p === '/admin/stats' ||
     p === '/reviews' ||
+    p === '/tickets' ||
+    p === '/operations/tickets' ||
     p.startsWith('/profile/') ||
     p.startsWith('/faq/') ||
+    p.startsWith('/tickets/') ||
+    p.startsWith('/operations/tickets/') ||
     p.startsWith('/admin/');
   if (!portalPath) return false;
   return isPortalHostname() || isPortalSpaDocument();
@@ -176,6 +183,7 @@ const PORTAL_SESSION_STORAGE_KEYS = [
   'studentPortalTeacherClasses',
   'studentPortalIsAdmin',
   'studentPortalIsReviewer',
+  'studentPortalIsOperationsTeam',
   'studentPortalIsApplied',
   'studentPortalIsApplicant',
   'studentPortalPeopleStatus',
@@ -500,6 +508,11 @@ function applyPortalSessionFromApi(data, options = {}) {
     sessionStorage.setItem('studentPortalIsReviewer', '1');
   } else {
     sessionStorage.removeItem('studentPortalIsReviewer');
+  }
+  if (data.isOperationsTeam === true) {
+    sessionStorage.setItem('studentPortalIsOperationsTeam', '1');
+  } else {
+    sessionStorage.removeItem('studentPortalIsOperationsTeam');
   }
   if (isApplicantFromApi) {
     sessionStorage.setItem('studentPortalIsApplicant', '1');
@@ -1755,6 +1768,9 @@ function PortalTeacherRoster({ rosterEnabled, isAdminView }) {
 }
 
 function clearPortalSession() {
+  if (typeof fetch !== 'undefined') {
+    fetch('/api/portal-tickets/logout', { method: 'POST', credentials: 'same-origin', keepalive: true }).catch(() => {});
+  }
   if (typeof sessionStorage === 'undefined') return;
   PORTAL_SESSION_STORAGE_KEYS.forEach((key) => sessionStorage.removeItem(key));
   sessionStorage.removeItem(PORTAL_IMPERSONATING_KEY);
@@ -2507,18 +2523,28 @@ function PortalSectionLinks({ current, isAdmin, isReviewer, showEditDingLink = t
   // Admins/reviewers use Review Applications instead of Edit Ding; applicants never manage Ding.
   const showEditDing = showEditDingLink && !resolvedReviewer && !isAdmin && !isApplicant;
   const showReviewsLink = resolvedReviewer || isAdmin;
+  const signedIn = isPortalSessionCompleteSync();
+  const isOperationsTeam = readSessionField('studentPortalIsOperationsTeam') === '1';
   // For applicants the only destination is "Profile", so drop the tab bar entirely and
   // leave just the "Welcome" heading. Everyone else (students, reviewers, admins) keeps
   // their nav so they never lose access to their tabs.
   const hasExtraLinks = showEditDing || showReviewsLink || isAdmin;
-  if (isApplicant && !hasExtraLinks) {
-    return null;
-  }
+  // Applicants still need the FAQ, even when no role-specific destination applies.
   return (
     <nav className="portal-section-links" aria-label={t('nav.portalNav')}>
       <a href={hubHref} className={current === 'hub' ? 'is-current' : undefined}>
         {t('nav.profile')}
       </a>
+      <span className="portal-section-links-sep" aria-hidden="true">·</span>
+      <a href="/faq" className={current === 'faq' ? 'is-current' : undefined}>{t('nav.faq')}</a>
+      {signedIn && !isApplicant ? (
+        <><span className="portal-section-links-sep" aria-hidden="true">·</span>
+        <a href="/tickets" className={current === 'tickets' ? 'is-current' : undefined}>{t('nav.tickets')}</a></>
+      ) : null}
+      {(isOperationsTeam || isAdmin) ? (
+        <><span className="portal-section-links-sep" aria-hidden="true">·</span>
+        <a href="/operations/tickets" className={current === 'operations-tickets' ? 'is-current' : undefined}>{t('nav.operationsTickets')}</a></>
+      ) : null}
       {showEditDing ? (
         <>
           <span className="portal-section-links-sep" aria-hidden="true">
@@ -3362,25 +3388,146 @@ function PortalHubPage() {
 
 function PortalFaqPage() {
   const { isAdmin } = usePortalClassGrade();
+  const { t } = usePortalI18n();
+  const items = [
+    ['faq.contactTitle', 'faq.contactBody'],
+    ['faq.loginTitle', 'faq.loginBody'],
+    ['faq.gradeTitle', 'faq.gradeBody'],
+  ];
 
   return (
     <PortalLayout>
       <div className="portal-card portal-content portal-faq-card">
         <PortalSectionLinks current="faq" isAdmin={isAdmin} />
         <p className="faq-kicker">AESOP Afghanistan</p>
-        <h2 className="faq-title">Frequently asked questions</h2>
-        <p className="faq-placeholder">
-          Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et
-          dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris.
-        </p>
-        <p className="faq-placeholder faq-placeholder-muted">
-          Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur.
-          Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est
-          laborum.
-        </p>
+        <h2 className="faq-title">{t('faq.title')}</h2>
+        <p className="portal-ticket-lead">{t('faq.lead')}</p>
+        <div className="portal-faq-list">
+          {items.map(([title, body]) => <details className="portal-faq-item" key={title}>
+            <summary>{t(title)}</summary><p>{t(body)}</p>
+          </details>)}
+        </div>
+        {isPortalSessionCompleteSync() ? <a className="portal-ticket-primary-link" href="/tickets">{t('faq.stillNeedHelp')}</a> : null}
       </div>
     </PortalLayout>
   );
+}
+
+function ticketIdFromPath(prefix) {
+  const rest = window.location.pathname.slice(prefix.length).replace(/^\/+/, '');
+  return rest ? decodeURIComponent(rest.split('/')[0]) : '';
+}
+
+async function ticketApi(path, body = {}) {
+  return portalApiPost(path, body);
+}
+
+function formatTicketDate(value, locale) {
+  const date = new Date(value);
+  if (!value || Number.isNaN(date.getTime())) return '—';
+  return new Intl.DateTimeFormat(locale === 'fa' ? 'fa-AF' : 'en', { dateStyle: 'medium', timeStyle: 'short' }).format(date);
+}
+
+function StudentTicketMessage({ message }) {
+  const { locale, t } = usePortalI18n();
+  const fromStudent = message.authorType === 'student' || message.authorLabel === 'You';
+  return <article className={`portal-ticket-message ${fromStudent ? 'is-student' : 'is-operations'}`}>
+    <header><strong>{fromStudent ? t('tickets.you') : t('tickets.operationsTeam')}</strong><time>{formatTicketDate(message.createdAt, locale)}</time></header>
+    <p dir={paragraphDirection(message.message)}>{message.message}</p>
+  </article>;
+}
+
+function OperationsTicketMessage({ message }) {
+  const { locale, t } = usePortalI18n();
+  const fromStudent = message.authorType === 'student';
+  return <article className={`portal-ticket-message ${fromStudent ? 'is-student' : 'is-operations'}`}>
+    <header><strong>{fromStudent ? t('tickets.student') : t('tickets.operationsTeam')}</strong><time>{formatTicketDate(message.createdAt, locale)}</time></header>
+    <p dir={paragraphDirection(message.message)}>{message.message}</p>
+    {!fromStudent && (message.createdByName || message.createdByAesopId) ? <small className="portal-ticket-internal">{t('tickets.sentInternallyBy', { name: message.createdByName || message.createdByAesopId })}</small> : null}
+  </article>;
+}
+
+function TicketStatus({ status }) {
+  const { t } = usePortalI18n();
+  const key = ['open', 'waiting', 'resolved', 'closed'].includes(status) ? status : 'open';
+  return <span className={`portal-ticket-status is-${key}`}>{t(`tickets.status.${key}`)}</span>;
+}
+
+function PortalTicketsPage() {
+  const { locale, t } = usePortalI18n();
+  const { isAdmin } = usePortalClassGrade();
+  const ticketId = ticketIdFromPath('/tickets');
+  const [tickets, setTickets] = useState([]);
+  const [ticket, setTicket] = useState(null);
+  const [status, setStatus] = useState('loading');
+  const [error, setError] = useState('');
+  const [subject, setSubject] = useState('');
+  const [category, setCategory] = useState('general');
+  const [message, setMessage] = useState('');
+  const [sending, setSending] = useState(false);
+  const load = useCallback(async () => {
+    setStatus('loading'); setError('');
+    try {
+      const data = await ticketApi(ticketId ? '/api/portal-tickets/detail' : '/api/portal-tickets/list', ticketId ? { ticketId } : {});
+      if (ticketId) setTicket(data.ticket || null); else setTickets(Array.isArray(data.tickets) ? data.tickets : []);
+      setStatus('ready');
+    } catch (err) { setError(err.message); setStatus('error'); }
+  }, [ticketId]);
+  useEffect(() => { if (isPortalSessionCompleteSync()) load(); else setStatus('signed-out'); }, [load]);
+  const submit = async (event) => {
+    event.preventDefault(); if (!message.trim() || (!ticketId && !subject.trim())) return;
+    setSending(true); setError('');
+    try {
+      const data = await ticketApi(ticketId ? '/api/portal-tickets/reply' : '/api/portal-tickets/create', ticketId ? { ticketId, message: message.trim() } : { subject: subject.trim(), category, message: message.trim() });
+      setMessage('');
+      if (!ticketId && data.ticket?.id) window.location.assign(`/tickets/${encodeURIComponent(data.ticket.id)}`); else await load();
+    } catch (err) { setError(err.message); } finally { setSending(false); }
+  };
+  return <PortalLayout><div className="portal-card portal-content">
+    <PortalSectionLinks current="tickets" isAdmin={isAdmin} />
+    <h2 className="portal-page-title">{ticketId ? (ticket?.subject || t('tickets.request')) : t('tickets.title')}</h2>
+    <p className="portal-ticket-lead">{t('tickets.privacy')}</p>
+    {error ? <div className="portal-session-banner" role="alert">{error}</div> : null}
+    {status === 'signed-out' ? <PortalSignInOnlyContent /> : status === 'loading' ? <p>{t('tickets.loading')}</p> : ticketId ? <>
+      {ticket ? <><div className="portal-ticket-detail-meta"><TicketStatus status={ticket.status} /><span>{t('tickets.requestNumber', { id: ticket.id })}</span></div>
+      <div className="portal-ticket-thread">{(ticket.messages || []).map((item) => <StudentTicketMessage message={item} key={item.id} />)}</div>
+      <form className="portal-ticket-form" onSubmit={submit}><label>{t('tickets.followUp')}<textarea value={message} onChange={(e) => setMessage(e.target.value)} required rows="5" maxLength="5000" /></label><button disabled={sending}>{sending ? t('tickets.sending') : t('tickets.send')}</button></form></> : <p>{t('tickets.notFound')}</p>}
+    </> : <>
+      <form className="portal-ticket-form portal-ticket-new" onSubmit={submit}>
+        <h3>{t('tickets.new')}</h3><label>{t('tickets.category')}<select value={category} onChange={(e) => setCategory(e.target.value)}><option value="general">{t('tickets.category.general')}</option><option value="technical">{t('tickets.category.technical')}</option><option value="academic">{t('tickets.category.academic')}</option></select></label>
+        <label>{t('tickets.subject')}<input value={subject} onChange={(e) => setSubject(e.target.value)} required maxLength="160" /></label><label>{t('tickets.message')}<textarea value={message} onChange={(e) => setMessage(e.target.value)} required rows="5" maxLength="5000" /></label><button disabled={sending}>{sending ? t('tickets.sending') : t('tickets.create')}</button>
+      </form>
+      <h3>{t('tickets.yourRequests')}</h3><div className="portal-ticket-list">{tickets.length ? tickets.map((item) => <a href={`/tickets/${encodeURIComponent(item.id)}`} key={item.id}><span><strong>{item.subject}</strong><small>{formatTicketDate(item.updatedAt, locale)}</small></span><TicketStatus status={item.status} /></a>) : <p>{t('tickets.empty')}</p>}</div>
+    </>}
+  </div></PortalLayout>;
+}
+
+function PortalOperationsTicketsPage() {
+  const { locale, t } = usePortalI18n();
+  const { isAdmin } = usePortalClassGrade();
+  const allowed = isAdmin || readSessionField('studentPortalIsOperationsTeam') === '1';
+  const ticketId = ticketIdFromPath('/operations/tickets');
+  const [tickets, setTickets] = useState([]); const [ticket, setTicket] = useState(null); const [filter, setFilter] = useState('open');
+  const [message, setMessage] = useState(''); const [error, setError] = useState(''); const [loading, setLoading] = useState(true);
+  const load = useCallback(async () => { if (!allowed) return; setLoading(true); try { const data = await ticketApi(ticketId ? '/api/operations/tickets/detail' : '/api/operations/tickets/list', ticketId ? { ticketId } : { status: filter }); if (ticketId) setTicket(data.ticket); else setTickets(data.tickets || []); } catch (err) { setError(err.message); } finally { setLoading(false); } }, [allowed, ticketId, filter]);
+  useEffect(() => { load(); }, [load]);
+  const reply = async (e) => { e.preventDefault(); try { await ticketApi('/api/operations/tickets/reply', { ticketId, message: message.trim() }); setMessage(''); await load(); } catch (err) { setError(err.message); } };
+  const changeStatus = async (nextStatus) => { try { await ticketApi('/api/operations/tickets/status', { ticketId, status: nextStatus }); await load(); } catch (err) { setError(err.message); } };
+  return <PortalLayout><div className="portal-card portal-content"><PortalSectionLinks current="operations-tickets" isAdmin={isAdmin} />
+    <h2 className="portal-page-title">{t('tickets.operationsQueue')}</h2>
+    {!allowed ? <div className="portal-session-banner" role="alert">{t('tickets.noAccess')}</div> : <>
+      {error ? <div className="portal-session-banner" role="alert">{error}</div> : null}
+      {loading ? <p>{t('tickets.loading')}</p> : ticketId ? ticket ? <>
+        <div className="portal-ticket-detail-meta"><TicketStatus status={ticket.status} /><strong>{ticket.subject}</strong><span className="portal-ltr">{ticket.studentName || ticket.studentAesopId}</span></div>
+        <div className="portal-ticket-thread">{(ticket.messages || []).map((item) => <OperationsTicketMessage message={item} key={item.id} />)}</div>
+        <form className="portal-ticket-form" onSubmit={reply}><label>{t('tickets.publicReply')}<textarea value={message} onChange={(e) => setMessage(e.target.value)} required rows="5" /></label><p className="portal-ticket-hint">{t('tickets.publicReplyHint')}</p><button>{t('tickets.sendAsOperations')}</button></form>
+        <div className="portal-ticket-actions"><button onClick={() => changeStatus('open')}>{t('tickets.status.open')}</button><button onClick={() => changeStatus('waiting')}>{t('tickets.status.waiting')}</button><button onClick={() => changeStatus('resolved')}>{t('tickets.status.resolved')}</button><button onClick={() => changeStatus('closed')}>{t('tickets.status.closed')}</button></div>
+      </> : <p>{t('tickets.notFound')}</p> : <>
+        <label className="portal-ticket-filter">{t('tickets.filter')}<select value={filter} onChange={(e) => setFilter(e.target.value)}><option value="open">{t('tickets.status.open')}</option><option value="waiting">{t('tickets.status.waiting')}</option><option value="resolved">{t('tickets.status.resolved')}</option><option value="closed">{t('tickets.status.closed')}</option><option value="all">{t('tickets.all')}</option></select></label>
+        <div className="portal-ticket-list">{tickets.map((item) => <a href={`/operations/tickets/${encodeURIComponent(item.id)}`} key={item.id}><span><strong>{item.subject}</strong><small>{item.studentName || item.studentAesopId} · {formatTicketDate(item.updatedAt, locale)}</small></span><TicketStatus status={item.status} /></a>)}</div>
+      </>}
+    </>}
+  </div></PortalLayout>;
 }
 
 function PortalAdminViewAs() {
@@ -7959,13 +8106,6 @@ function PortalShellApp() {
     return () => document.body.classList.remove('portal-body');
   }, []);
 
-  useEffect(() => {
-    const { pathname } = window.location;
-    if (pathname === '/faq' || pathname.startsWith('/faq/')) {
-      window.location.replace(portalHubHref());
-    }
-  }, []);
-
   const segment = getPortalRouteSegment();
   const signedIn = isPortalSessionCompleteSync();
 
@@ -8011,6 +8151,12 @@ function PortalShellApp() {
     page = <PortalAdminPage />;
   } else if (segment === 'reviews') {
     page = <PortalReviewApplicationsPage />;
+  } else if (segment === 'operations-tickets') {
+    page = <PortalOperationsTicketsPage />;
+  } else if (segment === 'tickets') {
+    page = <PortalTicketsPage />;
+  } else if (segment === 'faq') {
+    page = <PortalFaqPage />;
   } else if (segment === 'profile') {
     page = signedIn ? <PortalProfilePage /> : <PortalHubPage />;
   } else {

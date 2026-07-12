@@ -88,7 +88,14 @@ const {
   sanitizePortalDingHelpPhone,
   sanitizePortalDingHelpNote,
   PORTAL_DING_HELP_NEED_DETAIL_MESSAGE,
+  sanitizeTicketSubject,
+  sanitizeTicketMessage,
+  sanitizeTicketCategory,
+  isValidTicketStatus,
 } = require('./utils/validation');
+const ticketService = require('./services/tickets');
+const { createTicketSession, setTicketSessionCookie, getTicketSessionPerson, revokeTicketSession } = require('./services/ticketSessions');
+const { sendStudentTicketUpdate, notifyOperationsOfStudentMessage } = require('./services/ticketEmail');
 const { createRateLimiter } = require('./middleware/rateLimiter');
 const { getClientIp } = require('./utils/clientIp');
 const { securityHeaders } = require('./middleware/security');
@@ -317,6 +324,19 @@ async function requirePortalAdmin(res, body) {
   return profile;
 }
 
+async function requireOperationsTeam(req, res) {
+  const person = await getTicketSessionPerson(req);
+  if (!person) {
+    res.status(401).json({ error: 'Your secure ticket session expired. Please sign in again.' });
+    return null;
+  }
+  if (!ticketService.isOperationsTeam(person, isPortalAdmin({ email: person.email, portalRole: person.portal_role }))) {
+    res.status(403).json({ error: 'Operations Team access required.' });
+    return null;
+  }
+  return { ticketPerson: person };
+}
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -374,6 +394,10 @@ app.use((req, res, next) => {
   if (
     req.path === '/profile' ||
     req.path === '/faq' ||
+    req.path === '/tickets' ||
+    req.path.startsWith('/tickets/') ||
+    req.path === '/operations/tickets' ||
+    req.path.startsWith('/operations/tickets/') ||
     req.path === '/admin' ||
     req.path === '/admin/emails' ||
     req.path === '/admin/campaigns' ||
@@ -559,6 +583,15 @@ app.post('/api/verify-magic-link', async (req, res) => {
         peopleStatus: profile?.peopleStatus,
       });
       const isAdmin = isPortalAdmin({ email: emailFromSheet, portalRole: profile?.portalRole });
+      let isOperationsTeam = false;
+      if (isDatabaseEnabled() && profile) {
+        try {
+          const ticketPerson = await ticketService.getPersonForProfile(profile);
+          isOperationsTeam = ticketService.isOperationsTeam(ticketPerson, isAdmin);
+        } catch (ticketRoleError) {
+          console.warn('Operations Team role lookup failed:', formatErrorForLog(ticketRoleError));
+        }
+      }
       const isReviewer = await resolvePortalReviewerAccess(profile);
       const applicationStatus = await resolveApplicationStatus(studentUserId, isApplicant);
 
@@ -569,6 +602,14 @@ app.post('/api/verify-magic-link', async (req, res) => {
       }
 
       recordLoginSuccess();
+      if (isDatabaseEnabled() && profile) {
+        try {
+          const ticketPerson = await ticketService.getPersonForProfile(profile);
+          if (ticketPerson) setTicketSessionCookie(res, await createTicketSession(ticketPerson.id));
+        } catch (ticketSessionError) {
+          console.warn('Ticket session creation failed:', formatErrorForLog(ticketSessionError));
+        }
+      }
       res.json({
         success: true,
         email: emailFromSheet,
@@ -582,6 +623,7 @@ app.post('/api/verify-magic-link', async (req, res) => {
         isTeacher,
         teacherClasses,
         isAdmin,
+        isOperationsTeam,
         isReviewer,
         isApplied,
         isApplicant,
@@ -683,6 +725,12 @@ const portalAdminRateLimiter = createRateLimiter({
   windowMs: RATE_LIMIT_WINDOW_15M_MS,
   max: 200,
   resolveKeySuffix: portalSubjectKey,
+});
+const portalTicketsRateLimiter = createRateLimiter({
+  name: 'portal-tickets',
+  windowMs: RATE_LIMIT_WINDOW_15M_MS,
+  max: 120,
+  resolveKeySuffix: (req) => `ip:${getClientIp(req)}`,
 });
 
 const portalVoiceMemoRateLimiter = createRateLimiter({
@@ -1091,6 +1139,149 @@ app.post('/api/portal-teacher-roster', portalTeacherRosterRateLimiter, async (re
   } catch (error) {
     console.error('Error loading teacher roster:', formatErrorForLog(error));
     res.status(500).json({ error: 'Could not load your class roster. Please try again later.' });
+  }
+});
+
+function parseTicketId(value) {
+  if (!/^\d+$/.test(String(value || ''))) return null;
+  const id = Number.parseInt(String(value), 10);
+  return Number.isSafeInteger(id) && id > 0 ? id : null;
+}
+
+async function requireTicketPerson(req, res) {
+  const person = await getTicketSessionPerson(req);
+  if (!person) {
+    res.status(401).json({ error: 'Your secure ticket session expired. Please sign in again.' });
+    return null;
+  }
+  return { person };
+}
+
+app.post('/api/portal-tickets/logout', async (req, res) => {
+  try {
+    await revokeTicketSession(req, res);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error revoking ticket session:', formatErrorForLog(error));
+    res.status(500).json({ error: 'Could not finish signing out.' });
+  }
+});
+
+app.post('/api/portal-tickets/list', portalTicketsRateLimiter, async (req, res) => {
+  try {
+    const auth = await requireTicketPerson(req, res); if (!auth) return;
+    res.json({ success: true, tickets: await ticketService.listStudentTickets(auth.person) });
+  } catch (error) {
+    console.error('Error listing student tickets:', formatErrorForLog(error));
+    res.status(500).json({ error: 'Could not load your support requests.' });
+  }
+});
+
+app.post('/api/portal-tickets/create', portalTicketsRateLimiter, async (req, res) => {
+  try {
+    const auth = await requireTicketPerson(req, res); if (!auth) return;
+    const subject = sanitizeTicketSubject(req.body.subject);
+    const message = sanitizeTicketMessage(req.body.message);
+    const category = sanitizeTicketCategory(req.body.category).toLowerCase();
+    if (!subject || !message) return res.status(400).json({ error: 'Subject and message are required.' });
+    if (!['general', 'technical', 'academic'].includes(category)) return res.status(400).json({ error: 'Choose a valid ticket category.' });
+    const ticket = await ticketService.createTicket(auth.person, { subject, category, message });
+    notifyOperationsOfStudentMessage({ ticketId: ticket.id, subject, studentName: auth.person.name, isNew: true })
+      .catch((error) => console.warn('Ticket Operations notification failed:', formatErrorForLog(error)));
+    res.status(201).json({ success: true, ticket });
+  } catch (error) {
+    console.error('Error creating ticket:', formatErrorForLog(error));
+    res.status(500).json({ error: 'Could not create your support request.' });
+  }
+});
+
+app.post('/api/portal-tickets/detail', portalTicketsRateLimiter, async (req, res) => {
+  try {
+    const auth = await requireTicketPerson(req, res); if (!auth) return;
+    const ticketId = parseTicketId(req.body.ticketId);
+    if (!ticketId) return res.status(400).json({ error: 'Invalid ticket.' });
+    const ticket = await ticketService.getTicket(ticketId, auth.person, false);
+    if (!ticket) return res.status(404).json({ error: 'Ticket not found.' });
+    res.json({ success: true, ticket });
+  } catch (error) {
+    console.error('Error loading ticket:', formatErrorForLog(error));
+    res.status(500).json({ error: 'Could not load this support request.' });
+  }
+});
+
+app.post('/api/portal-tickets/reply', portalTicketsRateLimiter, async (req, res) => {
+  try {
+    const auth = await requireTicketPerson(req, res); if (!auth) return;
+    const ticketId = parseTicketId(req.body.ticketId);
+    const message = sanitizeTicketMessage(req.body.message);
+    if (!ticketId || !message) return res.status(400).json({ error: 'Ticket and message are required.' });
+    const ticket = await ticketService.addReply(ticketId, auth.person, message, false);
+    if (!ticket) return res.status(404).json({ error: 'Ticket not found.' });
+    notifyOperationsOfStudentMessage({ ticketId, subject: ticket.subject, studentName: auth.person.name, isNew: false })
+      .catch((error) => console.warn('Ticket Operations notification failed:', formatErrorForLog(error)));
+    res.json({ success: true, ticket });
+  } catch (error) {
+    console.error('Error replying to ticket:', formatErrorForLog(error));
+    res.status(500).json({ error: 'Could not send your message.' });
+  }
+});
+
+app.post('/api/operations/tickets/list', portalTicketsRateLimiter, async (req, res) => {
+  try {
+    const profile = await requireOperationsTeam(req, res); if (!profile) return;
+    const requested = String(req.body.status || 'open').toLowerCase();
+    const status = requested === 'all' ? '' : requested;
+    if (status && !isValidTicketStatus(status)) return res.status(400).json({ error: 'Invalid status.' });
+    res.json({ success: true, tickets: await ticketService.listOperationsTickets(status) });
+  } catch (error) {
+    console.error('Error listing Operations tickets:', formatErrorForLog(error));
+    res.status(500).json({ error: 'Could not load the Operations Team queue.' });
+  }
+});
+
+app.post('/api/operations/tickets/detail', portalTicketsRateLimiter, async (req, res) => {
+  try {
+    const profile = await requireOperationsTeam(req, res); if (!profile) return;
+    const ticketId = parseTicketId(req.body.ticketId);
+    if (!ticketId) return res.status(400).json({ error: 'Invalid ticket.' });
+    const ticket = await ticketService.getTicket(ticketId, profile.ticketPerson, true);
+    if (!ticket) return res.status(404).json({ error: 'Ticket not found.' });
+    res.json({ success: true, ticket });
+  } catch (error) {
+    console.error('Error loading Operations ticket:', formatErrorForLog(error));
+    res.status(500).json({ error: 'Could not load this ticket.' });
+  }
+});
+
+app.post('/api/operations/tickets/reply', portalTicketsRateLimiter, async (req, res) => {
+  try {
+    const profile = await requireOperationsTeam(req, res); if (!profile) return;
+    const ticketId = parseTicketId(req.body.ticketId);
+    const message = sanitizeTicketMessage(req.body.message);
+    if (!ticketId || !message) return res.status(400).json({ error: 'Ticket and message are required.' });
+    const ticket = await ticketService.addReply(ticketId, profile.ticketPerson, message, true);
+    if (!ticket) return res.status(404).json({ error: 'Ticket not found.' });
+    sendStudentTicketUpdate({ to: ticket.studentEmail, name: ticket.studentName, ticketId, subject: ticket.subject })
+      .catch((error) => console.warn('Ticket student notification failed:', formatErrorForLog(error)));
+    res.json({ success: true, ticket });
+  } catch (error) {
+    console.error('Error replying as Operations Team:', formatErrorForLog(error));
+    res.status(500).json({ error: 'Could not send the Operations Team reply.' });
+  }
+});
+
+app.post('/api/operations/tickets/status', portalTicketsRateLimiter, async (req, res) => {
+  try {
+    const profile = await requireOperationsTeam(req, res); if (!profile) return;
+    const ticketId = parseTicketId(req.body.ticketId);
+    const status = String(req.body.status || '').toLowerCase();
+    if (!ticketId || !isValidTicketStatus(status)) return res.status(400).json({ error: 'Invalid ticket or status.' });
+    const ticket = await ticketService.updateStatus(ticketId, status, profile.ticketPerson);
+    if (!ticket) return res.status(404).json({ error: 'Ticket not found.' });
+    res.json({ success: true, ticket });
+  } catch (error) {
+    console.error('Error updating ticket status:', formatErrorForLog(error));
+    res.status(500).json({ error: 'Could not update this ticket.' });
   }
 });
 
