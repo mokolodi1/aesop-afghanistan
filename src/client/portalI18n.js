@@ -145,7 +145,8 @@ const TRANSLATIONS = {
     'voiceMemo.audioUnavailable':
       'Your submission is recorded, but the audio file is not available to play yet. Please check again later.',
     'voiceMemo.audioPlayError':
-      'Could not play your voice memo. Please reload this page and try again, or contact support.',
+      'Could not play your voice memo. Please reload this page and try again.',
+    'voiceMemo.audioTryAgainLater': 'Please try again later.',
     'voiceMemo.instructionsParagraph':
       'Submit your Round 2 voice memo using the instructions you received by email. Once it is received, this page will show Submitted and you can listen to your recording here. Your voice note can take up to 3 days to appear on the AESOP Portal after you send it. You may submit your voice notes as many times as you\'d like, but only ONE voice notes will be saved.',
     'voiceMemo.loadError': 'Could not load voice memo status.',
@@ -456,7 +457,8 @@ const TRANSLATIONS = {
     'voiceMemo.audioUnavailable':
       'ارسال شما ثبت شده، اما فایل صوتی هنوز برای پخش در دسترس نیست. لطفاً بعداً دوباره بررسی کنید.',
     'voiceMemo.audioPlayError':
-      'پخش یادداشت صوتی ممکن نشد. لطفاً این صفحه را دوباره بارگذاری کنید و دوباره تلاش کنید، یا با پشتیبانی تماس بگیرید.',
+      'پخش یادداشت صوتی ممکن نشد. لطفاً این صفحه را دوباره بارگذاری کنید و دوباره تلاش کنید.',
+    'voiceMemo.audioTryAgainLater': 'لطفاً بعداً دوباره تلاش کنید.',
     'voiceMemo.instructionsParagraph':
       'یادداشت صوتی دور دوم را طبق دستورالعمل ایمیل‌شده ارسال کنید. پس از دریافت، این صفحه «ثبت شده» را نشان می‌دهد و می‌توانید ضبط خود را بشنوید. یادداشت صوتی شما ممکن است تا ۳ روز پس از ارسال در پورتال AESOP نمایان شود. می‌توانید هر چند بار که بخواهید یادداشت صوتی بفرستید، اما فقط یک یادداشت صوتی ذخیره می‌شود.',
     'voiceMemo.loadError': 'بارگذاری وضعیت یادداشت صوتی ممکن نشد.',

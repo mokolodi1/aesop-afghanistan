@@ -73,6 +73,7 @@ const {
   verifyVoiceStreamToken,
   verifyReviewVoiceStreamToken,
 } = require('./services/portalVoiceMemo');
+const { mapVoiceMemoStreamError } = require('./services/googleDrive');
 const { getPortalCalendarForApplicant } = require('./services/portalCalendar');
 const {
   sanitizeEmail,
@@ -1588,8 +1589,7 @@ app.get('/api/portal-reviews/voice-memo/stream', portalVoiceMemoStreamRateLimite
     writeVoiceMemoStream(res, streamResult);
   } catch (error) {
     console.error('Error streaming review voice memo:', formatErrorForLog(error));
-    const status = error.statusCode || 500;
-    res.status(status).json({ error: error.message || 'Could not stream voice memo.' });
+    respondVoiceMemoStreamError(res, error);
   }
 });
 
@@ -1631,6 +1631,16 @@ app.post('/api/portal-reviews/save', portalReviewsRateLimiter, async (req, res) 
   }
 });
 
+function respondVoiceMemoStreamError(res, error) {
+  const mapped = mapVoiceMemoStreamError(error);
+  const status = mapped.statusCode || 503;
+  if (!res.headersSent) {
+    res.status(status).json({ error: mapped.message || 'Could not play voice memo. Please reload this page and try again.' });
+    return;
+  }
+  res.end();
+}
+
 function writeVoiceMemoStream(res, streamResult) {
   const { stream, mimeType, fileName, size, status, contentRange, contentLength } = streamResult;
 
@@ -1650,11 +1660,7 @@ function writeVoiceMemoStream(res, streamResult) {
 
   stream.on('error', (streamError) => {
     console.error('Error streaming portal voice memo:', formatErrorForLog(streamError));
-    if (!res.headersSent) {
-      res.status(500).json({ error: 'Could not stream voice memo.' });
-    } else {
-      res.end();
-    }
+    respondVoiceMemoStreamError(res, streamError);
   });
   stream.pipe(res);
 }
@@ -1683,8 +1689,7 @@ app.get('/api/portal-voice-memo/stream', portalVoiceMemoStreamRateLimiter, async
     await pipePortalVoiceMemoStreamByToken(req, res, token);
   } catch (error) {
     console.error('Error streaming portal voice memo:', formatErrorForLog(error));
-    const status = error.statusCode || 500;
-    res.status(status).json({ error: error.message || 'Could not stream voice memo.' });
+    respondVoiceMemoStreamError(res, error);
   }
 });
 
@@ -1705,8 +1710,7 @@ app.post('/api/portal-voice-memo/stream', portalVoiceMemoStreamRateLimiter, asyn
     await pipePortalVoiceMemoStream(req, res, userId, emailSan);
   } catch (error) {
     console.error('Error streaming portal voice memo:', formatErrorForLog(error));
-    const status = error.statusCode || 500;
-    res.status(status).json({ error: error.message || 'Could not stream voice memo.' });
+    respondVoiceMemoStreamError(res, error);
   }
 });
 

@@ -6,12 +6,14 @@
  */
 require("../config/secrets");
 const { runMigrations } = require("../db/migrate");
+const { setDriveScriptRateLimit } = require("../services/googleDrive");
 const { mirrorApplicantsAndDriveFromSheets } = require("../services/peopleMirror");
 const { formatErrorForLog } = require("../utils/errorLogging");
 const { isDatabaseEnabled, closeDatabase } = require("../db/index");
 const { getServiceAccountCredentials } = require("../services/googleAuth");
 
 async function main() {
+  setDriveScriptRateLimit(true);
   if (!isDatabaseEnabled()) {
     throw new Error("DATABASE_URL is not set.");
   }

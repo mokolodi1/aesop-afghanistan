@@ -16,6 +16,100 @@ const DRIVE_RETRY_BACKOFF_BASE_MS = 1000;
 const DRIVE_RETRY_BACKOFF_CAP_MS = 60 * 1000;
 const DRIVE_RETRY_AFTER_CAP_MS = 15 * 60 * 1000;
 
+/** User-facing copy when Drive throttles on-demand portal streaming. */
+const DRIVE_TRY_AGAIN_LATER_MESSAGE = "Please try again later.";
+
+/**
+ * Map a Drive streaming failure to a safe portal error (no internal details).
+ * @param {unknown} error
+ * @returns {Error & { statusCode?: number, code?: string }}
+ */
+function mapVoiceMemoStreamError(error) {
+  if (isDriveThrottleError(error)) {
+    const mapped = new Error(DRIVE_TRY_AGAIN_LATER_MESSAGE);
+    mapped.statusCode = 503;
+    mapped.code = "DRIVE_THROTTLED";
+    return mapped;
+  }
+  if (error && typeof error === "object" && Number.isFinite(error.statusCode)) {
+    const statusCode = Number(error.statusCode);
+    if (statusCode === 403 || statusCode === 404) {
+      return /** @type {Error & { statusCode?: number }} */ (error);
+    }
+  }
+  const mapped = new Error("Could not play voice memo. Please reload this page and try again.");
+  mapped.statusCode = 503;
+  return mapped;
+}
+
+/** Stay under 50 Drive requests/min while sync scripts run. */
+const DRIVE_SCRIPT_MAX_REQUESTS_PER_MINUTE = 49;
+const DRIVE_SCRIPT_RATE_WINDOW_MS = 60 * 1000;
+/** Google allows up to 100 sub-requests per HTTP batch; keep chunks modest. */
+const DRIVE_BATCH_MAX_SUBREQUESTS = 25;
+
+/** @type {number[]} */
+let driveScriptRequestTimestamps = [];
+let driveScriptRateLimitEnabled = false;
+
+/**
+ * Enable proactive Drive throttling for cron scripts and other batch runners.
+ * Portal on-demand paths leave this off.
+ * @param {boolean} enabled
+ */
+function setDriveScriptRateLimit(enabled) {
+  driveScriptRateLimitEnabled = !!enabled;
+  if (!enabled) {
+    driveScriptRequestTimestamps = [];
+  }
+}
+
+/** @returns {boolean} */
+function isDriveScriptRateLimitEnabled() {
+  return driveScriptRateLimitEnabled;
+}
+
+/**
+ * Long-running syncs pass `deadlineAt`; treat that as script mode too.
+ * @param {number|undefined|null} deadlineAt
+ */
+function maybeEnableDriveScriptRateLimit(deadlineAt) {
+  if (Number.isFinite(deadlineAt)) {
+    driveScriptRateLimitEnabled = true;
+  }
+}
+
+/**
+ * Wait until the rolling minute window has room for `count` more Drive calls.
+ * @param {number} [count]
+ */
+async function acquireDriveRequestSlots(count = 1) {
+  if (!driveScriptRateLimitEnabled || count <= 0) {
+    return;
+  }
+  const want = Math.max(1, Math.floor(count));
+  for (;;) {
+    const now = Date.now();
+    driveScriptRequestTimestamps = driveScriptRequestTimestamps.filter(
+      (timestamp) => now - timestamp < DRIVE_SCRIPT_RATE_WINDOW_MS,
+    );
+    const available = DRIVE_SCRIPT_MAX_REQUESTS_PER_MINUTE - driveScriptRequestTimestamps.length;
+    if (available >= want) {
+      const stamp = Date.now();
+      for (let i = 0; i < want; i += 1) {
+        driveScriptRequestTimestamps.push(stamp);
+      }
+      return;
+    }
+    const oldest = driveScriptRequestTimestamps[0];
+    const waitMs = Math.max(DRIVE_SCRIPT_RATE_WINDOW_MS - (now - oldest) + 50, 250);
+    console.warn(
+      `[drive] pacing script traffic (${driveScriptRequestTimestamps.length}/${DRIVE_SCRIPT_MAX_REQUESTS_PER_MINUTE} req/min); waiting ${Math.ceil(waitMs / 1000)}s`,
+    );
+    await sleep(waitMs);
+  }
+}
+
 function sleep(ms) {
   return new Promise((resolve) => {
     setTimeout(resolve, ms);
@@ -33,13 +127,12 @@ function driveErrorStatus(error) {
 
 /**
  * Google signals throttling as HTTP 429, or as HTTP 403 with a rate-limit reason.
- * Transient 5xx and connection resets are retried on the same schedule.
  * @param {unknown} error
  * @returns {boolean}
  */
-function isRetryableDriveError(error) {
+function isDriveThrottleError(error) {
   const status = driveErrorStatus(error);
-  if (status === 429 || status === 500 || status === 502 || status === 503) {
+  if (status === 429) {
     return true;
   }
   if (status === 403) {
@@ -47,6 +140,22 @@ function isRetryableDriveError(error) {
     return (Array.isArray(reasons) ? reasons : []).some((entry) =>
       String(entry?.reason || "").toLowerCase().includes("ratelimit"),
     );
+  }
+  return false;
+}
+
+/**
+ * Transient 5xx and connection resets are retried on the same schedule.
+ * @param {unknown} error
+ * @returns {boolean}
+ */
+function isRetryableDriveError(error) {
+  if (isDriveThrottleError(error)) {
+    return true;
+  }
+  const status = driveErrorStatus(error);
+  if (status === 500 || status === 502 || status === 503) {
+    return true;
   }
   const code = String(error?.code || "").toUpperCase();
   return ["ECONNRESET", "ETIMEDOUT", "ECONNABORTED", "EAI_AGAIN", "EPIPE"].includes(code);
@@ -111,6 +220,146 @@ async function withDriveRetry(label, fn, options = {}) {
       await sleep(waitMs);
     }
   }
+}
+
+/**
+ * Rate-limited (in script mode) wrapper around {@link withDriveRetry}.
+ * @template T
+ * @param {string} label
+ * @param {() => Promise<T>} fn
+ * @param {{ deadlineAt?: number, requestSlots?: number }} [options]
+ * @returns {Promise<T>}
+ */
+async function driveApiCall(label, fn, options = {}) {
+  maybeEnableDriveScriptRateLimit(options.deadlineAt);
+  const requestSlots = options.requestSlots ?? 1;
+  return withDriveRetry(
+    label,
+    async () => {
+      await acquireDriveRequestSlots(requestSlots);
+      return fn();
+    },
+    options,
+  );
+}
+
+/**
+ * @param {string} responseText
+ * @param {string} responseContentType
+ * @returns {string|null}
+ */
+function parseMultipartBoundary(responseContentType) {
+  const match = String(responseContentType || "").match(/boundary=([^;\s]+)/i);
+  return match ? match[1].replace(/^"|"$/g, "") : null;
+}
+
+/**
+ * @param {string} responseText
+ * @param {string} boundary
+ * @returns {Array<{ status: number, body: string }>}
+ */
+function parseMultipartMixedResponse(responseText, boundary) {
+  const marker = `--${boundary}`;
+  const parts = String(responseText || "").split(marker);
+  /** @type {Array<{ status: number, body: string }>} */
+  const parsed = [];
+  for (const part of parts) {
+    const trimmed = part.trim();
+    if (!trimmed || trimmed === "--") {
+      continue;
+    }
+    const statusMatch = part.match(/HTTP\/\d(?:\.\d)?\s+(\d{3})/);
+    const status = statusMatch ? Number(statusMatch[1]) : 0;
+    const bodyIndex = part.search(/\r?\n\r?\n/);
+    const body = bodyIndex >= 0 ? part.slice(bodyIndex).replace(/^\s+/, "") : "";
+    parsed.push({ status, body: body.trim() });
+  }
+  return parsed;
+}
+
+/**
+ * Batch Drive files.get metadata calls via Google's multipart batch endpoint.
+ * @param {import('google-auth-library').OAuth2Client} auth
+ * @param {string[]} fileIds
+ * @param {string} fields
+ * @param {{ deadlineAt?: number }} [retryOptions]
+ * @returns {Promise<Map<string, import('googleapis').drive_v3.Schema$File>>}
+ */
+async function batchGetDriveFileMetadata(auth, fileIds, fields, retryOptions = {}) {
+  const uniqueIds = [...new Set(fileIds.map((id) => String(id || "").trim()).filter(Boolean))];
+  /** @type {Map<string, import('googleapis').drive_v3.Schema$File>} */
+  const results = new Map();
+  if (uniqueIds.length === 0) {
+    return results;
+  }
+
+  const encodedFields = encodeURIComponent(fields);
+  for (let offset = 0; offset < uniqueIds.length; offset += DRIVE_BATCH_MAX_SUBREQUESTS) {
+    const chunk = uniqueIds.slice(offset, offset + DRIVE_BATCH_MAX_SUBREQUESTS);
+    const boundary = `batch_${Date.now().toString(36)}_${offset}`;
+    let body = "";
+    for (let index = 0; index < chunk.length; index += 1) {
+      const fileId = chunk[index];
+      body += `--${boundary}\r\n`;
+      body += "Content-Type: application/http\r\n";
+      body += `Content-ID: ${index + 1}\r\n\r\n`;
+      body += `GET /drive/v3/files/${encodeURIComponent(fileId)}?fields=${encodedFields}&supportsAllDrives=true\r\n\r\n`;
+    }
+    body += `--${boundary}--\r\n`;
+
+    const chunkResults = await driveApiCall(
+      `files.get(batch metadata x${chunk.length})`,
+      async () => {
+        const tokenResponse = await auth.getAccessToken();
+        const token = tokenResponse?.token || tokenResponse;
+        if (!token) {
+          throw new Error("Drive batch request requires an access token.");
+        }
+        const response = await fetch("https://www.googleapis.com/batch/drive/v3", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": `multipart/mixed; boundary=${boundary}`,
+          },
+          body,
+        });
+        const responseText = await response.text();
+        if (!response.ok && response.status !== 200) {
+          const error = new Error(`Drive batch metadata failed (HTTP ${response.status}).`);
+          error.response = { status: response.status, data: responseText };
+          throw error;
+        }
+        const responseBoundary =
+          parseMultipartBoundary(response.headers.get("content-type") || "") || boundary;
+        const parts = parseMultipartMixedResponse(responseText, responseBoundary);
+        /** @type {Map<string, import('googleapis').drive_v3.Schema$File>} */
+        const chunkMap = new Map();
+        for (const part of parts) {
+          if (!part || part.status < 200 || part.status >= 300) {
+            continue;
+          }
+          try {
+            const data = JSON.parse(part.body);
+            const fileId = String(data?.id || "").trim();
+            if (fileId) {
+              chunkMap.set(fileId, data);
+            }
+          } catch {
+            // Skip malformed batch part; caller may fall back per file.
+          }
+        }
+        return chunkMap;
+      },
+      { ...retryOptions, requestSlots: chunk.length },
+    );
+
+    for (const [fileId, data] of chunkResults.entries()) {
+      results.set(fileId, data);
+    }
+    recordDriveFilesGet(chunkResults.size);
+  }
+
+  return results;
 }
 
 /**
@@ -239,6 +488,7 @@ async function scanVoiceMemoFolder(folderId, options = {}) {
   const { extensions, submissionTimeSource } = normalizeVoiceMemoScanOptions(options);
   const filenamePattern = buildVoiceMemoFilenamePattern(extensions);
   const retryOptions = { deadlineAt: options.deadlineAt };
+  maybeEnableDriveScriptRateLimit(options.deadlineAt);
 
   const auth = await buildServiceAccountJwt([DRIVE_READONLY_SCOPE]);
   const drive = google.drive({ version: "v3", auth });
@@ -252,7 +502,7 @@ async function scanVoiceMemoFolder(folderId, options = {}) {
 
   do {
     const currentPageToken = pageToken;
-    const response = await withDriveRetry(
+    const response = await driveApiCall(
       "files.list(voice memo folder)",
       () =>
         drive.files.list({
@@ -431,60 +681,64 @@ async function streamVoiceMemoFile(fileId, rangeHeader) {
     throw new Error("A Drive file id is required.");
   }
 
-  const auth = await buildServiceAccountJwt([DRIVE_READONLY_SCOPE]);
-  const drive = google.drive({ version: "v3", auth });
+  try {
+    const auth = await buildServiceAccountJwt([DRIVE_READONLY_SCOPE]);
+    const drive = google.drive({ version: "v3", auth });
 
-  const meta = await withDriveRetry("files.get(stream metadata)", () =>
-    drive.files.get({
-      fileId: normalizedFileId,
-      fields: "mimeType,name,size",
-      supportsAllDrives: true,
-    }),
-  );
-  recordDriveFilesGet(1);
+    const meta = await driveApiCall("files.get(stream metadata)", () =>
+      drive.files.get({
+        fileId: normalizedFileId,
+        fields: "mimeType,name,size",
+        supportsAllDrives: true,
+      }),
+    );
+    recordDriveFilesGet(1);
 
-  const fileName = String(meta.data.name || "voice-memo.m4a");
-  const extension = voiceMemoExtensionFromFileName(fileName);
-  const shouldTranscode = extension != null && voiceMemoNeedsTranscodeForPlayback(extension) && (await isFfmpegAvailable());
+    const fileName = String(meta.data.name || "voice-memo.m4a");
+    const extension = voiceMemoExtensionFromFileName(fileName);
+    const shouldTranscode = extension != null && voiceMemoNeedsTranscodeForPlayback(extension) && (await isFfmpegAvailable());
 
-  const requestOptions = { responseType: "stream" };
-  if (rangeHeader && !shouldTranscode) {
-    requestOptions.headers = { Range: rangeHeader };
-  }
+    const requestOptions = { responseType: "stream" };
+    if (rangeHeader && !shouldTranscode) {
+      requestOptions.headers = { Range: rangeHeader };
+    }
 
-  const media = await withDriveRetry("files.get(stream media)", () =>
-    drive.files.get(
-      { fileId: normalizedFileId, alt: "media", supportsAllDrives: true },
-      requestOptions,
-    ),
-  );
-  recordDriveFilesGet(1);
+    const media = await driveApiCall("files.get(stream media)", () =>
+      drive.files.get(
+        { fileId: normalizedFileId, alt: "media", supportsAllDrives: true },
+        requestOptions,
+      ),
+    );
+    recordDriveFilesGet(1);
 
-  const sizeRaw = meta.data.size;
-  const size = sizeRaw != null && String(sizeRaw).trim() !== "" ? Number.parseInt(String(sizeRaw), 10) : null;
+    const sizeRaw = meta.data.size;
+    const size = sizeRaw != null && String(sizeRaw).trim() !== "" ? Number.parseInt(String(sizeRaw), 10) : null;
 
-  if (shouldTranscode) {
-    const { stream } = transcodeVoiceMemoToM4aStream(media.data);
+    if (shouldTranscode) {
+      const { stream } = transcodeVoiceMemoToM4aStream(media.data);
+      return {
+        stream,
+        mimeType: "audio/mp4",
+        fileName: voiceMemoPlaybackFileName(fileName),
+        size: null,
+        status: 200,
+        contentRange: null,
+        contentLength: null,
+      };
+    }
+
     return {
-      stream,
-      mimeType: "audio/mp4",
-      fileName: voiceMemoPlaybackFileName(fileName),
-      size: null,
-      status: 200,
-      contentRange: null,
-      contentLength: null,
+      stream: media.data,
+      mimeType: resolveVoiceMemoStreamMimeType(fileName, meta.data.mimeType),
+      fileName,
+      size: Number.isFinite(size) ? size : null,
+      status: media.status || 200,
+      contentRange: media.headers?.["content-range"] || null,
+      contentLength: media.headers?.["content-length"] || null,
     };
+  } catch (error) {
+    throw mapVoiceMemoStreamError(error);
   }
-
-  return {
-    stream: media.data,
-    mimeType: resolveVoiceMemoStreamMimeType(fileName, meta.data.mimeType),
-    fileName,
-    size: Number.isFinite(size) ? size : null,
-    status: media.status || 200,
-    contentRange: media.headers?.["content-range"] || null,
-    contentLength: media.headers?.["content-length"] || null,
-  };
 }
 
 /** Voice notes are small; reading the whole file avoids wrong lengths from partial m4a/ogg probes. */
@@ -562,50 +816,52 @@ async function parseDurationFromAudioBuffer(buffer, fileInfo) {
 }
 
 /**
- * @param {string} fileId
- * @param {{ deadlineAt?: number }} [options]
- * @returns {Promise<number|null>}
+ * @param {import('googleapis').drive_v3.Schema$File|{ data?: import('googleapis').drive_v3.Schema$File }} meta
+ * @returns {number|null}
  */
-async function readVoiceMemoDurationSeconds(fileId, options = {}) {
-  const retryOptions = { deadlineAt: options.deadlineAt };
-  const auth = await buildServiceAccountJwt([DRIVE_READONLY_SCOPE]);
-  const drive = google.drive({ version: "v3", auth });
-
-  const meta = await withDriveRetry(
-    "files.get(duration metadata)",
-    () =>
-      drive.files.get({
-        fileId,
-        fields: "mimeType,name,size,videoMediaMetadata(durationMillis)",
-        supportsAllDrives: true,
-      }),
-    retryOptions,
-  );
-  recordDriveFilesGet(1);
-
-  const fileName = String(meta.data.name || "");
-  const driveMimeType = String(meta.data.mimeType || "");
-  const mimeType = resolveVoiceMemoStreamMimeType(fileName, driveMimeType);
-  const sizeRaw = meta.data.size;
-  const size =
-    sizeRaw != null && String(sizeRaw).trim() !== "" ? Number.parseInt(String(sizeRaw), 10) : undefined;
-  const knownSize = Number.isFinite(size) ? size : undefined;
-
-  // Drive's videoMediaMetadata is often wrong for Signal/voice m4a uploads.
-  // Only trust it for non-audio files.
+function durationSecondsFromDriveFileMetadata(meta) {
+  const file = meta?.data ?? meta;
+  const fileName = String(file?.name || "");
+  const driveMimeType = String(file?.mimeType || "");
   if (!isLikelyAudioVoiceMemo(fileName, driveMimeType)) {
-    const durationMillis = meta.data.videoMediaMetadata?.durationMillis;
+    const durationMillis = file?.videoMediaMetadata?.durationMillis;
     if (durationMillis != null && Number.isFinite(Number(durationMillis)) && Number(durationMillis) > 0) {
       return Number(durationMillis) / 1000;
     }
   }
+  return null;
+}
 
-  // Download the full file into a buffer for accurate duration (moov/tags may be at end).
+/**
+ * @param {import('googleapis').drive_v3.Schema$File|{ data?: import('googleapis').drive_v3.Schema$File }} meta
+ * @returns {{ fileName: string, driveMimeType: string, mimeType: string, knownSize: number|undefined }}
+ */
+function voiceMemoMetadataContext(meta) {
+  const file = meta?.data ?? meta;
+  const fileName = String(file?.name || "");
+  const driveMimeType = String(file?.mimeType || "");
+  const mimeType = resolveVoiceMemoStreamMimeType(fileName, driveMimeType);
+  const sizeRaw = file?.size;
+  const size =
+    sizeRaw != null && String(sizeRaw).trim() !== "" ? Number.parseInt(String(sizeRaw), 10) : undefined;
+  const knownSize = Number.isFinite(size) ? size : undefined;
+  return { fileName, driveMimeType, mimeType, knownSize };
+}
+
+/**
+ * @param {ReturnType<typeof google.drive>} drive
+ * @param {string} fileId
+ * @param {import('googleapis').drive_v3.Schema$File|{ data?: import('googleapis').drive_v3.Schema$File }} meta
+ * @param {{ deadlineAt?: number }} [retryOptions]
+ * @returns {Promise<number|null>}
+ */
+async function probeVoiceMemoDurationFromMedia(drive, fileId, meta, retryOptions = {}) {
+  const { mimeType, knownSize } = voiceMemoMetadataContext(meta);
   if (knownSize != null && knownSize > VOICE_MEMO_FULL_DURATION_PROBE_MAX_BYTES) {
     return null;
   }
 
-  const media = await withDriveRetry(
+  const media = await driveApiCall(
     "files.get(duration media)",
     () =>
       drive.files.get(
@@ -624,6 +880,45 @@ async function readVoiceMemoDurationSeconds(fileId, options = {}) {
 }
 
 /**
+ * @param {string} fileId
+ * @param {{ deadlineAt?: number, metadata?: import('googleapis').drive_v3.Schema$File, drive?: ReturnType<typeof google.drive> }} [options]
+ * @returns {Promise<number|null>}
+ */
+async function readVoiceMemoDurationSeconds(fileId, options = {}) {
+  const retryOptions = { deadlineAt: options.deadlineAt };
+  maybeEnableDriveScriptRateLimit(options.deadlineAt);
+
+  let meta = options.metadata;
+  let drive = options.drive;
+  if (!drive) {
+    const auth = await buildServiceAccountJwt([DRIVE_READONLY_SCOPE]);
+    drive = google.drive({ version: "v3", auth });
+  }
+
+  if (!meta) {
+    const response = await driveApiCall(
+      "files.get(duration metadata)",
+      () =>
+        drive.files.get({
+          fileId,
+          fields: "mimeType,name,size,videoMediaMetadata(durationMillis)",
+          supportsAllDrives: true,
+        }),
+      retryOptions,
+    );
+    recordDriveFilesGet(1);
+    meta = response.data;
+  }
+
+  const fromMetadata = durationSecondsFromDriveFileMetadata(meta);
+  if (fromMetadata != null) {
+    return fromMetadata;
+  }
+
+  return probeVoiceMemoDurationFromMedia(drive, fileId, meta, retryOptions);
+}
+
+/**
  * @param {string[]} fileIds
  * @param {{ concurrency?: number, timeoutMs?: number, deadlineAt?: number }} [options]
  * @returns {Promise<Map<string, number|null>>}
@@ -635,15 +930,43 @@ async function resolveVoiceMemoDurationsMap(fileIds, options = {}) {
     return map;
   }
 
-  const concurrency = Math.min(Math.max(Number(options.concurrency) || 4, 1), 8);
+  maybeEnableDriveScriptRateLimit(options.deadlineAt);
+  const retryOptions = { deadlineAt: options.deadlineAt };
+  const auth = await buildServiceAccountJwt([DRIVE_READONLY_SCOPE]);
+  const drive = google.drive({ version: "v3", auth });
+  const metadataFields = "id,mimeType,name,size,videoMediaMetadata(durationMillis)";
+
+  /** @type {Map<string, import('googleapis').drive_v3.Schema$File>} */
+  let metadataByFileId = new Map();
+  if (driveScriptRateLimitEnabled && uniqueIds.length > 1) {
+    metadataByFileId = await batchGetDriveFileMetadata(auth, uniqueIds, metadataFields, retryOptions);
+  }
+
+  const scriptMode = driveScriptRateLimitEnabled;
+  const concurrency = scriptMode
+    ? 1
+    : Math.min(Math.max(Number(options.concurrency) || 4, 1), 8);
   let index = 0;
 
   async function worker() {
     while (index < uniqueIds.length) {
-      const current = uniqueIds[index];
+      const current = index;
       index += 1;
-      const duration = await getVoiceMemoDurationSeconds(current, options);
-      map.set(current, duration);
+      const fileId = uniqueIds[current];
+      let duration = null;
+      const prefetched = metadataByFileId.get(fileId);
+      if (prefetched) {
+        duration = durationSecondsFromDriveFileMetadata(prefetched);
+        if (duration == null) {
+          duration = await probeVoiceMemoDurationFromMedia(drive, fileId, prefetched, retryOptions);
+        }
+      } else {
+        duration = await readVoiceMemoDurationSeconds(fileId, {
+          deadlineAt: options.deadlineAt,
+          drive,
+        });
+      }
+      map.set(fileId, duration);
     }
   }
 
@@ -656,6 +979,11 @@ module.exports = {
   normalizeVoiceMemoScanOptions,
   buildVoiceMemoFilenamePattern,
   withDriveRetry,
+  setDriveScriptRateLimit,
+  isDriveScriptRateLimitEnabled,
+  isDriveThrottleError,
+  mapVoiceMemoStreamError,
+  DRIVE_TRY_AGAIN_LATER_MESSAGE,
   extractDriveFileIdFromLink,
   scanVoiceMemoFolder,
   listVoiceMemoFiles,

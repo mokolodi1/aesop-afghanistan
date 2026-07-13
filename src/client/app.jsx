@@ -791,6 +791,39 @@ async function loadPortalClassGradeFromApi() {
   return portalClassGradeInFlight;
 }
 
+async function resolvePortalVoiceMemoAudioError(streamSrc, t) {
+  if (!streamSrc) {
+    return t('voiceMemo.audioPlayError');
+  }
+  try {
+    const response = await fetch(streamSrc, {
+      method: 'GET',
+      headers: { Range: 'bytes=0-0' },
+    });
+    if (response.status === 429 || response.status === 503) {
+      const payload = await response.json().catch(() => null);
+      const serverMessage = String(payload?.error || '').trim();
+      if (/try again later/i.test(serverMessage)) {
+        return t('voiceMemo.audioTryAgainLater');
+      }
+      if (serverMessage) {
+        return serverMessage;
+      }
+      return t('voiceMemo.audioTryAgainLater');
+    }
+    if (!response.ok) {
+      const payload = await response.json().catch(() => null);
+      const serverMessage = String(payload?.error || '').trim();
+      if (serverMessage) {
+        return serverMessage;
+      }
+    }
+  } catch {
+    // Fall back to the generic playback message when the probe fails.
+  }
+  return t('voiceMemo.audioPlayError');
+}
+
 async function loadPortalVoiceMemoStatusFromApi({ userId, email }) {
   const id = String(userId || '').trim();
   const em = String(email || '').trim();
@@ -2922,7 +2955,9 @@ function PortalVoiceMemoSection({ studentUserId, studentEmail, enabled }) {
                       }
                     }}
                     onError={() => {
-                      setVoiceMemoAudioError(t('voiceMemo.audioPlayError'));
+                      resolvePortalVoiceMemoAudioError(voiceMemoStreamSrc, t).then((message) => {
+                        setVoiceMemoAudioError(message);
+                      });
                     }}
                   >
                     {t('voiceMemo.audioUnsupported')}
@@ -7791,7 +7826,11 @@ function PortalReviewVoicePlayer({ assignment, t }) {
           preload="none"
           className="portal-review-voice-audio"
           src={streamSrc}
-          onError={() => setAudioError(t('voiceMemo.audioPlayError'))}
+          onError={() => {
+            resolvePortalVoiceMemoAudioError(streamSrc, t).then((message) => {
+              setAudioError(message);
+            });
+          }}
         >
           {t('reviews.voiceAudioUnsupported')}
         </audio>

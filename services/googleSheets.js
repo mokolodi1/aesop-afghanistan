@@ -2060,6 +2060,7 @@ async function loadAllPeopleRowsFromSheets() {
       rows.push({
         email,
         id: aesopId,
+        sheetRowNumber: row.rowNumber,
         name: String(rowData[nameColumnIndex] ?? "").trim(),
         phone: phoneRaw,
         peopleType,
