@@ -37,6 +37,176 @@ function formatExpiryAcrossZones(expiresAt) {
   ).join(', ');
 }
 
+/**
+ * Build bilingual (English + Dari) magic-link email content.
+ * @param {{ magicLink: string, name?: string, userId?: string }} params
+ * @returns {{ subject: string, html: string, text: string }}
+ */
+function buildMagicLinkEmailContent({ magicLink, name = '', userId = '' }) {
+  const safeName = String(name || '').trim();
+  const safeUserId = String(userId || '').trim();
+  const greetingNameEn = safeName ? escapeHtml(safeName) : 'there';
+  const greetingNameFa = safeName ? escapeHtml(safeName) : '';
+  const emailSubject = 'AESOP Portal Sign In Link / لینک ورود به پورتال AESOP';
+  const { ink, muted, accent, accentDark, skyTint, line } = AESOP_EMAIL;
+  const safeLinkText = escapeHtml(magicLink);
+  const safeHref = magicLink.replace(/&/g, '&amp;');
+  const expiresAt = new Date(Date.now() + MAGIC_LINK_EXPIRY_MS);
+  const expiryAcrossZones = formatExpiryAcrossZones(expiresAt);
+
+  const idBlockEn = safeUserId
+    ? `<p style="margin:0 0 18px;line-height:1.5;">Your AESOP ID: <strong dir="ltr">${escapeHtml(safeUserId)}</strong></p>`
+    : '';
+  const idBlockFa = safeUserId
+    ? `<p style="margin:0 0 18px;line-height:1.8;" dir="rtl">شناسه AESOP شما: <strong dir="ltr">${escapeHtml(safeUserId)}</strong></p>`
+    : '';
+  const greetingFa = greetingNameFa
+    ? `سلام <strong>${greetingNameFa}</strong>،`
+    : 'سلام،';
+
+  const signInButton = `
+      <table role="presentation" cellpadding="0" cellspacing="0">
+        <tr>
+          <td style="border-radius:12px;background-color:${accent};">
+            <a href="${safeHref}" style="display:inline-block;padding:12px 24px;font-family:${FONT_STACK};font-size:14px;font-weight:700;color:#ffffff;text-decoration:none;border-radius:12px;">
+              Click to Sign In / برای ورود کلیک کنید
+            </a>
+          </td>
+        </tr>
+      </table>`;
+
+  const urlBox = `
+      <p style="margin:0;padding:12px 14px;word-break:break-all;font-size:12px;line-height:1.45;color:${accentDark};background-color:${skyTint};border:1px solid ${line};border-radius:12px;" dir="ltr">
+        ${safeLinkText}
+      </p>`;
+
+  const innerHtml = `
+      <p style="margin:0 0 16px;font-family:${FONT_HEADING};font-size:18px;font-weight:700;color:${ink};">
+        Link to Sign In to the AESOP Portal
+      </p>
+      <p style="margin:0 0 12px;line-height:1.5;">
+        Hello <strong>${greetingNameEn}</strong>,
+      </p>
+      ${idBlockEn}
+      <p style="margin:0 0 18px;line-height:1.5;">
+        Use the link below on the device you would like to log in on.
+      </p>
+      ${signInButton}
+      <p style="margin:18px 0 6px;font-size:13px;color:${muted};">Or paste this URL:</p>
+      ${urlBox}
+      <p style="margin:18px 0 0;font-size:13px;line-height:1.5;color:${muted};">
+        The login link expires in <strong>15 minutes</strong>. (Expires at ${expiryAcrossZones})
+      </p>
+      <p style="margin:12px 0 0;font-size:13px;line-height:1.5;color:${muted};">
+        If you did not request this email, you may disregard it.
+      </p>
+
+      <hr style="margin:28px 0;border:0;border-top:1px solid ${line};" />
+
+      <div dir="rtl" lang="fa" style="text-align:right;">
+        <p style="margin:0 0 16px;font-family:${FONT_HEADING};font-size:18px;font-weight:700;color:${ink};line-height:1.6;">
+          لینک ورود به پورتال AESOP
+        </p>
+        <p style="margin:0 0 12px;line-height:1.8;">
+          ${greetingFa}
+        </p>
+        ${idBlockFa}
+        <p style="margin:0 0 18px;line-height:1.8;">
+          از لینک زیر روی دستگاهی که می‌خواهید با آن وارد شوید استفاده کنید.
+        </p>
+        ${signInButton}
+        <p style="margin:18px 0 6px;font-size:13px;color:${muted};line-height:1.8;">یا این آدرس را جای‌گذاری کنید:</p>
+        ${urlBox}
+        <p style="margin:18px 0 0;font-size:13px;line-height:1.8;color:${muted};">
+          لینک ورود تا <strong>۱۵ دقیقه</strong> اعتبار دارد. (انقضا: ${escapeHtml(expiryAcrossZones)})
+        </p>
+        <p style="margin:12px 0 0;font-size:13px;line-height:1.8;color:${muted};">
+          اگر شما این ایمیل را درخواست نکرده‌اید، می‌توانید آن را نادیده بگیرید.
+        </p>
+      </div>
+  `;
+
+  const emailHtml = wrapAesopEmail(innerHtml, { title: emailSubject });
+  const emailText = [
+    'AESOP Afghanistan — AESOP portal',
+    '',
+    safeName ? `Hello ${safeName},` : 'Hello,',
+    safeUserId ? `Your AESOP ID: ${safeUserId}` : '',
+    '',
+    'Use this link to sign in on the device you would like to log in on:',
+    magicLink,
+    '',
+    `The login link expires in 15 minutes. (Expires at ${expiryAcrossZones})`,
+    '',
+    'If you did not request this email, you may disregard it.',
+    '',
+    '---',
+    '',
+    'پورتال AESOP',
+    '',
+    safeName ? `سلام ${safeName}،` : 'سلام،',
+    safeUserId ? `شناسه AESOP شما: ${safeUserId}` : '',
+    '',
+    'از لینک زیر روی دستگاهی که می‌خواهید با آن وارد شوید استفاده کنید:',
+    magicLink,
+    '',
+    `لینک ورود تا ۱۵ دقیقه اعتبار دارد. (انقضا: ${expiryAcrossZones})`,
+    '',
+    'اگر شما این ایمیل را درخواست نکرده‌اید، می‌توانید آن را نادیده بگیرید.',
+    '',
+    'AESOP · https://aesopafghanistan.org/',
+  ]
+    .filter((line, index, arr) => !(line === '' && arr[index - 1] === ''))
+    .join('\n');
+
+  return { subject: emailSubject, html: emailHtml, text: emailText };
+}
+
+/**
+ * Write a local HTML preview of the magic-link email so it can be opened in a browser.
+ * @param {string} html
+ * @returns {string} absolute path written
+ */
+function writeMagicLinkEmailPreview(html) {
+  const fs = require('fs');
+  const path = require('path');
+  const dir = path.join(__dirname, '..', 'tmp');
+  fs.mkdirSync(dir, { recursive: true });
+  const filePath = path.join(dir, 'magic-link-email-preview.html');
+  fs.writeFileSync(filePath, html, 'utf8');
+  return filePath;
+}
+
+async function sendMagicLinkEmail(email, token, { name = '', userId = '' } = {}) {
+  const magicLink = isFlyProduction()
+    ? `${magicLinkSiteOrigin()}/verify.html#token=${token}`
+    : `${localDevMagicLinkOrigin()}/verify.html#token=${token}`;
+
+  // Token goes in the URL fragment (#), which browsers never send to the
+  // server — keeps it out of Fly/proxy access logs and Referer headers.
+  const { subject, html, text } = buildMagicLinkEmailContent({
+    magicLink,
+    name,
+    userId,
+  });
+
+  if (!isFlyProduction()) {
+    const previewPath = writeMagicLinkEmailPreview(html);
+    console.log(`[magic-link] sign-in link for ${email}${name ? ` (${name})` : ''}${userId ? ` [${userId}]` : ''}:`);
+    console.log(magicLink);
+    console.log(`[magic-link] email preview (open in browser):`);
+    console.log(`file://${previewPath}`);
+    return;
+  }
+
+  await sendEmail({
+    to: email,
+    subject,
+    html,
+    text,
+  });
+}
+
 function magicLinkSiteOrigin() {
   const raw = (
     process.env.PORTAL_BASE_URL ||
@@ -230,89 +400,6 @@ async function verifyMagicLink(token) {
   };
 }
 
-async function sendMagicLinkEmail(email, token, { name = '', userId = '' } = {}) {
-  const safeName = String(name || '').trim();
-  const safeUserId = String(userId || '').trim();
-  const greetingName = safeName ? escapeHtml(safeName) : 'there';
-
-  if (!isFlyProduction()) {
-    const magicLink = `${localDevMagicLinkOrigin()}/verify.html#token=${token}`;
-    console.log(`[magic-link] sign-in link for ${email}${safeName ? ` (${safeName})` : ''}${safeUserId ? ` [${safeUserId}]` : ''}:`);
-    console.log(magicLink);
-    return;
-  }
-
-  const origin = magicLinkSiteOrigin();
-  // Token goes in the URL fragment (#), which browsers never send to the
-  // server — keeps it out of Fly/proxy access logs and Referer headers.
-  const magicLink = `${origin}/verify.html#token=${token}`;
-
-  const emailSubject = 'AESOP Portal Sign In Link';
-  const { ink, muted, accent, accentDark, skyTint, line } = AESOP_EMAIL;
-  const safeLinkText = escapeHtml(magicLink);
-  const expiresAt = new Date(Date.now() + MAGIC_LINK_EXPIRY_MS);
-  const expiryAcrossZones = formatExpiryAcrossZones(expiresAt);
-  const innerHtml = `
-      <p style="margin:0 0 16px;font-family:${FONT_HEADING};font-size:18px;font-weight:700;color:${ink};">
-        Link to Sign In to the AESOP Portal
-      </p>
-      <p style="margin:0 0 12px;line-height:1.5;">
-        Hello <strong>${greetingName}</strong>,
-      </p>
-      ${
-        safeUserId
-          ? `<p style="margin:0 0 18px;line-height:1.5;">Your AESOP ID: <strong>${escapeHtml(safeUserId)}</strong></p>`
-          : ''
-      }
-      <p style="margin:0 0 18px;line-height:1.5;">
-        Use the link below on the device you would like to log in on.
-      </p>
-      <table role="presentation" cellpadding="0" cellspacing="0">
-        <tr>
-          <td style="border-radius:12px;background-color:${accent};">
-            <a href="${magicLink.replace(/&/g, '&amp;')}" style="display:inline-block;padding:12px 24px;font-family:${FONT_STACK};font-size:14px;font-weight:700;color:#ffffff;text-decoration:none;border-radius:12px;">
-              Click to Sign In
-            </a>
-          </td>
-        </tr>
-      </table>
-      <p style="margin:18px 0 6px;font-size:13px;color:${muted};">Or paste this URL:</p>
-      <p style="margin:0;padding:12px 14px;word-break:break-all;font-size:12px;line-height:1.45;color:${accentDark};background-color:${skyTint};border:1px solid ${line};border-radius:12px;">
-        ${safeLinkText}
-      </p>
-      <p style="margin:18px 0 0;font-size:13px;line-height:1.5;color:${muted};">
-        The login link expires in <strong>15 minutes</strong>. (Expires at ${expiryAcrossZones})
-      </p>
-      <p style="margin:12px 0 0;font-size:13px;line-height:1.5;color:${muted};">
-        If you did not request this email, you may disregard it.
-      </p>
-  `;
-  const emailHtml = wrapAesopEmail(innerHtml, { title: emailSubject });
-
-  const emailText = [
-    'AESOP Afghanistan — AESOP portal',
-    '',
-    safeName ? `Hello ${safeName},` : 'Hello,',
-    safeUserId ? `Your AESOP ID: ${safeUserId}` : '',
-    '',
-    'Use this link to sign in on the device you would like to log in on:',
-    magicLink,
-    '',
-    `The login link expires in 15 minutes. (Expires at ${expiryAcrossZones})`,
-    '',
-    'If you did not request this email, you may disregard it.',
-    '',
-    'AESOP · https://aesopafghanistan.org/',
-  ].join('\n');
-
-  await sendEmail({
-    to: email,
-    subject: emailSubject,
-    html: emailHtml,
-    text: emailText,
-  });
-}
-
 /**
  * Issue a fresh magic link using data from an expired or used token.
  * @param {string} token - Previous magic link token
@@ -363,6 +450,7 @@ module.exports = {
   generateAndStoreMagicLink,
   verifyMagicLink,
   sendMagicLinkEmail,
+  buildMagicLinkEmailContent,
   resendMagicLinkByToken,
   isFlyProduction,
 };
