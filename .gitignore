@@ -12,6 +12,9 @@ scripts/.venv
 node_modules
 data/backups/
 
+# Local magic-link email HTML preview (written by npm run dev)
+tmp/
+
 # Generated client bundle (built by esbuild via `npm run dev` / `npm run build`)
 public/app.js
 public/app.css
