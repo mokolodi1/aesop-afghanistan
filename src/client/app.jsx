@@ -3393,6 +3393,21 @@ function PortalFaqPage() {
     ['faq.contactTitle', 'faq.contactBody'],
     ['faq.loginTitle', 'faq.loginBody'],
     ['faq.gradeTitle', 'faq.gradeBody'],
+    ['faq.honorTitle', 'faq.honorBody'],
+    ['faq.attendanceTitle', 'faq.attendanceBody'],
+    ['faq.absenceTitle', 'faq.absenceBody'],
+    ['faq.leaveEligibilityTitle', 'faq.leaveEligibilityBody'],
+    ['faq.leaveDurationTitle', 'faq.leaveDurationBody'],
+    ['faq.classTimeTitle', 'faq.classTimeBody'],
+    ['faq.levelChangeTitle', 'faq.levelChangeBody'],
+    ['faq.financialAidTitle', 'faq.financialAidBody'],
+    ['faq.financialAidTimingTitle', 'faq.financialAidTimingBody'],
+    ['faq.certificateTitle', 'faq.certificateBody'],
+    ['faq.volunteerTitle', 'faq.volunteerBody'],
+    ['faq.scholarshipTitle', 'faq.scholarshipBody'],
+    ['faq.recommendationTitle', 'faq.recommendationBody'],
+    ['faq.communicationTitle', 'faq.communicationBody'],
+    ['faq.privacyTitle', 'faq.privacyBody'],
   ];
 
   return (
