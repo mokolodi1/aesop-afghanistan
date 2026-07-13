@@ -872,11 +872,20 @@ async function probeVoiceMemoDurationFromMedia(drive, fileId, meta, retryOptions
   );
   recordDriveFilesGet(1);
 
-  const buffer = Buffer.from(media.data);
-  return parseDurationFromAudioBuffer(buffer, {
-    mimeType,
-    size: knownSize ?? buffer.length,
-  });
+  // Copy once, then drop the Drive response payload so GC can reclaim the
+  // ArrayBuffer while music-metadata parses (up to 8 MB per file).
+  let arrayBuffer = media.data;
+  media.data = null;
+  let buffer = Buffer.from(arrayBuffer);
+  arrayBuffer = null;
+  try {
+    return await parseDurationFromAudioBuffer(buffer, {
+      mimeType,
+      size: knownSize ?? buffer.length,
+    });
+  } finally {
+    buffer = null;
+  }
 }
 
 /**
@@ -960,6 +969,8 @@ async function resolveVoiceMemoDurationsMap(fileIds, options = {}) {
         if (duration == null) {
           duration = await probeVoiceMemoDurationFromMedia(drive, fileId, prefetched, retryOptions);
         }
+        // Drop metadata once used so the batch map can shrink during long probes.
+        metadataByFileId.delete(fileId);
       } else {
         duration = await readVoiceMemoDurationSeconds(fileId, {
           deadlineAt: options.deadlineAt,

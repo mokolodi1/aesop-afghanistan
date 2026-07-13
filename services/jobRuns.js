@@ -5,7 +5,7 @@
 const path = require("path");
 const { spawn } = require("child_process");
 const { isDatabaseEnabled, getPool } = require("../db/index");
-const { getJobDefinition } = require("./jobRegistry");
+const { getJobDefinition, getConflictingJobNames } = require("./jobRegistry");
 
 /** Logs beyond this are middle-truncated before storage. */
 const MAX_LOG_CHARS = 400 * 1024;
@@ -150,6 +150,35 @@ async function findActiveJobRun(jobName) {
   return rowToRun(found.rows[0]);
 }
 
+/**
+ * @param {string[]} jobNames
+ * @returns {Promise<Record<string, unknown>|null>} freshest 'running' run among the names
+ */
+async function findActiveJobRunAmong(jobNames) {
+  const pool = getPool();
+  if (!pool) {
+    return null;
+  }
+  const names = [...new Set((jobNames || []).map((name) => String(name || "").trim()).filter(Boolean))];
+  if (names.length === 0) {
+    return null;
+  }
+  if (names.length === 1) {
+    return findActiveJobRun(names[0]);
+  }
+  const found = await pool.query(
+    `SELECT id, job_name, trigger_source, triggered_by, status, started_at, finished_at, result, error
+     FROM job_runs
+     WHERE job_name = ANY($1::text[])
+       AND status = 'running'
+       AND started_at > NOW() - ($2::bigint * INTERVAL '1 millisecond')
+     ORDER BY started_at DESC
+     LIMIT 1`,
+    [names, ACTIVE_RUN_STALE_MS],
+  );
+  return rowToRun(found.rows[0]);
+}
+
 /** @param {number} runId @returns {Promise<Record<string, unknown>|null>} run incl. logs */
 async function getJobRun(runId) {
   const pool = getPool();
@@ -239,11 +268,17 @@ async function startJobRunChild({ jobName, triggerSource, triggeredBy = null, pa
 
   let runId = null;
   if (isDatabaseEnabled()) {
-    const active = await findActiveJobRun(jobName);
+    const conflictingNames = getConflictingJobNames(jobName);
+    const active = await findActiveJobRunAmong(conflictingNames);
     if (active) {
+      const activeLabel = getJobDefinition(String(active.jobName))?.label || active.jobName;
       const busy = new Error(
-        `${definition.label} is already running (started ${active.startedAt}` +
-          `${active.triggeredBy ? ` by ${active.triggeredBy}` : ""}).`,
+        active.jobName === jobName
+          ? `${definition.label} is already running (started ${active.startedAt}` +
+              `${active.triggeredBy ? ` by ${active.triggeredBy}` : ""}).`
+          : `${definition.label} cannot start while ${activeLabel} is running ` +
+              `(run #${active.id}, started ${active.startedAt}` +
+              `${active.triggeredBy ? ` by ${active.triggeredBy}` : ""}).`,
       );
       busy.statusCode = 409;
       throw busy;
@@ -293,6 +328,7 @@ module.exports = {
   failJobRunIfStillRunning,
   updateJobRunLogs,
   findActiveJobRun,
+  findActiveJobRunAmong,
   getJobRun,
   listJobRuns,
   getLastRunsByJob,

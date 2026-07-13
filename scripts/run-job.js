@@ -18,12 +18,12 @@ const util = require("util");
 const { formatErrorForLog } = require("../utils/errorLogging");
 const { setDriveScriptRateLimit } = require("../services/googleDrive");
 const { isDatabaseEnabled, closeDatabase } = require("../db/index");
-const { getJobDefinition } = require("../services/jobRegistry");
+const { getJobDefinition, getConflictingJobNames } = require("../services/jobRegistry");
 const {
   createJobRun,
   finalizeJobRun,
   updateJobRunLogs,
-  findActiveJobRun,
+  findActiveJobRunAmong,
   pruneJobRuns,
 } = require("../services/jobRuns");
 
@@ -98,12 +98,18 @@ async function main() {
   let runId = presetRunId;
 
   if (recording && runId == null) {
-    const active = await findActiveJobRun(jobName);
+    const conflictingNames = getConflictingJobNames(jobName);
+    const active = await findActiveJobRunAmong(conflictingNames);
     if (active) {
+      const activeLabel = getJobDefinition(String(active.jobName))?.label || active.jobName;
       const skipMessage =
-        `Skipped: ${definition.label} is already running ` +
-        `(run #${active.id}, started ${active.startedAt}` +
-        `${active.triggeredBy ? ` by ${active.triggeredBy}` : ""}).`;
+        active.jobName === jobName
+          ? `Skipped: ${definition.label} is already running ` +
+            `(run #${active.id}, started ${active.startedAt}` +
+            `${active.triggeredBy ? ` by ${active.triggeredBy}` : ""}).`
+          : `Skipped: ${definition.label} cannot start while ${activeLabel} is running ` +
+            `(run #${active.id}, started ${active.startedAt}` +
+            `${active.triggeredBy ? ` by ${active.triggeredBy}` : ""}).`;
       console.warn(`[run-job] ${skipMessage}`);
       const skippedId = await createJobRun({ jobName, triggerSource: trigger, triggeredBy });
       await finalizeJobRun(skippedId, { status: "skipped", error: skipMessage, logs: skipMessage });

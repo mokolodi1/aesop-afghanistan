@@ -36,6 +36,9 @@ const VOICE_NOTE_DATE_HEADERS = [
   "Date of Submission",
   "Date of submission",
 ];
+/** Probe/cache Drive durations in chunks so progress survives OOM and GC can reclaim. */
+const VOICE_MEMO_DURATION_PROBE_CHUNK_SIZE = 25;
+
 const VOICE_NOTE_LENGTH_HEADERS = [
   "Voice memo length (secs)",
   "Voice memo length (sec)",
@@ -826,6 +829,62 @@ async function syncVoiceMemoRound2Status(options = {}) {
 }
 
 /**
+ * @template T
+ * @param {T[]} items
+ * @param {number} size
+ * @returns {T[][]}
+ */
+function chunkArray(items, size) {
+  const chunkSize = Math.max(1, Math.floor(size) || 1);
+  /** @type {T[][]} */
+  const chunks = [];
+  for (let i = 0; i < items.length; i += chunkSize) {
+    chunks.push(items.slice(i, i + chunkSize));
+  }
+  return chunks;
+}
+
+/**
+ * @param {Array<{ aesopId: string, memo: { fileId: string, fileName: string }, lengthFromProbe: boolean, lengthSeconds: number|null }>} candidates
+ * @param {Map<string, number|null>} durationByFileId
+ * @param {Set<string>} fileIdsInChunk
+ */
+async function cacheProbedDurationsInPostgres(candidates, durationByFileId, fileIdsInChunk) {
+  if (!isDatabaseEnabled()) {
+    return;
+  }
+  const writes = [];
+  for (const candidate of candidates) {
+    if (!candidate.lengthFromProbe || !fileIdsInChunk.has(candidate.memo.fileId)) {
+      continue;
+    }
+    if (candidate.lengthSeconds != null) {
+      continue;
+    }
+    const probed = durationByFileId.get(candidate.memo.fileId);
+    if (probed == null || !Number.isFinite(probed)) {
+      continue;
+    }
+    const seconds = Math.round(probed);
+    candidate.lengthSeconds = seconds;
+    candidate.lengthFromProbe = false;
+    writes.push(
+      updateApplicantDriveDurationSeconds(candidate.aesopId, {
+        driveDurationSeconds: seconds,
+        driveFileId: candidate.memo.fileId,
+        driveFileName: candidate.memo.fileName,
+      }).catch((error) =>
+        console.warn(
+          "[sync-voice-memos] could not cache duration in Postgres:",
+          error.message || error,
+        ),
+      ),
+    );
+  }
+  await Promise.all(writes);
+}
+
+/**
  * @param {{ timeBudgetMs?: number }} [options]
  */
 async function runVoiceMemoRound2Sync(options = {}) {
@@ -844,7 +903,12 @@ async function runVoiceMemoRound2Sync(options = {}) {
   const scan = await scanVoiceMemoFolder(folderId, { ...scanOptions, deadlineAt });
   const memoById = scan.memosById;
 
-  const { worksheet, columns, cfg: sheetCfg } = await loadApplicantsWorksheet();
+  // One values.get is much lighter than worksheet.getRows() on large Applicants tabs.
+  const {
+    dataRows,
+    columns,
+    cfg: sheetCfg,
+  } = await loadApplicantsDataForStats();
   const round2ColIdx = columns.round2;
   const linksColIdx = columns.links;
   const dateColIdx = columns.date;
@@ -872,10 +936,8 @@ async function runVoiceMemoRound2Sync(options = {}) {
     }
   }
 
-  const rows = await worksheet.getRows();
   const applicantIds = new Set();
-  for (const row of rows) {
-    const rowData = Array.isArray(row._rawData) ? row._rawData : [];
+  for (const rowData of dataRows) {
     const aesopId = String(rowData[sheetCfg.idColumnIndex] ?? "").trim();
     if (aesopId) {
       applicantIds.add(aesopId);
@@ -898,8 +960,10 @@ async function runVoiceMemoRound2Sync(options = {}) {
   let skippedNotAccepted = 0;
   let skippedNoId = 0;
 
-  for (const row of rows) {
-    const rowData = Array.isArray(row._rawData) ? row._rawData : [];
+  for (let rowIndex = 0; rowIndex < dataRows.length; rowIndex += 1) {
+    const rowData = dataRows[rowIndex] || [];
+    // values.get starts at headerRowNum + 1; grid row index is 0-based sheet row.
+    const gridRowIdx = sheetCfg.headerRowNum + rowIndex;
     const aesopId = String(rowData[sheetCfg.idColumnIndex] ?? "").trim();
     if (!aesopId) {
       skippedNoId += 1;
@@ -963,7 +1027,7 @@ async function runVoiceMemoRound2Sync(options = {}) {
     }
 
     candidates.push({
-      gridRowIdx: row.rowNumber - 1,
+      gridRowIdx,
       aesopId,
       memo: { fileId: memo.fileId, fileName: memo.fileName },
       round2: desiredRound2,
@@ -978,22 +1042,35 @@ async function runVoiceMemoRound2Sync(options = {}) {
   }
 
   /** @type {Map<string, number|null>} */
-  let durationByFileId = new Map();
-  if (probeFileIds.size > 0) {
+  const durationByFileId = new Map();
+  const probeIdList = [...probeFileIds];
+  if (probeIdList.length > 0) {
     const probeStartedAt = Date.now();
-    durationByFileId = await resolveVoiceMemoDurationsMap([...probeFileIds], {
-      concurrency: 4,
-      deadlineAt,
-    });
+    const chunks = chunkArray(probeIdList, VOICE_MEMO_DURATION_PROBE_CHUNK_SIZE);
+    let probedCount = 0;
+    for (let chunkIndex = 0; chunkIndex < chunks.length; chunkIndex += 1) {
+      const chunk = chunks[chunkIndex];
+      const chunkMap = await resolveVoiceMemoDurationsMap(chunk, {
+        concurrency: 4,
+        deadlineAt,
+      });
+      for (const [fileId, duration] of chunkMap) {
+        durationByFileId.set(fileId, duration);
+      }
+      await cacheProbedDurationsInPostgres(candidates, durationByFileId, new Set(chunk));
+      probedCount += chunk.length;
+      console.info(
+        `[sync-voice-memos] probed Drive lengths chunk ${chunkIndex + 1}/${chunks.length} ` +
+          `(${probedCount}/${probeIdList.length})`,
+      );
+    }
     console.info(
-      `[sync-voice-memos] probed ${probeFileIds.size} voice memo length(s) from Drive in ${Date.now() - probeStartedAt}ms`,
+      `[sync-voice-memos] probed ${probeIdList.length} voice memo length(s) from Drive in ${Date.now() - probeStartedAt}ms`,
     );
   }
 
   /** @type {Array<{ gridRowIdx: number, round2: string, links: string, submittedAt: string, baseChanged: boolean, writeLength: boolean, lengthCellValue: number|'' }>} */
   const pending = [];
-  /** @type {Promise<unknown>[]} */
-  const dbWrites = [];
   let lengthsWritten = 0;
   let lengthsCleared = 0;
   let lengthsUnknown = 0;
@@ -1009,21 +1086,6 @@ async function runVoiceMemoRound2Sync(options = {}) {
         const probed = durationByFileId.get(candidate.memo.fileId);
         if (probed != null && Number.isFinite(probed)) {
           seconds = Math.round(probed);
-          // Warm the Postgres cache right away so the portal reads it without probing.
-          if (isDatabaseEnabled()) {
-            dbWrites.push(
-              updateApplicantDriveDurationSeconds(candidate.aesopId, {
-                driveDurationSeconds: seconds,
-                driveFileId: candidate.memo.fileId,
-                driveFileName: candidate.memo.fileName,
-              }).catch((error) =>
-                console.warn(
-                  "[sync-voice-memos] could not cache duration in Postgres:",
-                  error.message || error,
-                ),
-              ),
-            );
-          }
         }
       }
 
@@ -1063,6 +1125,7 @@ async function runVoiceMemoRound2Sync(options = {}) {
   const updated = pending.filter((entry) => entry.baseChanged).length;
 
   if (pending.length > 0) {
+    const { worksheet } = await loadApplicantsWorksheet();
     const columnIndices = [round2ColIdx, linksColIdx, dateColIdx];
     if (lengthEnabled) {
       columnIndices.push(lengthColIdx);
@@ -1092,8 +1155,6 @@ async function runVoiceMemoRound2Sync(options = {}) {
 
     await worksheet.saveUpdatedCells();
   }
-
-  await Promise.all(dbWrites);
 
   const result = {
     updated,

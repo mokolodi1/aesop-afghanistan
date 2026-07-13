@@ -76,6 +76,8 @@ const JOB_DEFINITIONS = {
       "Mirrors the People tab, current Ding numbers, Applicants, ApplicantReviews, and " +
       "Drive voice memo metadata from Google Sheets and Drive into the Postgres cache.",
     schedule: "Hourly at :00 UTC",
+    // Shares the cron VM with voice-memo-sync; both download Drive media.
+    exclusiveGroup: "driveHeavy",
     async run(payload = {}) {
       const { refreshPortalCaches } = require("./portalCacheRefresh");
 
@@ -180,6 +182,8 @@ const JOB_DEFINITIONS = {
       "Checks Google Drive for applicant voice notes and updates the Applicants sheet: " +
       "Round 2, voice note link, last updated, and memo length.",
     schedule: "Daily at 03:30 UTC",
+    // Shares the cron VM with hourly-cache; both download Drive media.
+    exclusiveGroup: "driveHeavy",
     async run() {
       const { syncVoiceMemoRound2Status } = require("./voiceMemoSync");
       const result = await syncVoiceMemoRound2Status();
@@ -193,13 +197,14 @@ const JOB_DEFINITIONS = {
   },
 };
 
-/** @returns {{ name: string, label: string, description: string, schedule: string }[]} */
+/** @returns {{ name: string, label: string, description: string, schedule: string, exclusiveGroup: string|null }[]} */
 function listJobDefinitions() {
   return Object.entries(JOB_DEFINITIONS).map(([name, def]) => ({
     name,
     label: def.label,
     description: def.description,
     schedule: def.schedule,
+    exclusiveGroup: def.exclusiveGroup || null,
   }));
 }
 
@@ -208,7 +213,28 @@ function getJobDefinition(name) {
   return JOB_DEFINITIONS[name] || null;
 }
 
+/**
+ * Jobs that must not run concurrently with `jobName` on the same machine
+ * (same job, or others in the same exclusiveGroup).
+ * @param {string} jobName
+ * @returns {string[]}
+ */
+function getConflictingJobNames(jobName) {
+  const definition = getJobDefinition(jobName);
+  if (!definition) {
+    return [jobName].filter(Boolean);
+  }
+  const group = definition.exclusiveGroup;
+  if (!group) {
+    return [jobName];
+  }
+  return Object.entries(JOB_DEFINITIONS)
+    .filter(([, def]) => def.exclusiveGroup === group)
+    .map(([name]) => name);
+}
+
 module.exports = {
   listJobDefinitions,
   getJobDefinition,
+  getConflictingJobNames,
 };
