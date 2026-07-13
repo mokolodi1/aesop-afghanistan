@@ -271,8 +271,8 @@ async function getAdminDashboard() {
         lastSyncedAt: dbStats.lastSyncedAt,
         backupExportKey: dbStats.lastSyncRun?.backupExportKey || "",
         syncHint: classroomEnabled
-          ? "Classroom data is cached in Postgres. Run npm run sync:classroom daily (Fly scheduled job) to refresh."
-          : "Set CLASSROOM_SYNC_ENABLED=true and run the Classroom sync to populate the database.",
+          ? "Classroom data is cached in Postgres and refreshed by the daily Classroom sync — see the Jobs tab."
+          : "Set CLASSROOM_SYNC_ENABLED=true, then run the Classroom sync from the Jobs tab.",
       };
     } catch (dbErr) {
       console.warn("[admin] dashboard DB stats failed:", dbErr.message);
@@ -293,8 +293,8 @@ async function getAdminDashboard() {
     lastSyncedAt: null,
     backupExportKey: "",
     syncHint: classroomEnabled
-      ? "Run npm run sync:classroom (or the scheduled Fly job) to refresh Classroom Roles and Classroom Grades tabs."
-      : "Set CLASSROOM_SYNC_ENABLED=true and run the Classroom sync to populate grade tabs.",
+      ? "Run the Classroom sync (Jobs tab) to refresh Classroom Roles and Classroom Grades tabs."
+      : "Set CLASSROOM_SYNC_ENABLED=true, then run the Classroom sync from the Jobs tab.",
   };
 }
 

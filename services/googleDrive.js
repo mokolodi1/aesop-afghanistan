@@ -10,6 +10,131 @@ const { recordDriveFilesList, recordDriveFilesGet } = require("./portalMetrics")
 
 const DRIVE_READONLY_SCOPE = "https://www.googleapis.com/auth/drive.readonly";
 
+/** Retry budget for Drive calls on request paths (portal streaming / on-demand probes). */
+const DRIVE_RETRY_DEFAULT_BUDGET_MS = 20 * 1000;
+const DRIVE_RETRY_BACKOFF_BASE_MS = 1000;
+const DRIVE_RETRY_BACKOFF_CAP_MS = 60 * 1000;
+const DRIVE_RETRY_AFTER_CAP_MS = 15 * 60 * 1000;
+
+function sleep(ms) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+/**
+ * @param {unknown} error
+ * @returns {number|null}
+ */
+function driveErrorStatus(error) {
+  const status = Number(error?.response?.status ?? error?.code);
+  return Number.isFinite(status) ? status : null;
+}
+
+/**
+ * Google signals throttling as HTTP 429, or as HTTP 403 with a rate-limit reason.
+ * Transient 5xx and connection resets are retried on the same schedule.
+ * @param {unknown} error
+ * @returns {boolean}
+ */
+function isRetryableDriveError(error) {
+  const status = driveErrorStatus(error);
+  if (status === 429 || status === 500 || status === 502 || status === 503) {
+    return true;
+  }
+  if (status === 403) {
+    const reasons = error?.errors || error?.response?.data?.error?.errors || [];
+    return (Array.isArray(reasons) ? reasons : []).some((entry) =>
+      String(entry?.reason || "").toLowerCase().includes("ratelimit"),
+    );
+  }
+  const code = String(error?.code || "").toUpperCase();
+  return ["ECONNRESET", "ETIMEDOUT", "ECONNABORTED", "EAI_AGAIN", "EPIPE"].includes(code);
+}
+
+/**
+ * @param {unknown} error
+ * @returns {number|null} milliseconds suggested by a Retry-After header, if any
+ */
+function driveRetryAfterMs(error) {
+  const headers = error?.response?.headers || {};
+  const raw = headers["retry-after"] ?? headers["Retry-After"];
+  if (raw == null || String(raw).trim() === "") {
+    return null;
+  }
+  const seconds = Number(String(raw).trim());
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return Math.min(seconds * 1000, DRIVE_RETRY_AFTER_CAP_MS);
+  }
+  const dateMs = Date.parse(String(raw));
+  if (!Number.isNaN(dateMs)) {
+    return Math.min(Math.max(dateMs - Date.now(), 0), DRIVE_RETRY_AFTER_CAP_MS);
+  }
+  return null;
+}
+
+/**
+ * Run a Drive API call, retrying 429s/rate limits with exponential backoff until
+ * `deadlineAt`. Request paths use a short default budget; sync scripts pass a
+ * deadline up to ~an hour away so throttled runs finish instead of failing.
+ * @template T
+ * @param {string} label
+ * @param {() => Promise<T>} fn
+ * @param {{ deadlineAt?: number }} [options]
+ * @returns {Promise<T>}
+ */
+async function withDriveRetry(label, fn, options = {}) {
+  const deadlineAt = Number.isFinite(options.deadlineAt)
+    ? Number(options.deadlineAt)
+    : Date.now() + DRIVE_RETRY_DEFAULT_BUDGET_MS;
+  let attempt = 0;
+  for (;;) {
+    try {
+      return await fn();
+    } catch (error) {
+      if (!isRetryableDriveError(error)) {
+        throw error;
+      }
+      attempt += 1;
+      const backoffMs = Math.min(
+        DRIVE_RETRY_BACKOFF_BASE_MS * 2 ** (attempt - 1),
+        DRIVE_RETRY_BACKOFF_CAP_MS,
+      );
+      const jitteredMs = Math.round(backoffMs * (0.5 + Math.random() * 0.5));
+      const waitMs = Math.max(driveRetryAfterMs(error) ?? 0, jitteredMs);
+      if (Date.now() + waitMs > deadlineAt) {
+        throw error;
+      }
+      console.warn(
+        `[drive] ${label} throttled (HTTP ${driveErrorStatus(error) ?? "?"}); retrying in ${Math.round(waitMs / 1000)}s (attempt ${attempt})`,
+      );
+      await sleep(waitMs);
+    }
+  }
+}
+
+/**
+ * Extract a Drive file id from a webViewLink-style URL
+ * (e.g. https://drive.google.com/file/d/FILE_ID/view or ...?id=FILE_ID).
+ * @param {string|null|undefined} link
+ * @returns {string|null}
+ */
+function extractDriveFileIdFromLink(link) {
+  const url = String(link || "").trim();
+  if (!url) {
+    return null;
+  }
+  const pathMatch = url.match(/\/d\/([a-zA-Z0-9_-]{10,})/);
+  if (pathMatch) {
+    return pathMatch[1];
+  }
+  const queryMatch = url.match(/[?&]id=([a-zA-Z0-9_-]{10,})/);
+  if (queryMatch) {
+    return queryMatch[1];
+  }
+  return null;
+}
+
 /**
  * @param {string|string[]} extensionOrList
  * @returns {RegExp}
@@ -96,7 +221,7 @@ function parseVoiceMemoFile(file, submissionTimeSource, filenamePattern) {
 
 /**
  * @param {string} folderId
- * @param {{ extension?: string, submissionTimeSource?: 'createdTime'|'modifiedTime' }} [options]
+ * @param {{ extension?: string, submissionTimeSource?: 'createdTime'|'modifiedTime', deadlineAt?: number }} [options]
  * @returns {Promise<{
  *   memosById: Map<string, { aesopId: string, fileId: string, webViewLink: string, submittedAt: Date, fileName: string }>,
  *   duplicateAesopIds: Array<{ aesopId: string, files: Array<{ fileName: string, submittedAt: string }> }>,
@@ -113,6 +238,7 @@ async function scanVoiceMemoFolder(folderId, options = {}) {
 
   const { extensions, submissionTimeSource } = normalizeVoiceMemoScanOptions(options);
   const filenamePattern = buildVoiceMemoFilenamePattern(extensions);
+  const retryOptions = { deadlineAt: options.deadlineAt };
 
   const auth = await buildServiceAccountJwt([DRIVE_READONLY_SCOPE]);
   const drive = google.drive({ version: "v3", auth });
@@ -125,14 +251,20 @@ async function scanVoiceMemoFolder(folderId, options = {}) {
   let pageToken;
 
   do {
-    const response = await drive.files.list({
-      q: `'${normalizedFolderId}' in parents and trashed=false`,
-      fields: "nextPageToken, files(id, name, webViewLink, createdTime, modifiedTime)",
-      pageSize: 1000,
-      pageToken,
-      supportsAllDrives: true,
-      includeItemsFromAllDrives: true,
-    });
+    const currentPageToken = pageToken;
+    const response = await withDriveRetry(
+      "files.list(voice memo folder)",
+      () =>
+        drive.files.list({
+          q: `'${normalizedFolderId}' in parents and trashed=false`,
+          fields: "nextPageToken, files(id, name, webViewLink, createdTime, modifiedTime)",
+          pageSize: 1000,
+          pageToken: currentPageToken,
+          supportsAllDrives: true,
+          includeItemsFromAllDrives: true,
+        }),
+      retryOptions,
+    );
     recordDriveFilesList(1);
 
     for (const file of response.data.files || []) {
@@ -302,11 +434,13 @@ async function streamVoiceMemoFile(fileId, rangeHeader) {
   const auth = await buildServiceAccountJwt([DRIVE_READONLY_SCOPE]);
   const drive = google.drive({ version: "v3", auth });
 
-  const meta = await drive.files.get({
-    fileId: normalizedFileId,
-    fields: "mimeType,name,size",
-    supportsAllDrives: true,
-  });
+  const meta = await withDriveRetry("files.get(stream metadata)", () =>
+    drive.files.get({
+      fileId: normalizedFileId,
+      fields: "mimeType,name,size",
+      supportsAllDrives: true,
+    }),
+  );
   recordDriveFilesGet(1);
 
   const fileName = String(meta.data.name || "voice-memo.m4a");
@@ -318,9 +452,11 @@ async function streamVoiceMemoFile(fileId, rangeHeader) {
     requestOptions.headers = { Range: rangeHeader };
   }
 
-  const media = await drive.files.get(
-    { fileId: normalizedFileId, alt: "media", supportsAllDrives: true },
-    requestOptions,
+  const media = await withDriveRetry("files.get(stream media)", () =>
+    drive.files.get(
+      { fileId: normalizedFileId, alt: "media", supportsAllDrives: true },
+      requestOptions,
+    ),
   );
   recordDriveFilesGet(1);
 
@@ -381,7 +517,7 @@ function normalizeParsedDurationSeconds(duration) {
 
 /**
  * @param {string} fileId
- * @param {{ timeoutMs?: number }} [options]
+ * @param {{ timeoutMs?: number, deadlineAt?: number }} [options]
  * @returns {Promise<number|null>} duration in seconds, or null if unknown
  */
 async function getVoiceMemoDurationSeconds(fileId, options = {}) {
@@ -390,11 +526,14 @@ async function getVoiceMemoDurationSeconds(fileId, options = {}) {
     return null;
   }
 
-  const timeoutMs = Number.isFinite(options.timeoutMs) ? options.timeoutMs : 30000;
+  const deadlineAt = Number.isFinite(options.deadlineAt) ? Number(options.deadlineAt) : null;
+  // With a retry deadline, don't let the overall timeout cut the retry budget short.
+  const defaultTimeoutMs = deadlineAt ? Math.max(30000, deadlineAt - Date.now() + 5000) : 30000;
+  const timeoutMs = Number.isFinite(options.timeoutMs) ? options.timeoutMs : defaultTimeoutMs;
 
   try {
     return await Promise.race([
-      readVoiceMemoDurationSeconds(normalizedFileId),
+      readVoiceMemoDurationSeconds(normalizedFileId, { deadlineAt: deadlineAt ?? undefined }),
       new Promise((resolve) => {
         setTimeout(() => resolve(null), timeoutMs);
       }),
@@ -424,17 +563,24 @@ async function parseDurationFromAudioBuffer(buffer, fileInfo) {
 
 /**
  * @param {string} fileId
+ * @param {{ deadlineAt?: number }} [options]
  * @returns {Promise<number|null>}
  */
-async function readVoiceMemoDurationSeconds(fileId) {
+async function readVoiceMemoDurationSeconds(fileId, options = {}) {
+  const retryOptions = { deadlineAt: options.deadlineAt };
   const auth = await buildServiceAccountJwt([DRIVE_READONLY_SCOPE]);
   const drive = google.drive({ version: "v3", auth });
 
-  const meta = await drive.files.get({
-    fileId,
-    fields: "mimeType,name,size,videoMediaMetadata(durationMillis)",
-    supportsAllDrives: true,
-  });
+  const meta = await withDriveRetry(
+    "files.get(duration metadata)",
+    () =>
+      drive.files.get({
+        fileId,
+        fields: "mimeType,name,size,videoMediaMetadata(durationMillis)",
+        supportsAllDrives: true,
+      }),
+    retryOptions,
+  );
   recordDriveFilesGet(1);
 
   const fileName = String(meta.data.name || "");
@@ -459,9 +605,14 @@ async function readVoiceMemoDurationSeconds(fileId) {
     return null;
   }
 
-  const media = await drive.files.get(
-    { fileId, alt: "media", supportsAllDrives: true },
-    { responseType: "arraybuffer" },
+  const media = await withDriveRetry(
+    "files.get(duration media)",
+    () =>
+      drive.files.get(
+        { fileId, alt: "media", supportsAllDrives: true },
+        { responseType: "arraybuffer" },
+      ),
+    retryOptions,
   );
   recordDriveFilesGet(1);
 
@@ -474,7 +625,7 @@ async function readVoiceMemoDurationSeconds(fileId) {
 
 /**
  * @param {string[]} fileIds
- * @param {{ concurrency?: number, timeoutMs?: number }} [options]
+ * @param {{ concurrency?: number, timeoutMs?: number, deadlineAt?: number }} [options]
  * @returns {Promise<Map<string, number|null>>}
  */
 async function resolveVoiceMemoDurationsMap(fileIds, options = {}) {
@@ -504,6 +655,8 @@ module.exports = {
   DRIVE_READONLY_SCOPE,
   normalizeVoiceMemoScanOptions,
   buildVoiceMemoFilenamePattern,
+  withDriveRetry,
+  extractDriveFileIdFromLink,
   scanVoiceMemoFolder,
   listVoiceMemoFiles,
   getVoiceMemoFileForAesopId,

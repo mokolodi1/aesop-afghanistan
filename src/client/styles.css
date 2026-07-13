@@ -4826,3 +4826,146 @@ html[dir='rtl'] .portal-voice-memo-substeps {
     padding: 0;
   }
 }
+
+/* Admin Jobs tab */
+
+.portal-admin-job-card {
+  margin-top: 28px;
+  padding-top: 20px;
+  border-top: 1px solid #e7e5e4;
+}
+
+.portal-admin-job-card:first-of-type {
+  margin-top: 20px;
+}
+
+.portal-job-status {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  line-height: 1.35;
+  border: 1px solid transparent;
+}
+
+.portal-job-status--succeeded {
+  color: #166534;
+  background: #dcfce7;
+  border-color: #86efac;
+}
+
+.portal-job-status--failed {
+  color: #991b1b;
+  background: #fee2e2;
+  border-color: #fca5a5;
+}
+
+.portal-job-status--running {
+  color: #1e40af;
+  background: #dbeafe;
+  border-color: #93c5fd;
+}
+
+.portal-job-status--skipped {
+  color: #78350f;
+  background: #fef3c7;
+  border-color: #fcd34d;
+}
+
+.portal-admin-job-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 12px 0 16px;
+}
+
+.portal-admin-job-actions button {
+  width: auto;
+  padding: 10px 18px;
+  font-size: 0.95rem;
+}
+
+.portal-admin-job-summary {
+  max-width: 360px;
+  font-size: 0.88rem;
+  color: var(--aesop-text-muted);
+  overflow-wrap: anywhere;
+}
+
+.portal-admin-job-log-link {
+  appearance: none;
+  width: auto;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  padding: 4px 12px;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  background: #f5f5f4;
+  color: inherit;
+}
+
+.portal-admin-job-log-link:hover {
+  border-color: #d6d3d1;
+  transform: none;
+  box-shadow: none;
+}
+
+.portal-admin-job-log {
+  margin-top: 16px;
+  padding: 14px 16px;
+  border-radius: var(--aesop-radius-md);
+  border: 1px solid #e7e5e4;
+  background: #fafaf9;
+}
+
+.portal-admin-job-log-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.portal-admin-job-log-title {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--aesop-teal-dark);
+}
+
+.portal-admin-job-log-close {
+  appearance: none;
+  width: auto;
+  flex-shrink: 0;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  padding: 4px 12px;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  background: #f5f5f4;
+  color: inherit;
+}
+
+.portal-admin-job-log-close:hover {
+  border-color: #d6d3d1;
+  transform: none;
+  box-shadow: none;
+}
+
+.portal-admin-job-log-output {
+  margin: 0;
+  max-height: 420px;
+  overflow: auto;
+  padding: 12px 14px;
+  border-radius: var(--aesop-radius-md);
+  background: #1c1917;
+  color: #e7e5e4;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

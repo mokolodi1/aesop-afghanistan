@@ -1,0 +1,25 @@
+# Scheduled syncs, run by Supercronic on the Fly.io `cron` Machine
+# (spawned by scripts/cron-server.js — see [processes] in fly.toml).
+# Deployed with the app image on every `fly deploy` — no manual scheduling
+# scripts. The same Machine also serves the admin Jobs tab's on-demand
+# triggers over private networking.
+#
+# Every job goes through scripts/run-job.js, which records the run and its
+# logs in the job_runs table (visible in the admin portal's Jobs tab).
+# Job definitions live in services/jobRegistry.js.
+#
+# All times are UTC (Fly Machines run UTC). Supercronic skips a run if the
+# previous run of the same job is still going, and run-job.js records a
+# 'skipped' row if another run of the same job is active.
+
+# Hourly Postgres cache refresh: People, current Ding numbers, Applicants,
+# ApplicantReviews, and Drive voice memo metadata. Classroom is excluded
+# unless HOURLY_CACHE_INCLUDE_CLASSROOM=true is set in fly.toml [env].
+0 * * * * node scripts/run-job.js hourly-cache
+
+# Daily Google Classroom sync (rosters, grades, Ding change history).
+# Requires classroom.enabled=true in SECRETS_JSON.
+30 2 * * * node scripts/run-job.js classroom-sync
+
+# Daily voice memo sync from Google Drive to the Applicants sheet.
+30 3 * * * node scripts/run-job.js voice-memo-sync

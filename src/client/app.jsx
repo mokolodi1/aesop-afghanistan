@@ -3703,6 +3703,394 @@ function formatMirrorCacheFreshness(entry) {
   return 'Never synced';
 }
 
+const JOB_STATUS_LABELS = {
+  running: 'Running',
+  succeeded: 'Succeeded',
+  failed: 'Failed',
+  skipped: 'Skipped',
+};
+
+function formatJobTimestamp(iso) {
+  return iso ? new Date(iso).toLocaleString() : '—';
+}
+
+function formatJobDuration(durationMs) {
+  if (durationMs == null || !Number.isFinite(durationMs) || durationMs < 0) {
+    return '—';
+  }
+  const totalSeconds = Math.round(durationMs / 1000);
+  if (totalSeconds < 60) {
+    return `${totalSeconds}s`;
+  }
+  const minutes = Math.floor(totalSeconds / 60);
+  if (minutes < 60) {
+    return `${minutes}m ${totalSeconds % 60}s`;
+  }
+  return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+}
+
+function formatJobTrigger(run) {
+  if (!run) {
+    return '—';
+  }
+  return run.triggerSource === 'admin' ? `by ${run.triggeredBy || 'admin'}` : 'scheduled';
+}
+
+/** Short "key: value" summary of the numeric fields in a job result. */
+function summarizeJobResult(result) {
+  if (!result || typeof result !== 'object') {
+    return '';
+  }
+  const parts = [];
+  for (const [key, value] of Object.entries(result)) {
+    if (typeof value === 'number') {
+      parts.push(`${key}: ${value}`);
+    } else if (value && typeof value === 'object' && !Array.isArray(value)) {
+      for (const [nestedKey, nestedValue] of Object.entries(value)) {
+        if (typeof nestedValue === 'number') {
+          parts.push(`${key}.${nestedKey}: ${nestedValue}`);
+        }
+      }
+    }
+  }
+  return parts.slice(0, 8).join(' · ');
+}
+
+function PortalAdminJobStatusBadge({ status }) {
+  return (
+    <span className={`portal-job-status portal-job-status--${status}`}>
+      {JOB_STATUS_LABELS[status] || status}
+    </span>
+  );
+}
+
+function PortalAdminJobLogPanel({ jobName, logRun, logError, onClose }) {
+  return (
+    <div className="portal-admin-job-log">
+      <div className="portal-admin-job-log-header">
+        <h4 className="portal-admin-job-log-title">
+          {logRun ? (
+            <>
+              Run #{logRun.id} · <PortalAdminJobStatusBadge status={logRun.status} /> ·{' '}
+              {formatJobTimestamp(logRun.startedAt)} · {formatJobDuration(logRun.durationMs)} ·{' '}
+              {formatJobTrigger(logRun)}
+            </>
+          ) : (
+            'Run log'
+          )}
+        </h4>
+        <button type="button" className="portal-admin-job-log-close" onClick={onClose}>
+          Close
+        </button>
+      </div>
+      {logError ? (
+        <p className="portal-admin-status portal-admin-status--error" role="alert">
+          {logError}
+        </p>
+      ) : null}
+      {logRun ? (
+        <>
+          {logRun.error ? (
+            <p className="portal-admin-status portal-admin-status--error">{logRun.error}</p>
+          ) : null}
+          {jobName === 'voice-memo-sync' && logRun.result ? (
+            <PortalAdminVoiceMemoSyncIssuesPanel syncResult={logRun.result} />
+          ) : null}
+          <pre className="portal-admin-job-log-output">{logRun.logs || 'No logs captured.'}</pre>
+          {logRun.status === 'running' ? (
+            <p className="portal-admin-hint">Still running — logs refresh every few seconds.</p>
+          ) : null}
+        </>
+      ) : !logError ? (
+        <p className="portal-admin-status">Loading log…</p>
+      ) : null}
+    </div>
+  );
+}
+
+function PortalAdminJobsTab({ mirrorCacheStatus }) {
+  const [overview, setOverview] = useState(null);
+  const [overviewError, setOverviewError] = useState('');
+  const [overviewLoading, setOverviewLoading] = useState(true);
+  const [runsByJob, setRunsByJob] = useState({});
+  const [runsLoading, setRunsLoading] = useState(false);
+  const [expandedJob, setExpandedJob] = useState('');
+  const [triggeringJob, setTriggeringJob] = useState('');
+  const [actionError, setActionError] = useState('');
+  const [logView, setLogView] = useState(null);
+  const [logRun, setLogRun] = useState(null);
+  const [logError, setLogError] = useState('');
+  const [refreshTick, setRefreshTick] = useState(0);
+
+  // Load the overview, then keep polling — quickly while a job is running.
+  useEffect(() => {
+    let cancelled = false;
+    let timer = null;
+    const load = async () => {
+      try {
+        const data = await adminApiPost('/api/portal-admin/jobs/overview');
+        if (cancelled) {
+          return;
+        }
+        setOverview(data);
+        setOverviewError('');
+        const anyRunning = (data.jobs || []).some((job) => job.lastRun?.status === 'running');
+        timer = setTimeout(load, anyRunning ? 4000 : 30000);
+      } catch (err) {
+        if (cancelled) {
+          return;
+        }
+        setOverviewError(err.message || 'Could not load jobs.');
+        timer = setTimeout(load, 15000);
+      } finally {
+        if (!cancelled) {
+          setOverviewLoading(false);
+        }
+      }
+    };
+    load();
+    return () => {
+      cancelled = true;
+      if (timer) {
+        clearTimeout(timer);
+      }
+    };
+  }, [refreshTick]);
+
+  // Run history for the expanded job; refreshes with each overview poll.
+  useEffect(() => {
+    if (!expandedJob) {
+      return undefined;
+    }
+    let cancelled = false;
+    setRunsLoading(true);
+    adminApiPost('/api/portal-admin/jobs/runs', { job: expandedJob, limit: 20 })
+      .then((data) => {
+        if (!cancelled) {
+          setRunsByJob((prev) => ({ ...prev, [expandedJob]: data.runs || [] }));
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) {
+          setRunsLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [expandedJob, overview]);
+
+  // Full log for the selected run; refreshes with each overview poll while running.
+  useEffect(() => {
+    if (!logView) {
+      setLogRun(null);
+      setLogError('');
+      return undefined;
+    }
+    let cancelled = false;
+    adminApiPost('/api/portal-admin/jobs/run-log', { runId: logView.runId })
+      .then((data) => {
+        if (!cancelled) {
+          setLogRun(data.run || null);
+          setLogError('');
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setLogError(err.message || 'Could not load the run log.');
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [logView, overview]);
+
+  const runJob = async (jobName) => {
+    setTriggeringJob(jobName);
+    setActionError('');
+    try {
+      const data = await adminApiPost('/api/portal-admin/jobs/run', { job: jobName });
+      setExpandedJob(jobName);
+      if (data.runId != null) {
+        setLogView({ runId: data.runId, jobName });
+      }
+      setRefreshTick((tick) => tick + 1);
+    } catch (err) {
+      setActionError(err.message || 'Could not start the job.');
+    } finally {
+      setTriggeringJob('');
+    }
+  };
+
+  return (
+    <section className="portal-admin-panel" aria-label="Jobs">
+      <p className="portal-admin-hint">
+        Sync jobs run on the dedicated cron machine — on their schedule and on demand from here.
+        Every run is recorded with its logs.
+      </p>
+      {mirrorCacheStatus ? (
+        <dl className="portal-admin-stats portal-admin-stats--compact">
+          <div className="portal-admin-stat-row">
+            <dt>People cache</dt>
+            <dd>{formatMirrorCacheFreshness(mirrorCacheStatus.people)}</dd>
+          </div>
+          <div className="portal-admin-stat-row">
+            <dt>Applicants cache</dt>
+            <dd>{formatMirrorCacheFreshness(mirrorCacheStatus.applicants)}</dd>
+          </div>
+          <div className="portal-admin-stat-row">
+            <dt>Classroom cache</dt>
+            <dd>{formatMirrorCacheFreshness(mirrorCacheStatus.classroom)}</dd>
+          </div>
+        </dl>
+      ) : null}
+      {overviewLoading && !overview ? <p className="portal-admin-status">Loading jobs…</p> : null}
+      {overviewError ? (
+        <p className="portal-admin-status portal-admin-status--error" role="alert">
+          {overviewError}
+        </p>
+      ) : null}
+      {actionError ? (
+        <p className="portal-admin-status portal-admin-status--error" role="alert">
+          {actionError}
+        </p>
+      ) : null}
+      {overview && overview.databaseEnabled === false ? (
+        <p className="portal-admin-hint">
+          Postgres is not configured — job history requires DATABASE_URL.
+        </p>
+      ) : null}
+      {(overview?.jobs || []).map((job) => {
+        const lastRun = job.lastRun;
+        const isRunning = lastRun?.status === 'running';
+        const isExpanded = expandedJob === job.name;
+        const runs = runsByJob[job.name] || [];
+        return (
+          <div key={job.name} className="portal-admin-voice-memo-sync portal-admin-job-card">
+            <h3 className="portal-admin-subheading">{job.label}</h3>
+            <p className="portal-admin-hint">{job.description}</p>
+            <dl className="portal-admin-stats portal-admin-stats--compact">
+              <div className="portal-admin-stat-row">
+                <dt>Schedule</dt>
+                <dd>{job.schedule}</dd>
+              </div>
+              <div className="portal-admin-stat-row">
+                <dt>Last run</dt>
+                <dd>
+                  {lastRun ? (
+                    <>
+                      <PortalAdminJobStatusBadge status={lastRun.status} />{' '}
+                      {formatJobTimestamp(lastRun.startedAt)}
+                      {lastRun.status !== 'running'
+                        ? ` · ${formatJobDuration(lastRun.durationMs)}`
+                        : ''}{' '}
+                      · {formatJobTrigger(lastRun)}
+                    </>
+                  ) : (
+                    'No runs recorded yet'
+                  )}
+                </dd>
+              </div>
+              {lastRun?.status === 'failed' && lastRun.error ? (
+                <div className="portal-admin-stat-row">
+                  <dt>Error</dt>
+                  <dd>{lastRun.error}</dd>
+                </div>
+              ) : null}
+            </dl>
+            <div className="portal-admin-job-actions">
+              <button
+                type="button"
+                className="portal-btn portal-btn--secondary"
+                disabled={isRunning || triggeringJob === job.name}
+                onClick={() => runJob(job.name)}
+              >
+                {isRunning
+                  ? 'Running…'
+                  : triggeringJob === job.name
+                    ? 'Starting…'
+                    : 'Run now'}
+              </button>
+              <button
+                type="button"
+                className="portal-btn portal-btn--secondary"
+                onClick={() => {
+                  setExpandedJob(isExpanded ? '' : job.name);
+                  if (isExpanded && logView?.jobName === job.name) {
+                    setLogView(null);
+                  }
+                }}
+              >
+                {isExpanded ? 'Hide history' : 'View history'}
+              </button>
+            </div>
+            {isExpanded ? (
+              <>
+                {runsLoading && runs.length === 0 ? (
+                  <p className="portal-admin-status">Loading run history…</p>
+                ) : null}
+                {runs.length > 0 ? (
+                  <div className="portal-admin-table-wrap portal-admin-table-wrap--scroll">
+                    <table className="portal-admin-table portal-admin-job-runs-table">
+                      <thead>
+                        <tr>
+                          <th scope="col">Started</th>
+                          <th scope="col">Status</th>
+                          <th scope="col">Duration</th>
+                          <th scope="col">Trigger</th>
+                          <th scope="col">Summary</th>
+                          <th scope="col">Log</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {runs.map((run) => (
+                          <tr key={run.id}>
+                            <td>{formatJobTimestamp(run.startedAt)}</td>
+                            <td>
+                              <PortalAdminJobStatusBadge status={run.status} />
+                            </td>
+                            <td>{formatJobDuration(run.durationMs)}</td>
+                            <td>{formatJobTrigger(run)}</td>
+                            <td className="portal-admin-job-summary">
+                              {run.status === 'failed' || run.status === 'skipped'
+                                ? run.error || '—'
+                                : summarizeJobResult(run.result) || '—'}
+                            </td>
+                            <td>
+                              <button
+                                type="button"
+                                className="portal-admin-job-log-link"
+                                onClick={() => setLogView({ runId: run.id, jobName: job.name })}
+                              >
+                                View
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : !runsLoading ? (
+                  <p className="portal-admin-status">No runs recorded yet.</p>
+                ) : null}
+                {logView && logView.jobName === job.name ? (
+                  <PortalAdminJobLogPanel
+                    jobName={job.name}
+                    logRun={logRun}
+                    logError={logError}
+                    onClose={() => setLogView(null)}
+                  />
+                ) : null}
+              </>
+            ) : null}
+          </div>
+        );
+      })}
+    </section>
+  );
+}
+
 function PortalAdminPage() {
   const { isAdmin } = usePortalClassGrade();
   const signedIn = isPortalSessionCompleteSync();
@@ -3726,15 +4114,7 @@ function PortalAdminPage() {
   const [exportError, setExportError] = useState('');
   const [exportDownloading, setExportDownloading] = useState(false);
 
-  const [voiceMemoSyncLoading, setVoiceMemoSyncLoading] = useState(false);
-  const [voiceMemoSyncError, setVoiceMemoSyncError] = useState('');
-  const [voiceMemoSyncResult, setVoiceMemoSyncResult] = useState(null);
-
   const [mirrorCacheStatus, setMirrorCacheStatus] = useState(null);
-  const [cacheRefreshLoading, setCacheRefreshLoading] = useState(false);
-  const [cacheRefreshError, setCacheRefreshError] = useState('');
-  const [cacheRefreshResult, setCacheRefreshResult] = useState(null);
-  const [cacheRefreshIncludeClassroom, setCacheRefreshIncludeClassroom] = useState(true);
 
   const [round1StatsLoading, setRound1StatsLoading] = useState(false);
   const [round1StatsError, setRound1StatsError] = useState('');
@@ -3770,7 +4150,7 @@ function PortalAdminPage() {
   }, [signedIn, isAdmin, activeTab]);
 
   useEffect(() => {
-    if (!signedIn || !isAdmin || activeTab !== 'overview') {
+    if (!signedIn || !isAdmin || activeTab !== 'jobs') {
       return undefined;
     }
     let cancelled = false;
@@ -3789,7 +4169,7 @@ function PortalAdminPage() {
     return () => {
       cancelled = true;
     };
-  }, [signedIn, isAdmin, activeTab, cacheRefreshResult]);
+  }, [signedIn, isAdmin, activeTab]);
 
   useEffect(() => {
     if (!signedIn || !isAdmin || activeTab !== 'high-grades') {
@@ -3882,51 +4262,6 @@ function PortalAdminPage() {
     }
   };
 
-  const runVoiceMemoSync = async () => {
-    setVoiceMemoSyncLoading(true);
-    setVoiceMemoSyncError('');
-    setVoiceMemoSyncResult(null);
-    try {
-      const data = await adminApiPost('/api/portal-admin/voice-memo/sync');
-      setVoiceMemoSyncResult(data);
-    } catch (err) {
-      setVoiceMemoSyncError(err.message || 'Voice memo sync failed.');
-    } finally {
-      setVoiceMemoSyncLoading(false);
-    }
-  };
-
-  const runCacheRefresh = async () => {
-    setCacheRefreshLoading(true);
-    setCacheRefreshError('');
-    setCacheRefreshResult(null);
-    try {
-      const data = await adminApiPost('/api/portal-admin/cache/refresh', {
-        includeClassroom: cacheRefreshIncludeClassroom,
-      });
-      setCacheRefreshResult(data);
-      if (data.mirrorCache) {
-        setMirrorCacheStatus(data.mirrorCache);
-      }
-      if (activeTab === 'overview') {
-        setDashboardLoading(true);
-        setDashboardError('');
-        try {
-          const dashboardData = await adminApiPost('/api/portal-admin/dashboard');
-          setDashboard(dashboardData.dashboard || null);
-        } catch (err) {
-          setDashboardError(err.message || 'Could not reload dashboard.');
-        } finally {
-          setDashboardLoading(false);
-        }
-      }
-    } catch (err) {
-      setCacheRefreshError(err.message || 'Cache refresh failed.');
-    } finally {
-      setCacheRefreshLoading(false);
-    }
-  };
-
   const runRound1StatsCheck = async () => {
     setRound1StatsLoading(true);
     setRound1StatsError('');
@@ -3993,6 +4328,7 @@ function PortalAdminPage() {
         <nav className="portal-admin-tabs" aria-label="Admin sections">
           {[
             { id: 'overview', label: 'Overview' },
+            { id: 'jobs', label: 'Jobs' },
             { id: 'all-classes', label: 'All classes' },
             { id: 'lookup', label: 'Student lookup' },
             { id: 'high-grades', label: `Grades above ${thresholdLabel}%` },
@@ -4059,158 +4395,6 @@ function PortalAdminPage() {
               </dl>
             ) : null}
             {dashboard?.syncHint ? <p className="portal-admin-hint">{dashboard.syncHint}</p> : null}
-            <div className="portal-admin-voice-memo-sync">
-              <h3 className="portal-admin-subheading">Portal cache</h3>
-              <p className="portal-admin-hint">
-                Refresh the Postgres mirror from Google Sheets and Drive (People, Ding numbers,
-                Applicants, voice memo metadata). When Classroom sync is enabled, also pulls live
-                Classroom rosters and grades. This can take several minutes — keep this tab open
-                until it finishes.
-              </p>
-              {mirrorCacheStatus ? (
-                <dl className="portal-admin-stats portal-admin-stats--compact">
-                  <div className="portal-admin-stat-row">
-                    <dt>People cache</dt>
-                    <dd>{formatMirrorCacheFreshness(mirrorCacheStatus.people)}</dd>
-                  </div>
-                  <div className="portal-admin-stat-row">
-                    <dt>Applicants cache</dt>
-                    <dd>{formatMirrorCacheFreshness(mirrorCacheStatus.applicants)}</dd>
-                  </div>
-                  <div className="portal-admin-stat-row">
-                    <dt>Classroom cache</dt>
-                    <dd>{formatMirrorCacheFreshness(mirrorCacheStatus.classroom)}</dd>
-                  </div>
-                </dl>
-              ) : null}
-              {dashboard?.classroomEnabled ? (
-                <label className="portal-admin-emails-checkbox">
-                  <input
-                    type="checkbox"
-                    checked={cacheRefreshIncludeClassroom}
-                    disabled={cacheRefreshLoading}
-                    onChange={(event) => setCacheRefreshIncludeClassroom(event.target.checked)}
-                  />
-                  Include Google Classroom sync (rosters and grades)
-                </label>
-              ) : null}
-              <button
-                type="button"
-                className="portal-btn portal-btn--secondary"
-                disabled={cacheRefreshLoading || !dashboard?.databaseEnabled}
-                onClick={runCacheRefresh}
-              >
-                {cacheRefreshLoading ? 'Refreshing caches…' : 'Refresh all caches'}
-              </button>
-              {!dashboard?.databaseEnabled ? (
-                <p className="portal-admin-hint">
-                  Postgres is not configured — portal cache refresh requires DATABASE_URL.
-                </p>
-              ) : null}
-              {cacheRefreshError ? (
-                <p className="portal-admin-status portal-admin-status--error" role="alert">
-                  {cacheRefreshError}
-                </p>
-              ) : null}
-              {cacheRefreshResult ? (
-                <dl className="portal-admin-stats portal-admin-stats--compact">
-                  {cacheRefreshResult.mirror ? (
-                    <>
-                      <div className="portal-admin-stat-row">
-                        <dt>People mirrored</dt>
-                        <dd>{cacheRefreshResult.mirror.people ?? 0}</dd>
-                      </div>
-                      <div className="portal-admin-stat-row">
-                        <dt>Ding numbers mirrored</dt>
-                        <dd>{cacheRefreshResult.mirror.dingNumbers ?? 0}</dd>
-                      </div>
-                      <div className="portal-admin-stat-row">
-                        <dt>Applicants mirrored</dt>
-                        <dd>{cacheRefreshResult.mirror.applicants ?? 0}</dd>
-                      </div>
-                      <div className="portal-admin-stat-row">
-                        <dt>Drive voice files indexed</dt>
-                        <dd>{cacheRefreshResult.mirror.driveFiles ?? 0}</dd>
-                      </div>
-                    </>
-                  ) : null}
-                  {cacheRefreshResult.classroom ? (
-                    <>
-                      <div className="portal-admin-stat-row">
-                        <dt>Classroom courses</dt>
-                        <dd>{cacheRefreshResult.classroom.courses ?? 0}</dd>
-                      </div>
-                      <div className="portal-admin-stat-row">
-                        <dt>Teachers synced</dt>
-                        <dd>{cacheRefreshResult.classroom.teachers ?? 0}</dd>
-                      </div>
-                      <div className="portal-admin-stat-row">
-                        <dt>Students synced</dt>
-                        <dd>{cacheRefreshResult.classroom.students ?? 0}</dd>
-                      </div>
-                      <div className="portal-admin-stat-row">
-                        <dt>Grade rows</dt>
-                        <dd>{cacheRefreshResult.classroom.gradeRows ?? 0}</dd>
-                      </div>
-                    </>
-                  ) : null}
-                </dl>
-              ) : null}
-            </div>
-            <div className="portal-admin-voice-memo-sync">
-              <h3 className="portal-admin-subheading">Voice memos</h3>
-              <p className="portal-admin-hint">
-                Check Google Drive for voice notes named like{' '}
-                <code>{'{AESOP ID}'}.m4a</code>, <code>{'{AESOP ID}'}.aac</code>,{' '}
-                <code>{'{AESOP ID}'}.mp3</code>, <code>{'{AESOP ID}'}.ogg</code>, or{' '}
-                <code>{'{AESOP ID}'}.opus</code> and update the Applicants sheet: Round 2, Voice
-                note link, and Voice note last updated.
-              </p>
-              <button
-                type="button"
-                className="portal-btn portal-btn--secondary"
-                disabled={voiceMemoSyncLoading}
-                onClick={runVoiceMemoSync}
-              >
-                {voiceMemoSyncLoading ? 'Syncing voice memos…' : 'Sync voice memos'}
-              </button>
-              {voiceMemoSyncError ? (
-                <p className="portal-admin-status portal-admin-status--error" role="alert">
-                  {voiceMemoSyncError}
-                </p>
-              ) : null}
-              {voiceMemoSyncResult ? (
-                <>
-                  <dl className="portal-admin-stats portal-admin-stats--compact" role="status">
-                    <div className="portal-admin-stat-row">
-                      <dt>Wrote Round 2, link, and date</dt>
-                      <dd>{voiceMemoSyncResult.updated ?? 0}</dd>
-                    </div>
-                    <div className="portal-admin-stat-row">
-                      <dt>Already up to date</dt>
-                      <dd>{voiceMemoSyncResult.skippedUpToDate ?? 0}</dd>
-                    </div>
-                    <div className="portal-admin-stat-row">
-                      <dt>Skipped — no voice note in Drive</dt>
-                      <dd>{voiceMemoSyncResult.skippedNoFile ?? 0}</dd>
-                    </div>
-                    <div className="portal-admin-stat-row">
-                      <dt>Skipped — Round 1 not accepted</dt>
-                      <dd>{voiceMemoSyncResult.skippedNotAccepted ?? 0}</dd>
-                    </div>
-                    <div className="portal-admin-stat-row">
-                      <dt>Skipped — no AESOP ID</dt>
-                      <dd>{voiceMemoSyncResult.skippedNoId ?? 0}</dd>
-                    </div>
-                    <div className="portal-admin-stat-row">
-                      <dt>Matched voice notes in Drive</dt>
-                      <dd>{voiceMemoSyncResult.driveFileCount ?? 0}</dd>
-                    </div>
-                  </dl>
-                  <PortalAdminVoiceMemoSyncIssuesPanel syncResult={voiceMemoSyncResult} />
-                </>
-              ) : null}
-            </div>
             <div className="portal-admin-voice-memo-sync portal-admin-application-stats">
               <h3 className="portal-admin-subheading">Application status (Round 1)</h3>
               <p className="portal-admin-hint">
@@ -4343,6 +4527,8 @@ function PortalAdminPage() {
             </div>
           </section>
         ) : null}
+
+        {activeTab === 'jobs' ? <PortalAdminJobsTab mirrorCacheStatus={mirrorCacheStatus} /> : null}
 
         {activeTab === 'all-classes' ? (
           <section className="portal-admin-panel" aria-label="All classes">

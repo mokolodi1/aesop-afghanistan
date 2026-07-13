@@ -53,16 +53,16 @@ When cache is stale, reads fall back to live Sheets/Classroom (slower but curren
 
 ### Refresh the cache (hourly on Fly)
 
-**Hourly job** — People, current Ding numbers, **Applicants**, **ApplicantReviews**, and **Google Drive** voice memo metadata:
+All scheduled syncs are defined in the repo's `crontab` and run by Supercronic on the `cron` process group Machine (see `[processes]` in `fly.toml` and `scripts/cron-server.js`). They deploy with the app image on every `fly deploy` — no manual scheduling scripts.
+
+Every run — scheduled or admin-triggered — goes through `scripts/run-job.js`, which records it in the **`job_runs`** table (status, duration, trigger, result summary, and captured console logs, pruned to the last 100 runs per job). Job definitions live in `services/jobRegistry.js`; the admin portal's **Jobs tab** lists each job with its last run, run history, logs, and a **Run now** button.
+
+On-demand runs from the Jobs tab are forwarded to the cron Machine over Fly private networking (`cron.process.<app>.internal`, port `CRON_TRIGGER_PORT`, default 3100), so heavy syncs run on the 1GB cron Machine instead of a 512MB web Machine. The trigger returns a `job_runs` id immediately and the UI polls for progress. If the cron Machine is unreachable (e.g. local dev), the web process spawns the job locally instead.
+
+**Hourly job** (top of each hour, UTC) — People, current Ding numbers, **Applicants**, **ApplicantReviews**, and **Google Drive** voice memo metadata:
 
 ```bash
 npm run sync:hourly-cache
-```
-
-Schedule on Fly:
-
-```bash
-bash scripts/schedule-hourly-cache.sh
 ```
 
 This runs `mirrorPeopleAndDingFromSheets()` every hour (without full Ding change history):
@@ -78,18 +78,14 @@ Other hourly mirrors:
 | Ding changes tab (current values only) | `ding_numbers` |
 | Applicants tab | `applicants` |
 | ApplicantReviews tab | `applicant_reviews` |
-| Google Drive folder | `applicants.drive_file_id`, `drive_file_name`, `drive_duration_seconds` |
+| Google Drive folder | `applicants.drive_file_id`, `drive_file_name`, `drive_duration_seconds` (length is read from the sheet's `Voice memo length (secs)` column when its Voice note link matches the current Drive file; Drive is only probed for missing/changed files) |
 
-Google Classroom is **not** included in the hourly job by default (too heavy). Keep Classroom on a daily schedule (below). To also run Classroom hourly, set `HOURLY_CACHE_INCLUDE_CLASSROOM=true` on the scheduled machine.
+Google Classroom is **not** included in the hourly job by default (too heavy). Keep Classroom on a daily schedule (below). To also run Classroom hourly, set `HOURLY_CACHE_INCLUDE_CLASSROOM=true` in `fly.toml` `[env]`.
 
-**Daily job** — Google Classroom rosters, grades, enrollments (+ sheet dual-write + backup export), and **Ding change history**:
+**Daily job** (02:30 UTC, see `crontab`) — Google Classroom rosters, grades, enrollments (+ sheet dual-write + backup export), and **Ding change history**:
 
 ```bash
 npm run sync:classroom
-```
-
-```bash
-bash scripts/schedule-classroom-sync.sh
 ```
 
 **People vs Classroom:** the hourly job owns the `people` table (from the **People** sheet). Classroom sync only writes `courses`, enrollments, and grades, and links them to emails that already exist in `people`. It does **not** create people rows for Classroom-only emails without a People sheet row. Run `sync:hourly-cache` before `sync:classroom` when both are due.
@@ -182,7 +178,8 @@ Returns `{ ok, database: { enabled, ok }, classroomEnabled }`.
 
 ## Schema overview
 
-- `sync_runs` — sync job audit log
+- `sync_runs` — Classroom sync audit log (legacy; superseded by `job_runs` for the Jobs tab)
+- `job_runs` — one row per sync job run (scheduled or admin-triggered) with status, result summary, and captured logs
 - `people` — AESOP IDs, emails, portal roles (**People sheet mirror only**; Classroom sync links by email)
 - `courses`, `course_enrollments`, `course_grades`, `assignments`, `assignment_grades` — Classroom cache
 - `ding_numbers`, `ding_change_history`, `ding_topups` — Ding mirror and future DingConnect automation audit

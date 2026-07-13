@@ -2,7 +2,11 @@ const { eq, and, sql } = require("drizzle-orm");
 const config = require("../config/secrets");
 const { getDb, getPool, isDatabaseEnabled } = require("../db/index");
 const { people, dingNumbers, dingChangeHistory } = require("../db/schema");
-const { upsertApplicantFromMirror, upsertApplicantReviewFromMirror } = require("./classroomDb");
+const {
+  upsertApplicantFromMirror,
+  upsertApplicantReviewFromMirror,
+  getApplicantVoiceMemoDurationsMapFromDb,
+} = require("./classroomDb");
 const {
   loadAllPeopleRowsFromSheets,
   loadEmailToPeopleProfileMap,
@@ -22,8 +26,16 @@ const {
   getVoiceMemoDriveScanOptions,
   findVoiceMemoInScan,
   readApplicantRound2Prompt,
+  parseVoiceMemoSheetLengthSeconds,
 } = require("./voiceMemoSync");
-const { scanVoiceMemoFolder, resolveVoiceMemoDurationsMap } = require("./googleDrive");
+const {
+  scanVoiceMemoFolder,
+  resolveVoiceMemoDurationsMap,
+  extractDriveFileIdFromLink,
+} = require("./googleDrive");
+
+/** Drive throttling can stretch the mirror; retry 429s for up to ~45 minutes. */
+const MIRROR_DRIVE_TIME_BUDGET_MS = 45 * 60 * 1000;
 
 
 const INSERT_PERSON_FROM_SHEET_SQL = `
@@ -477,27 +489,47 @@ async function mirrorApplicantsAndDriveFromSheets() {
   }
 
   const syncedAt = new Date();
+  const deadlineAt = Date.now() + MIRROR_DRIVE_TIME_BUDGET_MS;
   const { dataRows, columns, cfg } = await loadApplicantsDataForStats();
 
   const folderId = String(cfg.voiceMemo?.driveFolderId || "").trim();
   /** @type {Map<string, { aesopId: string, fileId: string, fileName: string }>} */
   let memoById = new Map();
-  /** @type {Map<string, number|null>} */
-  let durationsMap = new Map();
 
   if (folderId) {
     const scanOptions = getVoiceMemoDriveScanOptions(cfg.voiceMemo);
-    const scan = await scanVoiceMemoFolder(folderId, scanOptions);
+    const scan = await scanVoiceMemoFolder(folderId, { ...scanOptions, deadlineAt });
     memoById = scan.memosById;
-    const fileIds = [...memoById.values()].map((memo) => memo.fileId);
-    durationsMap = await resolveVoiceMemoDurationsMap(fileIds, { concurrency: 4 });
   }
 
-  let mirrored = 0;
+  // Durations come from the sheet's "Voice memo length (secs)" column (when its
+  // Voice note link still matches the current Drive file), then the existing DB
+  // cache for that file id. Only files with no known length are probed from Drive.
+  /** @type {Map<string, number>} */
+  let cachedDurationByFileId = new Map();
+  try {
+    const cached = await getApplicantVoiceMemoDurationsMapFromDb();
+    if (cached) {
+      cachedDurationByFileId = cached.byFileId;
+    }
+  } catch (error) {
+    console.warn(
+      "[mirror] could not load cached voice memo durations:",
+      error.message || error,
+    );
+  }
+
   const gs = config.googleSheets || {};
   const levelColumnIndex = resolveColumnIndex(gs.admissionsLevelColumn || "E");
   const ageColumnIndex = resolveColumnIndex(gs.admissionsAgeColumn || "L");
   const essayColumnIndex = resolveColumnIndex(gs.admissionsEssayColumn || "K");
+
+  /** @type {Array<Record<string, unknown> & { driveFileId: string|null, driveDurationSeconds: number|null }>} */
+  const entries = [];
+  /** @type {Set<string>} */
+  const probeFileIds = new Set();
+  let durationsFromSheet = 0;
+  let durationsFromDb = 0;
 
   for (const rowData of dataRows) {
     const aesopId = String(rowData[cfg.idColumnIndex] ?? "").trim();
@@ -518,13 +550,25 @@ async function mirrorApplicantsAndDriveFromSheets() {
     const driveFile = findVoiceMemoInScan(memoById, aesopId);
     const driveFileId = driveFile?.fileId ? String(driveFile.fileId).trim() : null;
     const driveFileName = driveFile?.fileName ? String(driveFile.fileName).trim() : null;
-    const durationRaw = driveFileId ? durationsMap.get(driveFileId) : null;
-    const driveDurationSeconds =
-      durationRaw != null && Number.isFinite(Number(durationRaw))
-        ? Math.round(Number(durationRaw))
-        : null;
 
-    const row = await upsertApplicantFromMirror({
+    let driveDurationSeconds = null;
+    if (driveFileId) {
+      const sheetLengthSeconds =
+        columns.length >= 0 ? parseVoiceMemoSheetLengthSeconds(rowData[columns.length]) : null;
+      const sheetLinkFileId = extractDriveFileIdFromLink(applicantLinks);
+      const cached = cachedDurationByFileId.get(driveFileId);
+      if (sheetLengthSeconds != null && sheetLinkFileId === driveFileId) {
+        driveDurationSeconds = sheetLengthSeconds;
+        durationsFromSheet += 1;
+      } else if (cached != null && Number.isFinite(cached)) {
+        driveDurationSeconds = Math.round(cached);
+        durationsFromDb += 1;
+      } else {
+        probeFileIds.add(driveFileId);
+      }
+    }
+
+    entries.push({
       aesopId,
       email,
       name,
@@ -541,10 +585,42 @@ async function mirrorApplicantsAndDriveFromSheets() {
       driveDurationSeconds,
       syncedAt,
     });
+  }
+
+  /** @type {Map<string, number|null>} */
+  let probedDurations = new Map();
+  if (probeFileIds.size > 0) {
+    const probeStartedAt = Date.now();
+    probedDurations = await resolveVoiceMemoDurationsMap([...probeFileIds], {
+      concurrency: 4,
+      deadlineAt,
+    });
+    console.info(
+      `[mirror] probed ${probeFileIds.size} missing voice memo duration(s) from Drive in ${Date.now() - probeStartedAt}ms`,
+    );
+  }
+
+  let mirrored = 0;
+  let durationsUnknown = 0;
+  for (const entry of entries) {
+    if (entry.driveFileId && entry.driveDurationSeconds == null) {
+      const probed = probedDurations.get(entry.driveFileId);
+      if (probed != null && Number.isFinite(Number(probed))) {
+        entry.driveDurationSeconds = Math.round(Number(probed));
+      } else {
+        durationsUnknown += 1;
+      }
+    }
+
+    const row = await upsertApplicantFromMirror(entry);
     if (row) {
       mirrored += 1;
     }
   }
+
+  console.info(
+    `[mirror] voice memo durations: sheet=${durationsFromSheet}, dbCache=${durationsFromDb}, probed=${probeFileIds.size}, unknown=${durationsUnknown}`,
+  );
 
   return { mirrored, driveFiles: memoById.size };
 }

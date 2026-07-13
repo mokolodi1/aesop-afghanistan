@@ -15,6 +15,7 @@ const { buildServiceAccountJwt } = require("./googleAuth");
 const {
   scanVoiceMemoFolder,
   resolveVoiceMemoDurationsMap,
+  extractDriveFileIdFromLink,
 } = require("./googleDrive");
 const {
   initGoogleSheets,
@@ -26,6 +27,7 @@ const { isDatabaseEnabled } = require("../db/index");
 const {
   getApplicantRowByAesopIdFromDb,
   getApplicantVoiceMemoDurationsMapFromDb,
+  updateApplicantDriveDurationSeconds,
 } = require("./classroomDb");
 
 const VOICE_NOTE_LINK_HEADERS = ["Voice note link", "Links"];
@@ -34,7 +36,32 @@ const VOICE_NOTE_DATE_HEADERS = [
   "Date of Submission",
   "Date of submission",
 ];
+const VOICE_NOTE_LENGTH_HEADERS = [
+  "Voice memo length (secs)",
+  "Voice memo length (sec)",
+  "Voice memo length",
+];
 const ROUND2_PROMPT_HEADERS = ["Round 2 Prompt"];
+
+/** Drive throttling can stretch the voice memo sync; allow it to run up to ~an hour. */
+const SYNC_VOICE_MEMO_TIME_BUDGET_MS = 55 * 60 * 1000;
+
+/**
+ * Parse a `Voice memo length (secs)` sheet cell into whole seconds.
+ * @param {unknown} rawValue
+ * @returns {number|null}
+ */
+function parseVoiceMemoSheetLengthSeconds(rawValue) {
+  const raw = String(rawValue ?? "").trim();
+  if (!raw) {
+    return null;
+  }
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return null;
+  }
+  return Math.round(parsed);
+}
 
 /**
  * @param {string[]} headerValues
@@ -120,7 +147,7 @@ function escapeSheetRangeName(sheetName) {
  * @returns {Promise<{
  *   headerValues: string[],
  *   dataRows: string[][],
- *   columns: { round1: number, round2: number, links: number, date: number },
+ *   columns: { round1: number, round2: number, links: number, date: number, length: number },
  *   cfg: ReturnType<typeof getVoiceMemoSheetConfig>,
  * }>}
  */
@@ -144,6 +171,10 @@ async function loadApplicantsDataForStats() {
     date: resolveHeaderColumnIndex(
       headerValues,
       voiceMemoHeaderCandidates(cfg.dateHeader, VOICE_NOTE_DATE_HEADERS),
+    ),
+    length: resolveOptionalHeaderColumnIndex(
+      headerValues,
+      voiceMemoHeaderCandidates(cfg.lengthHeader, VOICE_NOTE_LENGTH_HEADERS),
     ),
     round2Prompt: resolveOptionalHeaderColumnIndex(headerValues, ROUND2_PROMPT_HEADERS),
   };
@@ -219,6 +250,7 @@ function getVoiceMemoDurationLimits(voiceMemo = {}) {
  *   round2Header: string,
  *   linksHeader: string,
  *   dateHeader: string,
+ *   lengthHeader: string,
  *   submittedValue: string,
  *   acceptedValue: string,
  *   rejectedValue: string,
@@ -239,6 +271,7 @@ function getVoiceMemoSheetConfig() {
     round2Header: voiceMemo.round2ColumnHeader || "Round 2",
     linksHeader: voiceMemo.linksColumnHeader || "Voice note link",
     dateHeader: voiceMemo.dateOfSubmissionColumnHeader || "Voice note last updated",
+    lengthHeader: voiceMemo.lengthColumnHeader || "Voice memo length (secs)",
     submittedValue: voiceMemo.submittedValue || "Submitted",
     acceptedValue: String(voiceMemo.round1AcceptedValue || "Accepted").trim(),
     rejectedValue: String(voiceMemo.round1RejectedValue || "Rejected").trim(),
@@ -320,7 +353,7 @@ async function getRound1ApplicationStats() {
   let pending = 0;
   let total = 0;
 
-  /** @type {Array<{ person: ApplicationStatPerson, memo: { fileId: string, fileName: string }|null, round2Submitted: boolean, round1Accepted: boolean, round1Status: 'Accepted'|'Rejected'|'Pending' }>} */
+  /** @type {Array<{ person: ApplicationStatPerson, memo: { fileId: string, fileName: string }|null, round2Submitted: boolean, round1Accepted: boolean, round1Status: 'Accepted'|'Rejected'|'Pending', sheetLengthSeconds: number|null, sheetLinkFileId: string|null }>} */
   const applicantRows = [];
 
   for (const rowData of dataRows) {
@@ -358,6 +391,9 @@ async function getRound1ApplicationStats() {
           .toLowerCase() === submittedValue,
       round1Accepted,
       round1Status,
+      sheetLengthSeconds:
+        columns.length >= 0 ? parseVoiceMemoSheetLengthSeconds(rowData[columns.length]) : null,
+      sheetLinkFileId: extractDriveFileIdFromLink(rowData[columns.links]),
     });
   }
 
@@ -432,9 +468,17 @@ async function getRound1ApplicationStats() {
     const aesopKey = String(entry.person.aesopId || "").trim().toLowerCase();
     const cachedByFile = cachedDurationByFileId.get(entry.memo.fileId);
     const cachedByApplicant = cachedDurationByAesopId.get(aesopKey);
-    // Prefer DB cache when it matches this Drive file id (includes browser-corrected lengths).
+    // The sheet's "Voice memo length (secs)" column is authoritative when its
+    // Voice note link still points at the scanned Drive file.
     let cachedDurationSeconds =
-      cachedByFile != null && Number.isFinite(cachedByFile) ? cachedByFile : null;
+      entry.sheetLengthSeconds != null && entry.sheetLinkFileId === entry.memo.fileId
+        ? entry.sheetLengthSeconds
+        : null;
+    // Otherwise fall back to the DB cache when it matches this Drive file id
+    // (includes browser-corrected lengths).
+    if (cachedDurationSeconds == null && cachedByFile != null && Number.isFinite(cachedByFile)) {
+      cachedDurationSeconds = cachedByFile;
+    }
     if (
       cachedDurationSeconds == null &&
       cachedByApplicant &&
@@ -543,7 +587,7 @@ async function getRound1ApplicationStats() {
  * @returns {Promise<{
  *   worksheet: import('google-spreadsheet').GoogleSpreadsheetWorksheet,
  *   headerValues: string[],
- *   columns: { round1: number, round2: number, links: number, date: number },
+ *   columns: { round1: number, round2: number, links: number, date: number, length: number },
  *   cfg: ReturnType<typeof getVoiceMemoSheetConfig>,
  * }>}
  */
@@ -567,6 +611,10 @@ async function loadApplicantsWorksheet() {
     date: resolveHeaderColumnIndex(
       headerValues,
       voiceMemoHeaderCandidates(cfg.dateHeader, VOICE_NOTE_DATE_HEADERS),
+    ),
+    length: resolveOptionalHeaderColumnIndex(
+      headerValues,
+      voiceMemoHeaderCandidates(cfg.lengthHeader, VOICE_NOTE_LENGTH_HEADERS),
     ),
     round2Prompt: resolveOptionalHeaderColumnIndex(headerValues, ROUND2_PROMPT_HEADERS),
   };
@@ -747,11 +795,45 @@ function buildVoiceMemoDriveWarnings(applicantIds, scan, extensions = DEFAULT_VO
   };
 }
 
+let voiceMemoSyncInFlight = false;
+
 /**
- * Sync Round 2, Voice note link, and Voice note last updated from Google Drive voice memos.
- * @returns {Promise<{ updated: number, skippedUpToDate: number, skippedNoFile: number, skippedNotAccepted: number, skippedNoId: number, driveFileCount: number, warnings: string[], duplicateAesopIds: Array, unmatchedFiles: Array, invalidFileNames: string[] }>}
+ * Sync Round 2, Voice note link, Voice note last updated, and Voice memo length (secs)
+ * from Google Drive voice memos.
+ *
+ * Lengths are only computed for rows whose sheet length is blank/invalid or whose
+ * Drive file changed since the last sync (detected via the Voice note link file id);
+ * known lengths are reused from the sheet or the Postgres cache before probing Drive.
+ * Drive throttling (429s) is retried with backoff, so a run may take up to ~an hour.
+ *
+ * @param {{ timeBudgetMs?: number }} [options]
+ * @returns {Promise<{ updated: number, skippedUpToDate: number, skippedNoFile: number, skippedNotAccepted: number, skippedNoId: number, driveFileCount: number, lengthsWritten: number, lengthsCleared: number, lengthsUnknown: number, lengthProbes: number, warnings: string[], duplicateAesopIds: Array, unmatchedFiles: Array, invalidFileNames: string[] }>}
  */
-async function syncVoiceMemoRound2Status() {
+async function syncVoiceMemoRound2Status(options = {}) {
+  if (voiceMemoSyncInFlight) {
+    const error = new Error(
+      "A voice memo sync is already running. Please wait for it to finish and try again.",
+    );
+    error.statusCode = 409;
+    throw error;
+  }
+  voiceMemoSyncInFlight = true;
+  try {
+    return await runVoiceMemoRound2Sync(options);
+  } finally {
+    voiceMemoSyncInFlight = false;
+  }
+}
+
+/**
+ * @param {{ timeBudgetMs?: number }} [options]
+ */
+async function runVoiceMemoRound2Sync(options = {}) {
+  const timeBudgetMs = Number.isFinite(options.timeBudgetMs)
+    ? Number(options.timeBudgetMs)
+    : SYNC_VOICE_MEMO_TIME_BUDGET_MS;
+  const deadlineAt = Date.now() + timeBudgetMs;
+
   const cfg = getVoiceMemoSheetConfig();
   const folderId = String(cfg.voiceMemo.driveFolderId || "").trim();
   if (!folderId) {
@@ -759,16 +841,36 @@ async function syncVoiceMemoRound2Status() {
   }
 
   const scanOptions = getVoiceMemoDriveScanOptions(cfg.voiceMemo);
-  const scan = await scanVoiceMemoFolder(folderId, scanOptions);
+  const scan = await scanVoiceMemoFolder(folderId, { ...scanOptions, deadlineAt });
   const memoById = scan.memosById;
 
   const { worksheet, columns, cfg: sheetCfg } = await loadApplicantsWorksheet();
   const round2ColIdx = columns.round2;
   const linksColIdx = columns.links;
   const dateColIdx = columns.date;
+  const lengthColIdx = columns.length;
+  const lengthEnabled = lengthColIdx != null && lengthColIdx >= 0;
   const round1ColIdx = sheetCfg.onlyIfRound1Accepted ? columns.round1 : null;
   const acceptedValue = sheetCfg.acceptedValue.toLowerCase();
   const submittedValue = sheetCfg.submittedValue;
+
+  // Known lengths from Postgres (previous probes + browser-corrected values) let us
+  // fill the sheet without re-downloading files from Drive.
+  /** @type {Map<string, number>} */
+  let cachedDurationByFileId = new Map();
+  if (lengthEnabled && isDatabaseEnabled()) {
+    try {
+      const cached = await getApplicantVoiceMemoDurationsMapFromDb();
+      if (cached) {
+        cachedDurationByFileId = cached.byFileId;
+      }
+    } catch (error) {
+      console.warn(
+        "[sync-voice-memos] could not load cached voice memo durations:",
+        error.message || error,
+      );
+    }
+  }
 
   const rows = await worksheet.getRows();
   const applicantIds = new Set();
@@ -781,8 +883,16 @@ async function syncVoiceMemoRound2Status() {
   }
 
   const driveWarnings = buildVoiceMemoDriveWarnings(applicantIds, scan, scanOptions.extensions);
-  /** @type {Array<{ gridRowIdx: number, round2: string, links: string, submittedAt: string }>} */
-  const pending = [];
+  if (!lengthEnabled) {
+    driveWarnings.warnings.push(
+      `The "${sheetCfg.lengthHeader}" column was not found on the Applicants sheet, so voice memo lengths were not written.`,
+    );
+  }
+
+  /** @type {Array<{ gridRowIdx: number, aesopId: string, memo: { fileId: string, fileName: string }, round2: string, links: string, submittedAt: string, baseChanged: boolean, needsLength: boolean, currentLengthRaw: string, lengthSeconds: number|null, lengthFromProbe: boolean }>} */
+  const candidates = [];
+  /** @type {Set<string>} */
+  const probeFileIds = new Set();
   let skippedUpToDate = 0;
   let skippedNoFile = 0;
   let skippedNotAccepted = 0;
@@ -818,66 +928,184 @@ async function syncVoiceMemoRound2Status() {
     const currentRound2 = String(rowData[round2ColIdx] ?? "").trim();
     const currentLinks = String(rowData[linksColIdx] ?? "").trim();
     const currentDate = String(rowData[dateColIdx] ?? "").trim();
+    const baseChanged =
+      currentRound2 !== desiredRound2 ||
+      currentLinks !== desiredLinks ||
+      currentDate !== desiredDate;
 
-    if (
-      currentRound2 === desiredRound2 &&
-      currentLinks === desiredLinks &&
-      currentDate === desiredDate
-    ) {
+    // Keep the sheet length only while its Voice note link still points at the same
+    // Drive file; a changed file id means the recording was replaced, so recompute.
+    let needsLength = false;
+    let lengthSeconds = null;
+    let lengthFromProbe = false;
+    let currentLengthRaw = "";
+    if (lengthEnabled) {
+      currentLengthRaw = String(rowData[lengthColIdx] ?? "").trim();
+      const sheetLengthSeconds = parseVoiceMemoSheetLengthSeconds(currentLengthRaw);
+      const sheetLinkFileId = extractDriveFileIdFromLink(currentLinks);
+      const sheetLengthIsCurrent =
+        sheetLengthSeconds != null && sheetLinkFileId === memo.fileId;
+      if (!sheetLengthIsCurrent) {
+        needsLength = true;
+        const cached = cachedDurationByFileId.get(memo.fileId);
+        if (cached != null && Number.isFinite(cached)) {
+          lengthSeconds = Math.round(cached);
+        } else {
+          probeFileIds.add(memo.fileId);
+          lengthFromProbe = true;
+        }
+      }
+    }
+
+    if (!baseChanged && !needsLength) {
+      skippedUpToDate += 1;
+      continue;
+    }
+
+    candidates.push({
+      gridRowIdx: row.rowNumber - 1,
+      aesopId,
+      memo: { fileId: memo.fileId, fileName: memo.fileName },
+      round2: desiredRound2,
+      links: desiredLinks,
+      submittedAt: desiredDate,
+      baseChanged,
+      needsLength,
+      currentLengthRaw,
+      lengthSeconds,
+      lengthFromProbe,
+    });
+  }
+
+  /** @type {Map<string, number|null>} */
+  let durationByFileId = new Map();
+  if (probeFileIds.size > 0) {
+    const probeStartedAt = Date.now();
+    durationByFileId = await resolveVoiceMemoDurationsMap([...probeFileIds], {
+      concurrency: 4,
+      deadlineAt,
+    });
+    console.info(
+      `[sync-voice-memos] probed ${probeFileIds.size} voice memo length(s) from Drive in ${Date.now() - probeStartedAt}ms`,
+    );
+  }
+
+  /** @type {Array<{ gridRowIdx: number, round2: string, links: string, submittedAt: string, baseChanged: boolean, writeLength: boolean, lengthCellValue: number|'' }>} */
+  const pending = [];
+  /** @type {Promise<unknown>[]} */
+  const dbWrites = [];
+  let lengthsWritten = 0;
+  let lengthsCleared = 0;
+  let lengthsUnknown = 0;
+
+  for (const candidate of candidates) {
+    let writeLength = false;
+    /** @type {number|''} */
+    let lengthCellValue = "";
+
+    if (candidate.needsLength) {
+      let seconds = candidate.lengthSeconds;
+      if (seconds == null && candidate.lengthFromProbe) {
+        const probed = durationByFileId.get(candidate.memo.fileId);
+        if (probed != null && Number.isFinite(probed)) {
+          seconds = Math.round(probed);
+          // Warm the Postgres cache right away so the portal reads it without probing.
+          if (isDatabaseEnabled()) {
+            dbWrites.push(
+              updateApplicantDriveDurationSeconds(candidate.aesopId, {
+                driveDurationSeconds: seconds,
+                driveFileId: candidate.memo.fileId,
+                driveFileName: candidate.memo.fileName,
+              }).catch((error) =>
+                console.warn(
+                  "[sync-voice-memos] could not cache duration in Postgres:",
+                  error.message || error,
+                ),
+              ),
+            );
+          }
+        }
+      }
+
+      if (seconds != null) {
+        if (String(seconds) !== candidate.currentLengthRaw) {
+          writeLength = true;
+          lengthCellValue = seconds;
+          lengthsWritten += 1;
+        }
+      } else {
+        lengthsUnknown += 1;
+        if (candidate.currentLengthRaw !== "") {
+          // The Drive file changed and the new length is unknown: clear the stale value.
+          writeLength = true;
+          lengthCellValue = "";
+          lengthsCleared += 1;
+        }
+      }
+    }
+
+    if (!candidate.baseChanged && !writeLength) {
       skippedUpToDate += 1;
       continue;
     }
 
     pending.push({
-      gridRowIdx: row.rowNumber - 1,
-      round2: desiredRound2,
-      links: desiredLinks,
-      submittedAt: desiredDate,
+      gridRowIdx: candidate.gridRowIdx,
+      round2: candidate.round2,
+      links: candidate.links,
+      submittedAt: candidate.submittedAt,
+      baseChanged: candidate.baseChanged,
+      writeLength,
+      lengthCellValue,
     });
   }
 
-  if (pending.length === 0) {
-    const result = {
-      updated: 0,
-      skippedUpToDate,
-      skippedNoFile,
-      skippedNotAccepted,
-      skippedNoId,
-      driveFileCount: memoById.size,
-      ...driveWarnings,
-    };
-    logVoiceMemoSyncAudit(result);
-    return result;
+  const updated = pending.filter((entry) => entry.baseChanged).length;
+
+  if (pending.length > 0) {
+    const columnIndices = [round2ColIdx, linksColIdx, dateColIdx];
+    if (lengthEnabled) {
+      columnIndices.push(lengthColIdx);
+    }
+    const minRow = Math.min(...pending.map((entry) => entry.gridRowIdx));
+    const maxRow = Math.max(...pending.map((entry) => entry.gridRowIdx)) + 1;
+    const minCol = Math.min(...columnIndices);
+    const maxCol = Math.max(...columnIndices) + 1;
+
+    await worksheet.loadCells({
+      startRowIndex: minRow,
+      endRowIndex: maxRow,
+      startColumnIndex: minCol,
+      endColumnIndex: maxCol,
+    });
+
+    for (const entry of pending) {
+      if (entry.baseChanged) {
+        worksheet.getCell(entry.gridRowIdx, round2ColIdx).value = entry.round2;
+        worksheet.getCell(entry.gridRowIdx, linksColIdx).value = entry.links;
+        worksheet.getCell(entry.gridRowIdx, dateColIdx).value = entry.submittedAt;
+      }
+      if (lengthEnabled && entry.writeLength) {
+        worksheet.getCell(entry.gridRowIdx, lengthColIdx).value = entry.lengthCellValue;
+      }
+    }
+
+    await worksheet.saveUpdatedCells();
   }
 
-  const columnIndices = [round2ColIdx, linksColIdx, dateColIdx];
-  const minRow = Math.min(...pending.map((entry) => entry.gridRowIdx));
-  const maxRow = Math.max(...pending.map((entry) => entry.gridRowIdx)) + 1;
-  const minCol = Math.min(...columnIndices);
-  const maxCol = Math.max(...columnIndices) + 1;
-
-  await worksheet.loadCells({
-    startRowIndex: minRow,
-    endRowIndex: maxRow,
-    startColumnIndex: minCol,
-    endColumnIndex: maxCol,
-  });
-
-  for (const entry of pending) {
-    worksheet.getCell(entry.gridRowIdx, round2ColIdx).value = entry.round2;
-    worksheet.getCell(entry.gridRowIdx, linksColIdx).value = entry.links;
-    worksheet.getCell(entry.gridRowIdx, dateColIdx).value = entry.submittedAt;
-  }
-
-  await worksheet.saveUpdatedCells();
+  await Promise.all(dbWrites);
 
   const result = {
-    updated: pending.length,
+    updated,
     skippedUpToDate,
     skippedNoFile,
     skippedNotAccepted,
     skippedNoId,
     driveFileCount: memoById.size,
+    lengthsWritten,
+    lengthsCleared,
+    lengthsUnknown,
+    lengthProbes: probeFileIds.size,
     ...driveWarnings,
   };
   logVoiceMemoSyncAudit(result);
@@ -916,4 +1144,5 @@ module.exports = {
   logVoiceMemoSyncAudit,
   findVoiceMemoInScan,
   readApplicantRound2Prompt,
+  parseVoiceMemoSheetLengthSeconds,
 };

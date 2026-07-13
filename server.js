@@ -36,7 +36,9 @@ const {
   getAdminViewAsStudent,
   getAdminViewAsTeacher,
 } = require('./services/adminPortal');
-const { refreshPortalCaches } = require('./services/portalCacheRefresh');
+const { triggerCronJob } = require('./services/cronRemote');
+const { listJobDefinitions } = require('./services/jobRegistry');
+const { getLastRunsByJob, listJobRuns, getJobRun } = require('./services/jobRuns');
 const {
   loadReviewAssignmentsForReviewer,
   saveReviewAssessment,
@@ -58,7 +60,6 @@ const {
   getWebhookSecret,
 } = require('./services/postmarkWebhooks');
 const {
-  syncVoiceMemoRound2Status,
   getApplicantRowByAesopId,
   classifyRound1ApplicationStatus,
   getRound1ApplicationStats,
@@ -1709,34 +1710,86 @@ app.post('/api/portal-voice-memo/stream', portalVoiceMemoStreamRateLimiter, asyn
   }
 });
 
-app.post('/api/portal-admin/cache/refresh', portalAdminRateLimiter, async (req, res) => {
+app.post('/api/portal-admin/jobs/overview', portalAdminRateLimiter, async (req, res) => {
   try {
     const profile = await requirePortalAdmin(res, req.body);
     if (!profile) {
       return;
     }
-    const includeClassroom = req.body.includeClassroom !== false;
-    const result = await refreshPortalCaches({ includeClassroom });
-    res.json({ success: true, ...result });
+    const databaseEnabled = isDatabaseEnabled();
+    const lastRuns = databaseEnabled ? await getLastRunsByJob() : {};
+    const jobs = listJobDefinitions().map((job) => ({
+      ...job,
+      lastRun: lastRuns[job.name] || null,
+    }));
+    res.json({ success: true, databaseEnabled, jobs });
   } catch (error) {
-    console.error('Error refreshing portal cache:', formatErrorForLog(error));
+    console.error('Error loading jobs overview:', formatErrorForLog(error));
     const status = error.statusCode || 500;
-    res.status(status).json({ error: error.message || 'Could not refresh portal cache.' });
+    res.status(status).json({ error: error.message || 'Could not load jobs.' });
   }
 });
 
-app.post('/api/portal-admin/voice-memo/sync', portalAdminRateLimiter, async (req, res) => {
+app.post('/api/portal-admin/jobs/run', portalAdminRateLimiter, async (req, res) => {
   try {
     const profile = await requirePortalAdmin(res, req.body);
     if (!profile) {
       return;
     }
-    const result = await syncVoiceMemoRound2Status();
-    res.json({ success: true, ...result });
+    const jobName = typeof req.body.job === 'string' ? req.body.job.trim() : '';
+    // Runs on the cron Machine when reachable (more memory, one place where
+    // all runs are recorded); spawns locally in dev. Returns immediately —
+    // the UI follows progress through job_runs.
+    const { runId, ranOn } = await triggerCronJob(jobName, null, { triggeredBy: profile.email });
+    res.json({ success: true, runId, ranOn });
   } catch (error) {
-    console.error('Error syncing voice memos:', formatErrorForLog(error));
+    console.error('Error starting job:', formatErrorForLog(error));
     const status = error.statusCode || 500;
-    res.status(status).json({ error: error.message || 'Could not sync voice memos.' });
+    res.status(status).json({ error: error.message || 'Could not start job.' });
+  }
+});
+
+app.post('/api/portal-admin/jobs/runs', portalAdminRateLimiter, async (req, res) => {
+  try {
+    const profile = await requirePortalAdmin(res, req.body);
+    if (!profile) {
+      return;
+    }
+    const jobName = typeof req.body.job === 'string' ? req.body.job.trim() : '';
+    if (!listJobDefinitions().some((job) => job.name === jobName)) {
+      return res.status(400).json({ error: 'Unknown job.' });
+    }
+    if (!isDatabaseEnabled()) {
+      return res.json({ success: true, runs: [] });
+    }
+    const runs = await listJobRuns({ jobName, limit: req.body.limit });
+    res.json({ success: true, runs });
+  } catch (error) {
+    console.error('Error listing job runs:', formatErrorForLog(error));
+    const status = error.statusCode || 500;
+    res.status(status).json({ error: error.message || 'Could not list job runs.' });
+  }
+});
+
+app.post('/api/portal-admin/jobs/run-log', portalAdminRateLimiter, async (req, res) => {
+  try {
+    const profile = await requirePortalAdmin(res, req.body);
+    if (!profile) {
+      return;
+    }
+    const runId = Number.parseInt(String(req.body.runId), 10);
+    if (!Number.isFinite(runId) || runId <= 0) {
+      return res.status(400).json({ error: 'runId is required.' });
+    }
+    const run = isDatabaseEnabled() ? await getJobRun(runId) : null;
+    if (!run) {
+      return res.status(404).json({ error: 'Run not found.' });
+    }
+    res.json({ success: true, run });
+  } catch (error) {
+    console.error('Error loading job run log:', formatErrorForLog(error));
+    const status = error.statusCode || 500;
+    res.status(status).json({ error: error.message || 'Could not load run log.' });
   }
 });
 

@@ -345,6 +345,26 @@ const emailCampaignRecipients = pgTable(
   }),
 );
 
+const jobRuns = pgTable(
+  "job_runs",
+  {
+    id: serial("id").primaryKey(),
+    jobName: varchar("job_name", { length: 64 }).notNull(),
+    triggerSource: varchar("trigger_source", { length: 16 }).notNull().default("schedule"),
+    triggeredBy: varchar("triggered_by", { length: 320 }),
+    status: varchar("status", { length: 16 }).notNull().default("running"),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+    result: jsonb("result"),
+    error: text("error"),
+    logs: text("logs"),
+  },
+  (table) => ({
+    jobNameStartedAtIdx: index("job_runs_job_name_started_at_idx").on(table.jobName, table.startedAt),
+    statusIdx: index("job_runs_status_idx").on(table.status),
+  }),
+);
+
 const portalMetricBuckets = pgTable(
   "portal_metric_buckets",
   {
@@ -376,5 +396,6 @@ module.exports = {
   emailAdminTests,
   emailCampaigns,
   emailCampaignRecipients,
+  jobRuns,
   portalMetricBuckets,
 };

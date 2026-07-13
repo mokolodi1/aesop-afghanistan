@@ -2,8 +2,9 @@ FROM node:20-alpine
 
 WORKDIR /app
 
+# supercronic runs the scheduled syncs on the Fly `cron` Machine (see fly.toml)
 COPY package.json package-lock.json ./
-RUN apk add --no-cache ffmpeg \
+RUN apk add --no-cache ffmpeg supercronic \
   && npm ci
 
 COPY . .

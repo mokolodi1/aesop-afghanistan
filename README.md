@@ -176,14 +176,7 @@ Setup:
 npm run sync:classroom
 ```
 
-5. Schedule it so roles/grades stay current. On Fly.io, create a daily scheduled Machine that reuses the app image and inherits `SECRETS_JSON`:
-
-```bash
-bash scripts/schedule-classroom-sync.sh            # daily, app aesop-afghanistan
-FLY_APP=my-app SCHEDULE=hourly bash scripts/schedule-classroom-sync.sh
-```
-
-The script resolves the current deployed image, then runs `fly machine run <image> --schedule daily node scripts/sync-classroom.js`. A dedicated scheduled Machine is used (rather than in-process `node-cron`) because `fly.toml` sets `min_machines_running = 0` with `auto_stop_machines`, so the web machine sleeps when idle. Inspect with `fly machine list -a <app>`.
+5. Scheduling is declarative: the `cron` process group in `fly.toml` runs Supercronic with the repo's `crontab`, which runs the Classroom sync daily (02:30 UTC). It deploys automatically with `fly deploy` — no manual scheduling step. A dedicated cron Machine is used (rather than in-process `node-cron`) because the web machines can auto-stop when idle. Edit `crontab` to change timing; inspect with `fly machine list -a <app>`. Every run is recorded in the `job_runs` table and can be reviewed (with logs) or re-run from the admin portal's **Jobs** tab.
 
 > The sync reuses the existing `email.gmailServiceAccount.credentials`, so no second key is needed - the service account just needs the Classroom scopes added to its delegation.
 

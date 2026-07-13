@@ -75,7 +75,7 @@ echo "  fly secrets deploy -a $APP"
 echo "  fly deploy -a $APP"
 echo "  fly machine list -a $APP"
 echo "  fly machine exec <machine-id> -a $APP \"sh -c 'cd /app && node db/migrate.js'\""
-echo "  bash scripts/schedule-classroom-sync.sh"
+echo "  (scheduled syncs run on the cron Machine; created automatically by fly deploy)"
 echo
 echo "Managed Postgres dashboard:"
 echo "  https://fly.io/dashboard/$ORG/managed_postgres/$CLUSTER_ID"
