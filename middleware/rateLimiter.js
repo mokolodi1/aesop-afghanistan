@@ -183,6 +183,8 @@ function logRateLimitBlock(req, key, name) {
  * @param {string} [options.name] - Metric / limiter name
  * @param {(req: import('express').Request) => (string|null|undefined)} [options.resolveKeySuffix]
  *   When set, the store key is `${name}:${suffix}` instead of `${name}:${ip}`.
+ * @param {(req: import('express').Request) => (boolean|Promise<boolean>)} [options.skip]
+ *   When this returns true, the request is not counted and throttling is bypassed.
  * @param {string} [options.message] - 429 response message
  * @returns {Function} Express middleware
  */
@@ -191,30 +193,38 @@ function createRateLimiter({
   max = 50,
   name = 'default',
   resolveKeySuffix = null,
+  skip = null,
   message = 'Too many requests. Please try again later.',
 }) {
   return (req, res, next) => {
-    const ip = getClientIp(req);
-    const key = `${name}:${buildRateLimitKey(req, ip, resolveKeySuffix)}`;
-    const now = Date.now();
-
-    consumeRateLimit(key, windowMs)
-      .then((record) => {
-        setRateLimitHeaders(res, { max, resetTime: record.resetTime, now, count: record.count });
-
-        if (record.count > max) {
-          recordRateLimitHit(name);
-          logRateLimitBlock(req, key, name);
-          return res.status(429).json({
-            error: message,
-            retryAfterSeconds: retryAfterSeconds(record.resetTime, now),
-            rateLimitName: name,
-          });
+    const run = async () => {
+      if (typeof skip === 'function') {
+        const shouldSkip = await skip(req);
+        if (shouldSkip) {
+          return next();
         }
+      }
 
-        return next();
-      })
-      .catch(next);
+      const ip = getClientIp(req);
+      const key = `${name}:${buildRateLimitKey(req, ip, resolveKeySuffix)}`;
+      const now = Date.now();
+      const record = await consumeRateLimit(key, windowMs);
+      setRateLimitHeaders(res, { max, resetTime: record.resetTime, now, count: record.count });
+
+      if (record.count > max) {
+        recordRateLimitHit(name);
+        logRateLimitBlock(req, key, name);
+        return res.status(429).json({
+          error: message,
+          retryAfterSeconds: retryAfterSeconds(record.resetTime, now),
+          rateLimitName: name,
+        });
+      }
+
+      return next();
+    };
+
+    run().catch(next);
   };
 }
 

@@ -637,79 +637,99 @@ function portalSubjectKey(req) {
   return `ip:${getClientIp(req)}`;
 }
 
+/**
+ * Portal admins are exempt from user-facing rate limits (stats polling, bulk admin
+ * navigation, etc.). Job triggers keep their own limiter without this skip.
+ * @param {import('express').Request} req
+ * @returns {Promise<boolean>}
+ */
+async function shouldSkipRateLimitForPortalAdmin(req) {
+  const userId = sanitizeIdentifier(req.body?.userId);
+  const emailSan = sanitizeEmail(req.body?.email);
+  if (!userId && !emailSan) {
+    return false;
+  }
+  if (emailSan && isPortalAdmin({ email: emailSan })) {
+    return true;
+  }
+  return isPeopleSheetAdminByIdentity(userId, emailSan);
+}
+
+const portalRateLimitOptions = {
+  windowMs: RATE_LIMIT_WINDOW_15M_MS,
+  resolveKeySuffix: portalSubjectKey,
+  skip: shouldSkipRateLimitForPortalAdmin,
+};
+
 // Rate limiter for updating ding number from the portal
 const dingUpdateRateLimiter = createRateLimiter({
   name: 'update-ding',
-  windowMs: RATE_LIMIT_WINDOW_15M_MS,
   max: RATE_LIMIT_MIN_PER_15M,
-  resolveKeySuffix: portalSubjectKey,
+  ...portalRateLimitOptions,
 });
 
 const portalDingHelpRateLimiter = createRateLimiter({
   name: 'portal-ding-help',
-  windowMs: RATE_LIMIT_WINDOW_15M_MS,
   max: RATE_LIMIT_MIN_PER_15M,
-  resolveKeySuffix: portalSubjectKey,
+  ...portalRateLimitOptions,
 });
 
 const portalDingHistoryRateLimiter = createRateLimiter({
   name: 'portal-ding-history',
-  windowMs: RATE_LIMIT_WINDOW_15M_MS,
   max: RATE_LIMIT_MIN_PER_15M,
-  resolveKeySuffix: portalSubjectKey,
+  ...portalRateLimitOptions,
 });
 
 const portalClassGradeRateLimiter = createRateLimiter({
   name: 'portal-class-grade',
-  windowMs: RATE_LIMIT_WINDOW_15M_MS,
   max: RATE_LIMIT_MIN_PER_15M,
-  resolveKeySuffix: portalSubjectKey,
+  ...portalRateLimitOptions,
 });
 
 const portalTeacherRosterRateLimiter = createRateLimiter({
   name: 'portal-teacher-roster',
-  windowMs: RATE_LIMIT_WINDOW_15M_MS,
   max: RATE_LIMIT_MIN_PER_15M,
-  resolveKeySuffix: portalSubjectKey,
+  ...portalRateLimitOptions,
 });
 
 const portalStudentGradesRateLimiter = createRateLimiter({
   name: 'portal-student-grades',
-  windowMs: RATE_LIMIT_WINDOW_15M_MS,
   max: RATE_LIMIT_MIN_PER_15M,
-  resolveKeySuffix: portalSubjectKey,
+  ...portalRateLimitOptions,
 });
 
 const portalAdminRateLimiter = createRateLimiter({
   name: 'portal-admin',
-  windowMs: RATE_LIMIT_WINDOW_15M_MS,
   max: 200,
+  ...portalRateLimitOptions,
+});
+
+const portalAdminJobsRunRateLimiter = createRateLimiter({
+  name: 'portal-admin-jobs-run',
+  max: RATE_LIMIT_MIN_PER_15M,
+  windowMs: RATE_LIMIT_WINDOW_15M_MS,
   resolveKeySuffix: portalSubjectKey,
 });
 
 const portalVoiceMemoRateLimiter = createRateLimiter({
   name: 'portal-voice-memo',
-  windowMs: RATE_LIMIT_WINDOW_15M_MS,
   max: 15 * 10,
-  resolveKeySuffix: portalSubjectKey,
+  ...portalRateLimitOptions,
 });
 const portalVoiceMemoStreamRateLimiter = createRateLimiter({
   name: 'portal-voice-memo-stream',
-  windowMs: RATE_LIMIT_WINDOW_15M_MS,
   max: 120,
-  resolveKeySuffix: portalSubjectKey,
+  ...portalRateLimitOptions,
 });
 const portalCalendarRateLimiter = createRateLimiter({
   name: 'portal-calendar',
-  windowMs: RATE_LIMIT_WINDOW_15M_MS,
   max: RATE_LIMIT_MIN_PER_15M,
-  resolveKeySuffix: portalSubjectKey,
+  ...portalRateLimitOptions,
 });
 const portalReviewsRateLimiter = createRateLimiter({
   name: 'portal-reviews',
-  windowMs: RATE_LIMIT_WINDOW_15M_MS,
   max: RATE_LIMIT_MIN_PER_15M,
-  resolveKeySuffix: portalSubjectKey,
+  ...portalRateLimitOptions,
 });
 // Postmark sends many events per campaign from a few source IPs; keep this
 // generous but bounded so an unauthenticated flood or secret brute-force is throttled.
@@ -1734,7 +1754,7 @@ app.post('/api/portal-admin/jobs/overview', portalAdminRateLimiter, async (req, 
   }
 });
 
-app.post('/api/portal-admin/jobs/run', portalAdminRateLimiter, async (req, res) => {
+app.post('/api/portal-admin/jobs/run', portalAdminJobsRunRateLimiter, async (req, res) => {
   try {
     const profile = await requirePortalAdmin(res, req.body);
     if (!profile) {
