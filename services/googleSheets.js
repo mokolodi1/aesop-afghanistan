@@ -12,6 +12,224 @@ let initPromise = null;
 let sheetsMetricsHooked = false;
 const SHEETS_SCOPE = "https://www.googleapis.com/auth/spreadsheets";
 
+/** Stay under Sheets ~60 read/write req/min/user while sync scripts run. */
+const SHEETS_SCRIPT_MAX_REQUESTS_PER_MINUTE = 45;
+const SHEETS_SCRIPT_RATE_WINDOW_MS = 60 * 1000;
+/** Portal/on-demand paths use a short budget; cron jobs pass a longer deadlineAt. */
+const SHEETS_RETRY_DEFAULT_BUDGET_MS = 20 * 1000;
+const SHEETS_RETRY_BACKOFF_BASE_MS = 2000;
+const SHEETS_RETRY_BACKOFF_CAP_MS = 60 * 1000;
+const SHEETS_RETRY_AFTER_CAP_MS = 15 * 60 * 1000;
+
+/** @type {number[]} */
+let sheetsScriptRequestTimestamps = [];
+let sheetsScriptRateLimitEnabled = false;
+
+/**
+ * Enable proactive Sheets throttling for cron scripts and other batch runners.
+ * Portal on-demand paths leave this off.
+ * @param {boolean} enabled
+ */
+function setSheetsScriptRateLimit(enabled) {
+  sheetsScriptRateLimitEnabled = !!enabled;
+  if (!enabled) {
+    sheetsScriptRequestTimestamps = [];
+  }
+}
+
+/** @returns {boolean} */
+function isSheetsScriptRateLimitEnabled() {
+  return sheetsScriptRateLimitEnabled;
+}
+
+/**
+ * Long-running syncs pass `deadlineAt`; treat that as script mode too.
+ * @param {number|undefined|null} deadlineAt
+ */
+function maybeEnableSheetsScriptRateLimit(deadlineAt) {
+  if (Number.isFinite(deadlineAt)) {
+    sheetsScriptRateLimitEnabled = true;
+  }
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, Math.max(0, ms)));
+}
+
+/**
+ * Wait until the rolling minute window has room for `count` more Sheets calls.
+ * @param {number} [count]
+ */
+async function acquireSheetsRequestSlots(count = 1) {
+  if (!sheetsScriptRateLimitEnabled || count <= 0) {
+    return;
+  }
+  const want = Math.max(1, Math.floor(count));
+  for (;;) {
+    const now = Date.now();
+    sheetsScriptRequestTimestamps = sheetsScriptRequestTimestamps.filter(
+      (timestamp) => now - timestamp < SHEETS_SCRIPT_RATE_WINDOW_MS,
+    );
+    const available = SHEETS_SCRIPT_MAX_REQUESTS_PER_MINUTE - sheetsScriptRequestTimestamps.length;
+    if (available >= want) {
+      const stamp = Date.now();
+      for (let i = 0; i < want; i += 1) {
+        sheetsScriptRequestTimestamps.push(stamp);
+      }
+      return;
+    }
+    const oldest = sheetsScriptRequestTimestamps[0] || now;
+    const waitMs = Math.max(1000, SHEETS_SCRIPT_RATE_WINDOW_MS - (now - oldest) + 50);
+    console.warn(
+      `[sheets] pacing script traffic (${sheetsScriptRequestTimestamps.length}/${SHEETS_SCRIPT_MAX_REQUESTS_PER_MINUTE} req/min); waiting ${Math.ceil(waitMs / 1000)}s`,
+    );
+    await sleep(waitMs);
+  }
+}
+
+/**
+ * @param {unknown} error
+ * @returns {number|null}
+ */
+function sheetsErrorStatus(error) {
+  const status = Number(
+    error?.response?.status ?? error?.code ?? error?.statusCode ?? error?.status,
+  );
+  return Number.isFinite(status) ? status : null;
+}
+
+/**
+ * Google Sheets signals throttling as HTTP 429, or as HTTP 403 with a rate-limit reason.
+ * @param {unknown} error
+ * @returns {boolean}
+ */
+function isSheetsThrottleError(error) {
+  const status = sheetsErrorStatus(error);
+  if (status === 429) {
+    return true;
+  }
+  const message = String(error?.message || error?.response?.data?.error?.message || "").toLowerCase();
+  if (message.includes("quota exceeded") || message.includes("rate limit")) {
+    return true;
+  }
+  if (status === 403) {
+    const reasons = error?.errors || error?.response?.data?.error?.errors || [];
+    return (Array.isArray(reasons) ? reasons : []).some((entry) => {
+      const reason = String(entry?.reason || "").toLowerCase();
+      return reason.includes("ratelimit") || reason.includes("quota");
+    });
+  }
+  return false;
+}
+
+/**
+ * Transient 5xx and connection resets are retried on the same schedule.
+ * @param {unknown} error
+ * @returns {boolean}
+ */
+function isRetryableSheetsError(error) {
+  if (isSheetsThrottleError(error)) {
+    return true;
+  }
+  const status = sheetsErrorStatus(error);
+  if (status === 500 || status === 502 || status === 503) {
+    return true;
+  }
+  const code = String(error?.code || "").toUpperCase();
+  return ["ECONNRESET", "ETIMEDOUT", "ECONNABORTED", "EAI_AGAIN", "EPIPE"].includes(code);
+}
+
+/**
+ * @param {unknown} error
+ * @returns {number|null} milliseconds suggested by a Retry-After header, if any
+ */
+function sheetsRetryAfterMs(error) {
+  const headers = error?.response?.headers || {};
+  const raw = headers["retry-after"] ?? headers["Retry-After"];
+  if (raw == null || String(raw).trim() === "") {
+    return null;
+  }
+  const seconds = Number(String(raw).trim());
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return Math.min(seconds * 1000, SHEETS_RETRY_AFTER_CAP_MS);
+  }
+  const dateMs = Date.parse(String(raw));
+  if (!Number.isNaN(dateMs)) {
+    return Math.min(Math.max(dateMs - Date.now(), 0), SHEETS_RETRY_AFTER_CAP_MS);
+  }
+  return null;
+}
+
+/**
+ * Run a Sheets API call, retrying 429s/rate limits with exponential backoff until
+ * `deadlineAt`. Sync scripts pass a long deadline so throttled runs pause and
+ * finish instead of failing the whole job.
+ * @template T
+ * @param {string} label
+ * @param {() => Promise<T>} fn
+ * @param {{ deadlineAt?: number }} [options]
+ * @returns {Promise<T>}
+ */
+async function withSheetsRetry(label, fn, options = {}) {
+  const deadlineAt = Number.isFinite(options.deadlineAt)
+    ? Number(options.deadlineAt)
+    : Date.now() + SHEETS_RETRY_DEFAULT_BUDGET_MS;
+  let attempt = 0;
+  for (;;) {
+    try {
+      return await fn();
+    } catch (error) {
+      if (!isRetryableSheetsError(error)) {
+        throw error;
+      }
+      attempt += 1;
+      const backoffMs = Math.min(
+        SHEETS_RETRY_BACKOFF_BASE_MS * 2 ** (attempt - 1),
+        SHEETS_RETRY_BACKOFF_CAP_MS,
+      );
+      const jitteredMs = Math.round(backoffMs * (0.5 + Math.random() * 0.5));
+      const waitMs = Math.max(sheetsRetryAfterMs(error) ?? 0, jitteredMs);
+      if (Date.now() + waitMs > deadlineAt) {
+        if (isSheetsThrottleError(error)) {
+          const exhausted = new Error(
+            `Google Sheets ${label} hit rate limits and the retry budget ran out. Wait a minute and try again.`,
+          );
+          exhausted.statusCode = 429;
+          exhausted.code = "SHEETS_THROTTLED";
+          throw exhausted;
+        }
+        throw error;
+      }
+      console.warn(
+        `[sheets] ${label} throttled (HTTP ${sheetsErrorStatus(error) ?? "?"}); ` +
+          `pausing ${Math.round(waitMs / 1000)}s then retrying (attempt ${attempt})`,
+      );
+      await sleep(waitMs);
+    }
+  }
+}
+
+/**
+ * Rate-limited (in script mode) wrapper around {@link withSheetsRetry}.
+ * @template T
+ * @param {string} label
+ * @param {() => Promise<T>} fn
+ * @param {{ deadlineAt?: number, requestSlots?: number }} [options]
+ * @returns {Promise<T>}
+ */
+async function sheetsApiCall(label, fn, options = {}) {
+  maybeEnableSheetsScriptRateLimit(options.deadlineAt);
+  const requestSlots = options.requestSlots ?? 1;
+  return withSheetsRetry(
+    label,
+    async () => {
+      await acquireSheetsRequestSlots(requestSlots);
+      return fn();
+    },
+    options,
+  );
+}
+
 /**
  * Count every Sheets HTTP call made through google-spreadsheet's axios client.
  * @param {import('google-spreadsheet').GoogleSpreadsheet} spreadsheet
@@ -85,7 +303,7 @@ async function initGoogleSheets() {
     }
 
     // Required before using sheetsByTitle or other sheet metadata.
-    await doc.loadInfo();
+    await sheetsApiCall("spreadsheets.get(loadInfo)", () => doc.loadInfo());
     return doc;
   })().catch((error) => {
     // Allow retries if initialization fails.
@@ -113,7 +331,7 @@ async function getWorksheetByTitle(doc, title) {
   if (worksheet) {
     return worksheet;
   }
-  await doc.loadInfo();
+  await sheetsApiCall("spreadsheets.get(reloadInfo)", () => doc.loadInfo());
   return doc.sheetsByTitle[normalizedTitle] || null;
 }
 
@@ -2713,6 +2931,11 @@ module.exports = {
   getUserData,
   initGoogleSheets,
   getWorksheetByTitle,
+  setSheetsScriptRateLimit,
+  isSheetsScriptRateLimitEnabled,
+  isSheetsThrottleError,
+  withSheetsRetry,
+  sheetsApiCall,
   replaceTabData,
   resolveColumnIndex,
   syncAllPeoplePastDingColumns,

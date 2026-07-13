@@ -21,6 +21,7 @@ const {
   initGoogleSheets,
   getWorksheetByTitle,
   resolveColumnIndex,
+  sheetsApiCall,
 } = require("./googleSheets");
 const { recordSheetsApiCall, recordSheetsApiError } = require("./portalMetrics");
 const { isDatabaseEnabled } = require("../db/index");
@@ -147,6 +148,7 @@ function escapeSheetRangeName(sheetName) {
 
 /**
  * Load Applicants rows with one Sheets values API call (much faster than getRows() on large tabs).
+ * @param {{ deadlineAt?: number }} [options]
  * @returns {Promise<{
  *   headerValues: string[],
  *   dataRows: string[][],
@@ -154,7 +156,7 @@ function escapeSheetRangeName(sheetName) {
  *   cfg: ReturnType<typeof getVoiceMemoSheetConfig>,
  * }>}
  */
-async function loadApplicantsDataForStats() {
+async function loadApplicantsDataForStats(options = {}) {
   const cfg = getVoiceMemoSheetConfig();
   const doc = await initGoogleSheets();
   const worksheet = await getWorksheetByTitle(doc, cfg.sheetName);
@@ -162,7 +164,11 @@ async function loadApplicantsDataForStats() {
     throw new Error(`Sheet "${cfg.sheetName}" was not found.`);
   }
 
-  await worksheet.loadHeaderRow(cfg.headerRowNum);
+  await sheetsApiCall(
+    "loadHeaderRow(applicants stats)",
+    () => worksheet.loadHeaderRow(cfg.headerRowNum),
+    { deadlineAt: options.deadlineAt },
+  );
   const headerValues = Array.isArray(worksheet.headerValues) ? worksheet.headerValues : [];
   const columns = {
     round1: resolveHeaderColumnIndex(headerValues, cfg.round1Header),
@@ -191,19 +197,25 @@ async function loadApplicantsDataForStats() {
   const sheets = google.sheets({ version: "v4", auth });
   const startRow = cfg.headerRowNum + 1;
   const range = `${escapeSheetRangeName(cfg.sheetName)}!A${startRow}:ZZ`;
-  let response;
-  try {
-    response = await sheets.spreadsheets.values.get({
-      spreadsheetId: sheetId,
-      range,
-      majorDimension: "ROWS",
-    });
-    recordSheetsApiCall(1);
-  } catch (error) {
-    recordSheetsApiCall(1);
-    recordSheetsApiError(1);
-    throw error;
-  }
+  const response = await sheetsApiCall(
+    "spreadsheets.values.get(applicants)",
+    async () => {
+      try {
+        const result = await sheets.spreadsheets.values.get({
+          spreadsheetId: sheetId,
+          range,
+          majorDimension: "ROWS",
+        });
+        recordSheetsApiCall(1);
+        return result;
+      } catch (error) {
+        recordSheetsApiCall(1);
+        recordSheetsApiError(1);
+        throw error;
+      }
+    },
+    { deadlineAt: options.deadlineAt },
+  );
 
   return {
     headerValues,
@@ -594,7 +606,16 @@ async function getRound1ApplicationStats() {
  *   cfg: ReturnType<typeof getVoiceMemoSheetConfig>,
  * }>}
  */
-async function loadApplicantsWorksheet() {
+/**
+ * @param {{ deadlineAt?: number }} [options]
+ * @returns {Promise<{
+ *   worksheet: import('google-spreadsheet').GoogleSpreadsheetWorksheet,
+ *   headerValues: string[],
+ *   columns: { round1: number, round2: number, links: number, date: number, length: number },
+ *   cfg: ReturnType<typeof getVoiceMemoSheetConfig>,
+ * }>}
+ */
+async function loadApplicantsWorksheet(options = {}) {
   const cfg = getVoiceMemoSheetConfig();
   const doc = await initGoogleSheets();
   const worksheet = await getWorksheetByTitle(doc, cfg.sheetName);
@@ -602,7 +623,11 @@ async function loadApplicantsWorksheet() {
     throw new Error(`Sheet "${cfg.sheetName}" was not found.`);
   }
 
-  await worksheet.loadHeaderRow(cfg.headerRowNum);
+  await sheetsApiCall(
+    "loadHeaderRow(applicants)",
+    () => worksheet.loadHeaderRow(cfg.headerRowNum),
+    { deadlineAt: options.deadlineAt },
+  );
   const headerValues = Array.isArray(worksheet.headerValues) ? worksheet.headerValues : [];
   const columns = {
     round1: resolveHeaderColumnIndex(headerValues, cfg.round1Header),
@@ -807,7 +832,7 @@ let voiceMemoSyncInFlight = false;
  * Lengths are only computed for rows whose sheet length is blank/invalid or whose
  * Drive file changed since the last sync (detected via the Voice note link file id);
  * known lengths are reused from the sheet or the Postgres cache before probing Drive.
- * Drive throttling (429s) is retried with backoff, so a run may take up to ~an hour.
+ * Drive/Sheets throttling (429s) is retried with backoff, so a run may take up to ~an hour.
  *
  * @param {{ timeBudgetMs?: number }} [options]
  * @returns {Promise<{ updated: number, skippedUpToDate: number, skippedNoFile: number, skippedNotAccepted: number, skippedNoId: number, driveFileCount: number, lengthsWritten: number, lengthsCleared: number, lengthsUnknown: number, lengthProbes: number, warnings: string[], duplicateAesopIds: Array, unmatchedFiles: Array, invalidFileNames: string[] }>}
@@ -908,7 +933,7 @@ async function runVoiceMemoRound2Sync(options = {}) {
     dataRows,
     columns,
     cfg: sheetCfg,
-  } = await loadApplicantsDataForStats();
+  } = await loadApplicantsDataForStats({ deadlineAt });
   const round2ColIdx = columns.round2;
   const linksColIdx = columns.links;
   const dateColIdx = columns.date;
@@ -1125,7 +1150,7 @@ async function runVoiceMemoRound2Sync(options = {}) {
   const updated = pending.filter((entry) => entry.baseChanged).length;
 
   if (pending.length > 0) {
-    const { worksheet } = await loadApplicantsWorksheet();
+    const { worksheet } = await loadApplicantsWorksheet({ deadlineAt });
     const columnIndices = [round2ColIdx, linksColIdx, dateColIdx];
     if (lengthEnabled) {
       columnIndices.push(lengthColIdx);
@@ -1135,12 +1160,17 @@ async function runVoiceMemoRound2Sync(options = {}) {
     const minCol = Math.min(...columnIndices);
     const maxCol = Math.max(...columnIndices) + 1;
 
-    await worksheet.loadCells({
-      startRowIndex: minRow,
-      endRowIndex: maxRow,
-      startColumnIndex: minCol,
-      endColumnIndex: maxCol,
-    });
+    await sheetsApiCall(
+      "loadCells(applicants voice memo)",
+      () =>
+        worksheet.loadCells({
+          startRowIndex: minRow,
+          endRowIndex: maxRow,
+          startColumnIndex: minCol,
+          endColumnIndex: maxCol,
+        }),
+      { deadlineAt },
+    );
 
     for (const entry of pending) {
       if (entry.baseChanged) {
@@ -1153,7 +1183,11 @@ async function runVoiceMemoRound2Sync(options = {}) {
       }
     }
 
-    await worksheet.saveUpdatedCells();
+    await sheetsApiCall(
+      "saveUpdatedCells(applicants voice memo)",
+      () => worksheet.saveUpdatedCells(),
+      { deadlineAt },
+    );
   }
 
   const result = {

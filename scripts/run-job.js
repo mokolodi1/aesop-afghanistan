@@ -17,6 +17,7 @@ require("../config/secrets");
 const util = require("util");
 const { formatErrorForLog } = require("../utils/errorLogging");
 const { setDriveScriptRateLimit } = require("../services/googleDrive");
+const { setSheetsScriptRateLimit } = require("../services/googleSheets");
 const { isDatabaseEnabled, closeDatabase } = require("../db/index");
 const { getJobDefinition, getConflictingJobNames } = require("../services/jobRegistry");
 const {
@@ -87,6 +88,7 @@ function captureConsole() {
 
 async function main() {
   setDriveScriptRateLimit(true);
+  setSheetsScriptRateLimit(true);
   const { jobName, trigger, runId: presetRunId, triggeredBy, payload } = parseArgs(process.argv.slice(2));
   const definition = getJobDefinition(jobName);
   if (!definition) {
