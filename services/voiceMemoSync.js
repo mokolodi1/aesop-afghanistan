@@ -39,6 +39,10 @@ const VOICE_NOTE_DATE_HEADERS = [
 ];
 /** Probe/cache Drive durations in chunks so progress survives OOM and GC can reclaim. */
 const VOICE_MEMO_DURATION_PROBE_CHUNK_SIZE = 25;
+/** Applicants sheet writes: keep loadCells ranges small (avoids huge in-memory cell grids). */
+const VOICE_MEMO_SHEET_WRITE_CHUNK_SIZE = 40;
+/** Max inclusive row span per loadCells call (sparse pending rows would otherwise inflate the grid). */
+const VOICE_MEMO_SHEET_WRITE_MAX_ROW_SPAN = 80;
 
 const VOICE_NOTE_LENGTH_HEADERS = [
   "Voice memo length (secs)",
@@ -870,6 +874,39 @@ function chunkArray(items, size) {
 }
 
 /**
+ * Group sorted pending sheet updates into loadCells-friendly batches.
+ * Caps both item count and row span so sparse Applicants rows don't allocate a giant cell grid.
+ * @param {Array<{ gridRowIdx: number }>} pendingSorted
+ * @param {{ maxItems?: number, maxRowSpan?: number }} [options]
+ * @returns {typeof pendingSorted[]}
+ */
+function chunkPendingSheetWrites(pendingSorted, options = {}) {
+  const maxItems = Math.max(1, Math.floor(options.maxItems || VOICE_MEMO_SHEET_WRITE_CHUNK_SIZE));
+  const maxRowSpan = Math.max(1, Math.floor(options.maxRowSpan || VOICE_MEMO_SHEET_WRITE_MAX_ROW_SPAN));
+  /** @type {typeof pendingSorted[]} */
+  const chunks = [];
+  /** @type {typeof pendingSorted} */
+  let current = [];
+  for (const entry of pendingSorted) {
+    if (current.length === 0) {
+      current.push(entry);
+      continue;
+    }
+    const rowSpan = entry.gridRowIdx - current[0].gridRowIdx + 1;
+    if (current.length >= maxItems || rowSpan > maxRowSpan) {
+      chunks.push(current);
+      current = [entry];
+      continue;
+    }
+    current.push(entry);
+  }
+  if (current.length > 0) {
+    chunks.push(current);
+  }
+  return chunks;
+}
+
+/**
  * @param {Array<{ aesopId: string, memo: { fileId: string, fileName: string }, lengthFromProbe: boolean, lengthSeconds: number|null }>} candidates
  * @param {Map<string, number|null>} durationByFileId
  * @param {Set<string>} fileIdsInChunk
@@ -929,7 +966,7 @@ async function runVoiceMemoRound2Sync(options = {}) {
   const memoById = scan.memosById;
 
   // One values.get is much lighter than worksheet.getRows() on large Applicants tabs.
-  const {
+  let {
     dataRows,
     columns,
     cfg: sheetCfg,
@@ -1066,6 +1103,11 @@ async function runVoiceMemoRound2Sync(options = {}) {
     });
   }
 
+  // Release the full sheet values payload before Drive downloads / Sheets writes.
+  dataRows = [];
+  cachedDurationByFileId = new Map();
+  applicantIds.clear();
+
   /** @type {Map<string, number|null>} */
   const durationByFileId = new Map();
   const probeIdList = [...probeFileIds];
@@ -1147,47 +1189,67 @@ async function runVoiceMemoRound2Sync(options = {}) {
     });
   }
 
+  candidates.length = 0;
+  durationByFileId.clear();
+
   const updated = pending.filter((entry) => entry.baseChanged).length;
+  const driveFileCount = memoById.size;
 
   if (pending.length > 0) {
+    pending.sort((a, b) => a.gridRowIdx - b.gridRowIdx);
     const { worksheet } = await loadApplicantsWorksheet({ deadlineAt });
     const columnIndices = [round2ColIdx, linksColIdx, dateColIdx];
     if (lengthEnabled) {
       columnIndices.push(lengthColIdx);
     }
-    const minRow = Math.min(...pending.map((entry) => entry.gridRowIdx));
-    const maxRow = Math.max(...pending.map((entry) => entry.gridRowIdx)) + 1;
     const minCol = Math.min(...columnIndices);
     const maxCol = Math.max(...columnIndices) + 1;
-
-    await sheetsApiCall(
-      "loadCells(applicants voice memo)",
-      () =>
-        worksheet.loadCells({
-          startRowIndex: minRow,
-          endRowIndex: maxRow,
-          startColumnIndex: minCol,
-          endColumnIndex: maxCol,
-        }),
-      { deadlineAt },
+    const writeChunks = chunkPendingSheetWrites(pending, {
+      maxItems: VOICE_MEMO_SHEET_WRITE_CHUNK_SIZE,
+      maxRowSpan: VOICE_MEMO_SHEET_WRITE_MAX_ROW_SPAN,
+    });
+    console.info(
+      `[sync-voice-memos] writing ${pending.length} Applicants row update(s) in ${writeChunks.length} chunk(s)`,
     );
 
-    for (const entry of pending) {
-      if (entry.baseChanged) {
-        worksheet.getCell(entry.gridRowIdx, round2ColIdx).value = entry.round2;
-        worksheet.getCell(entry.gridRowIdx, linksColIdx).value = entry.links;
-        worksheet.getCell(entry.gridRowIdx, dateColIdx).value = entry.submittedAt;
+    for (let chunkIndex = 0; chunkIndex < writeChunks.length; chunkIndex += 1) {
+      const chunk = writeChunks[chunkIndex];
+      const minRow = chunk[0].gridRowIdx;
+      const maxRow = chunk[chunk.length - 1].gridRowIdx + 1;
+
+      await sheetsApiCall(
+        `loadCells(applicants voice memo ${chunkIndex + 1}/${writeChunks.length})`,
+        () =>
+          worksheet.loadCells({
+            startRowIndex: minRow,
+            endRowIndex: maxRow,
+            startColumnIndex: minCol,
+            endColumnIndex: maxCol,
+          }),
+        { deadlineAt },
+      );
+
+      for (const entry of chunk) {
+        if (entry.baseChanged) {
+          worksheet.getCell(entry.gridRowIdx, round2ColIdx).value = entry.round2;
+          worksheet.getCell(entry.gridRowIdx, linksColIdx).value = entry.links;
+          worksheet.getCell(entry.gridRowIdx, dateColIdx).value = entry.submittedAt;
+        }
+        if (lengthEnabled && entry.writeLength) {
+          worksheet.getCell(entry.gridRowIdx, lengthColIdx).value = entry.lengthCellValue;
+        }
       }
-      if (lengthEnabled && entry.writeLength) {
-        worksheet.getCell(entry.gridRowIdx, lengthColIdx).value = entry.lengthCellValue;
-      }
+
+      await sheetsApiCall(
+        `saveUpdatedCells(applicants voice memo ${chunkIndex + 1}/${writeChunks.length})`,
+        () => worksheet.saveUpdatedCells(),
+        { deadlineAt },
+      );
+      console.info(
+        `[sync-voice-memos] wrote Applicants chunk ${chunkIndex + 1}/${writeChunks.length} ` +
+          `(rows ${minRow + 1}-${maxRow})`,
+      );
     }
-
-    await sheetsApiCall(
-      "saveUpdatedCells(applicants voice memo)",
-      () => worksheet.saveUpdatedCells(),
-      { deadlineAt },
-    );
   }
 
   const result = {
@@ -1196,7 +1258,7 @@ async function runVoiceMemoRound2Sync(options = {}) {
     skippedNoFile,
     skippedNotAccepted,
     skippedNoId,
-    driveFileCount: memoById.size,
+    driveFileCount,
     lengthsWritten,
     lengthsCleared,
     lengthsUnknown,

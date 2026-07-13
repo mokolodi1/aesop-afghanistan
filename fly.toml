@@ -32,11 +32,11 @@ primary_region = "iad"
   memory_mb = 512
   processes = ["app"]
 
-# The hourly cache sync needs more headroom (Sheets + Drive mirror).
+# Voice memo sync + hourly cache need headroom (Sheets + Drive media probes).
 [[vm]]
   cpu_kind = "shared"
   cpus = 1
-  memory_mb = 1024
+  memory_mb = 2048
   processes = ["cron"]
 
 [env]
