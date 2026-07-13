@@ -1,6 +1,8 @@
 /*
  * Theme aligned with aesopafghanistan.org (Squarespace 7.1):
- * Fonts: Space Grotesk + Raleway (loaded from HTML).
+ * Fonts: webfonts are intentionally NOT loaded (Google Fonts was render-blocking
+ * for users with slow/filtered connections); the stacks below fall back to
+ * system fonts. Space Grotesk / Raleway / Vazirmatn only apply if installed locally.
  * CSS vars mapped from site :root — accent-hsl, lightAccent-hsl, darkAccent-hsl.
  */
 :root {
