@@ -95,7 +95,7 @@ const TRANSLATIONS = {
     'voiceMemo.whyTitle': 'Why haven\'t you received my voice note?',
     'voiceMemo.why1Before': 'You have not sent a message to',
     'voiceMemo.why1After': ' on Signal.',
-    'voiceMemo.why2': 'It has been less than three days since you sent your messages.',
+    'voiceMemo.why2': 'It has been **less than three days** since you sent your messages.',
     'voiceMemo.why3': 'You submitted a voice note but did not send your AESOP ID.',
     'voiceMemo.why4': 'You mis-typed your AESOP ID.',
     'voiceMemo.why5':
@@ -108,7 +108,7 @@ const TRANSLATIONS = {
     'voiceMemo.goodToKnow3':
       'If you send a new voice note later, your submission will be updated within **3 days**.',
     'voiceMemo.reviewRequest1':
-      'If you believe you have followed all the steps above, please send a message on Signal to',
+      'If you believe you have followed all the steps above **and waited 3 days**, please send a message on Signal to',
     'voiceMemo.reviewRequest2':
       'saying the following **in English**. (You will **not** receive a response, but I will check your application again. It\'s very likely you mis-typed your AESOP ID.)',
     'voiceMemo.reviewRequestCopy': 'Click here to copy',
@@ -132,7 +132,7 @@ const TRANSLATIONS = {
     'voiceMemo.instrStep2Link': 'Message noreplyaesop.55',
     'voiceMemo.instrStep2Intro': 'Then send these two messages:',
     'voiceMemo.instrStep2Id': 'Your AESOP ID number:',
-    'voiceMemo.instrStep2Copy': 'Click here to copy to clipboard',
+    'voiceMemo.instrStep2Copy': 'Click here to copy',
     'voiceMemo.instrStep2Copied': 'Copied!',
     'voiceMemo.instrStep2Voice':
       'A voice note in your own best English answering the Round 2 Prompt above. It must be between 30 seconds and 2 minutes. Do NOT use ChatGPT or grammar checkers. Anything under 30 seconds is too short and will be rejected.',
@@ -143,6 +143,7 @@ const TRANSLATIONS = {
     'voiceMemo.doneLead':
       'We\'ve received your Round 2 voice note, so there\'s nothing more you need to do right now. We will email you with your result.',
     'voiceMemo.resubmitSummary': 'Click here to learn how',
+    'voiceMemo.resubmitSummaryHide': 'Click here to hide instructions',
     'voiceMemo.pendingNote':
       'Your voice note can take up to 3 days to appear on the AESOP Portal after you send it.',
     'voiceMemo.label': 'Voice memo',
@@ -151,17 +152,27 @@ const TRANSLATIONS = {
     'voiceMemo.audioUnavailable':
       'Your submission is recorded, but the audio file is not available to play yet. Please check again later.',
     'voiceMemo.audioPlayError':
-      'Could not play your voice memo. Refresh the stream and try again.',
+      'Your voice note is safe and submitted. We are experiencing high traffic volume and cannot play your audio right now. You may try refreshing the stream later to try again.',
     'voiceMemo.streamExpired':
       'This playback link has expired. Refresh the stream to continue.',
     'voiceMemo.refreshStream': 'Refresh stream',
     'voiceMemo.refreshingStream': 'Refreshing…',
-    'voiceMemo.audioTryAgainLater': 'Please try again later.',
+    'voiceMemo.playRecording': 'Play my voice note',
+    'voiceMemo.loadingRecording': 'Loading…',
+    'voiceMemo.audioTryAgainLater':
+      'Your voice note is safe and submitted. We are experiencing high traffic volume and cannot play your audio right now. You may try refreshing the stream later to try again.',
     'voiceMemo.instructionsParagraph':
       'Submit your Round 2 voice memo using the instructions you received by email. Once it is received, this page will show Submitted and you can listen to your recording here. Your voice note can take up to 3 days to appear on the AESOP Portal after you send it. You may submit your voice notes as many times as you\'d like, but only ONE voice notes will be saved.',
     'voiceMemo.loadError': 'Could not load voice memo status.',
     'voiceMemo.networkError': 'Network error. Please try again.',
     'voiceMemo.sectionAria': 'Round 2 voice memo',
+    'voiceMemo.statusSectionTitle': 'Voice note status',
+    'voiceMemo.infoSectionTitle': 'Voice note information',
+    'voiceMemo.submissionSectionTitle': 'Submission information',
+    'voiceMemo.submissionShowMore': 'Show more',
+    'voiceMemo.submissionHide': 'Hide',
+    'voiceMemo.submissionDoneCallout':
+      'You have already submitted your voice note successfully. You may resubmit until the deadline of Thursday, July 16, 2026 at 11:59 pm.',
     'voiceMemo.accordionAria': 'Voice memo',
     'voiceMemo.audioUnsupported': 'Your browser does not support audio playback.',
     'voiceMemo.tooShort':
@@ -425,7 +436,7 @@ const TRANSLATIONS = {
     'voiceMemo.whyTitle': 'چرا یادداشت صوتی مرا دریافت نکرده‌اید؟',
     'voiceMemo.why1Before': 'در Signal پیامی به',
     'voiceMemo.why1After': ' نفرستاده‌اید.',
-    'voiceMemo.why2': 'از زمان ارسال پیام‌های شما کمتر از سه روز گذشته است.',
+    'voiceMemo.why2': 'از زمان ارسال پیام‌های شما **کمتر از سه روز** گذشته است.',
     'voiceMemo.why3': 'یادداشت صوتی فرستاده‌اید اما شمارهٔ شناسایی ایساپ خود را نفرستاده‌اید.',
     'voiceMemo.why4': 'شمارهٔ شناسایی ایساپ خود را اشتباه تایپ کرده‌اید.',
     'voiceMemo.why5':
@@ -438,7 +449,7 @@ const TRANSLATIONS = {
     'voiceMemo.goodToKnow3':
       'اگر بعداً یادداشت صوتی جدیدی بفرستید، ارسال شما ظرف **۳ روز** به‌روزرسانی می‌شود.',
     'voiceMemo.reviewRequest1':
-      'اگر فکر می‌کنید همهٔ مراحل بالا را انجام داده‌اید، لطفاً در Signal پیامی به',
+      'اگر فکر می‌کنید همهٔ مراحل بالا را انجام داده‌اید **و ۳ روز صبر کرده‌اید**، لطفاً در Signal پیامی به',
     'voiceMemo.reviewRequest2':
       'بفرستید و در آن **به انگلیسی** متن زیر را بنویسید. (پاسخی **نخواهید** دریافت کرد، اما من درخواست شما را دوباره بررسی می‌کنم. خیلی محتمل است که شمارهٔ شناسایی ایساپ خود را اشتباه تایپ کرده باشید.)',
     'voiceMemo.reviewRequestCopy': 'برای کپی اینجا کلیک کنید',
@@ -462,7 +473,7 @@ const TRANSLATIONS = {
     'voiceMemo.instrStep2Link': 'پیام به noreplyaesop.55',
     'voiceMemo.instrStep2Intro': 'سپس این دو پیام را بفرستید:',
     'voiceMemo.instrStep2Id': 'شمارهٔ شناسایی ایساپ شما:',
-    'voiceMemo.instrStep2Copy': 'برای کپی در کلیپ‌بورد اینجا کلیک کنید',
+    'voiceMemo.instrStep2Copy': 'برای کپی اینجا کلیک کنید',
     'voiceMemo.instrStep2Copied': 'کپی شد!',
     'voiceMemo.instrStep2Voice':
       'یک پیام صوتی به بهترین زبان انگلیسی خودتان در پاسخ به سؤال مرحلهٔ دوم در بالا. باید بین ۳۰ ثانیه تا ۲ دقیقه باشد. از ChatGPT یا برنامه‌های تصحیح گرامر استفاده نکنید. هر پیام کوتاه‌تر از ۳۰ ثانیه بسیار کوتاه است و رد خواهد شد.',
@@ -473,6 +484,7 @@ const TRANSLATIONS = {
     'voiceMemo.doneLead':
       'ما یادداشت صوتی مرحلهٔ دوم شما را دریافت کردیم، پس در حال حاضر کار دیگری لازم نیست انجام دهید. نتیجه را از طریق ایمیل برایتان خواهیم فرستاد.',
     'voiceMemo.resubmitSummary': 'برای یادگیری نحوهٔ کار اینجا کلیک کنید',
+    'voiceMemo.resubmitSummaryHide': 'برای پنهان کردن دستورالعمل‌ها اینجا کلیک کنید',
     'voiceMemo.pendingNote':
       'یادداشت صوتی شما ممکن است تا ۳ روز پس از ارسال در پورتال دانش‌آموز نمایان شود.',
     'voiceMemo.label': 'یادداشت صوتی',
@@ -481,17 +493,27 @@ const TRANSLATIONS = {
     'voiceMemo.audioUnavailable':
       'ارسال شما ثبت شده، اما فایل صوتی هنوز برای پخش در دسترس نیست. لطفاً بعداً دوباره بررسی کنید.',
     'voiceMemo.audioPlayError':
-      'پخش یادداشت صوتی ممکن نشد. جریان را تازه کنید و دوباره تلاش کنید.',
+      'یادداشت صوتی شما محفوظ و ثبت شده است. ما با حجم بالای ترافیک روبه‌رو هستیم و فعلاً نمی‌توانیم فایل صوتی شما را پخش کنیم. می‌توانید بعداً جریان را تازه کنید و دوباره تلاش کنید.',
     'voiceMemo.streamExpired':
       'این پیوند پخش منقضی شده است. برای ادامه، جریان را تازه کنید.',
     'voiceMemo.refreshStream': 'تازه کردن جریان',
     'voiceMemo.refreshingStream': 'در حال تازه‌سازی…',
-    'voiceMemo.audioTryAgainLater': 'لطفاً بعداً دوباره تلاش کنید.',
+    'voiceMemo.playRecording': 'پخش یادداشت صوتی من',
+    'voiceMemo.loadingRecording': 'در حال بارگذاری…',
+    'voiceMemo.audioTryAgainLater':
+      'یادداشت صوتی شما محفوظ و ثبت شده است. ما با حجم بالای ترافیک روبه‌رو هستیم و فعلاً نمی‌توانیم فایل صوتی شما را پخش کنیم. می‌توانید بعداً جریان را تازه کنید و دوباره تلاش کنید.',
     'voiceMemo.instructionsParagraph':
       'یادداشت صوتی دور دوم را طبق دستورالعمل ایمیل‌شده ارسال کنید. پس از دریافت، این صفحه «ثبت شده» را نشان می‌دهد و می‌توانید ضبط خود را بشنوید. یادداشت صوتی شما ممکن است تا ۳ روز پس از ارسال در پورتال AESOP نمایان شود. می‌توانید هر چند بار که بخواهید یادداشت صوتی بفرستید، اما فقط یک یادداشت صوتی ذخیره می‌شود.',
     'voiceMemo.loadError': 'بارگذاری وضعیت یادداشت صوتی ممکن نشد.',
     'voiceMemo.networkError': 'خطای شبکه. لطفاً دوباره تلاش کنید.',
     'voiceMemo.sectionAria': 'یادداشت صوتی دور دوم',
+    'voiceMemo.statusSectionTitle': 'وضعیت یادداشت صوتی',
+    'voiceMemo.infoSectionTitle': 'اطلاعات یادداشت صوتی',
+    'voiceMemo.submissionSectionTitle': 'اطلاعات ارسال',
+    'voiceMemo.submissionShowMore': 'نمایش بیشتر',
+    'voiceMemo.submissionHide': 'پنهان کردن',
+    'voiceMemo.submissionDoneCallout':
+      'شما یادداشت صوتی خود را با موفقیت ارسال کرده‌اید. می‌توانید تا مهلت پنجشنبه ۱۶ جولای ۲۰۲۶ ساعت ۱۱:۵۹ شب دوباره ارسال کنید.',
     'voiceMemo.accordionAria': 'یادداشت صوتی',
     'voiceMemo.audioUnsupported': 'مرورگر شما از پخش صدا پشتیبانی نمی‌کند.',
     'voiceMemo.tooShort':

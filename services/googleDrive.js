@@ -17,7 +17,8 @@ const DRIVE_RETRY_BACKOFF_CAP_MS = 60 * 1000;
 const DRIVE_RETRY_AFTER_CAP_MS = 15 * 60 * 1000;
 
 /** User-facing copy when Drive throttles on-demand portal streaming. */
-const DRIVE_TRY_AGAIN_LATER_MESSAGE = "Please try again later.";
+const DRIVE_TRY_AGAIN_LATER_MESSAGE =
+  "Your voice note is safe and submitted. We are experiencing high traffic volume and cannot play your audio right now. You may try refreshing the stream later to try again.";
 
 /**
  * Map a Drive streaming failure to a safe portal error (no internal details).
@@ -37,7 +38,7 @@ function mapVoiceMemoStreamError(error) {
       return /** @type {Error & { statusCode?: number }} */ (error);
     }
   }
-  const mapped = new Error("Could not play voice memo. Refresh the stream and try again.");
+  const mapped = new Error(DRIVE_TRY_AGAIN_LATER_MESSAGE);
   mapped.statusCode = 503;
   return mapped;
 }
@@ -645,7 +646,7 @@ function resolveVoiceMemoStreamMimeType(fileName, driveMimeType) {
   if (name.endsWith(".mp3") || name.endsWith(".mpga")) {
     return "audio/mpeg";
   }
-  if (name.endsWith(".ogg")) {
+  if (name.endsWith(".ogg") || name.endsWith(".oga")) {
     return "audio/ogg";
   }
   if (name.endsWith(".opus")) {
@@ -761,7 +762,7 @@ const VOICE_MEMO_FULL_DURATION_PROBE_MAX_BYTES = 8 * 1024 * 1024;
  */
 function isLikelyAudioVoiceMemo(fileName, mimeType) {
   const name = String(fileName || "").trim().toLowerCase();
-  if (/\.(m4a|aac|acc|mp3|mpga|mpg|ogg|opus|wav|flac|mp4)$/i.test(name)) {
+  if (/\.(m4a|aac|acc|mp3|mpga|mpg|ogg|oga|opus|wav|flac|mp4)$/i.test(name)) {
     return true;
   }
   const mime = String(mimeType || "").trim().toLowerCase();

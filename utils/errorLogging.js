@@ -135,9 +135,25 @@ function formatGoogleSheetsWriteErrorForLog(error) {
   return base;
 }
 
+/**
+ * @param {unknown} error
+ * @returns {string}
+ */
+function formatGoogleDriveOperationError(error) {
+  const base = formatGoogleSheetsOperationError(error);
+  const message = String(
+    error?.response?.data?.error?.message || error?.message || "",
+  );
+  if (/unregistered callers/i.test(message)) {
+    return `${base} hint=drive-api-identity: in Google Cloud Console enable "Google Drive API" for the service account project, verify email.gmailServiceAccount.credentials (or GMAIL_SA_CREDENTIALS_JSON) is configured locally, and share the voice memo Drive folder with the service account client_email.`;
+  }
+  return base;
+}
+
 module.exports = {
   formatGoogleApiError,
   formatGoogleSheetsOperationError,
+  formatGoogleDriveOperationError,
   formatErrorForLog,
   formatDbErrorMessage,
   formatGmailAuthError,

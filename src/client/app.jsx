@@ -810,16 +810,10 @@ async function resolvePortalVoiceMemoAudioError(streamSrc, t) {
     if (response.status === 429 || response.status === 503) {
       const payload = await response.json().catch(() => null);
       const serverMessage = String(payload?.error || '').trim();
-      if (/try again later/i.test(serverMessage)) {
-        return t('voiceMemo.audioTryAgainLater');
-      }
       if (/reload|expired/i.test(serverMessage)) {
         return t('voiceMemo.streamExpired');
       }
-      if (serverMessage) {
-        return serverMessage;
-      }
-      return t('voiceMemo.audioTryAgainLater');
+      return t('voiceMemo.audioPlayError');
     }
     if (!response.ok) {
       const payload = await response.json().catch(() => null);
@@ -827,9 +821,7 @@ async function resolvePortalVoiceMemoAudioError(streamSrc, t) {
       if (/reload|expired/i.test(serverMessage)) {
         return t('voiceMemo.streamExpired');
       }
-      if (serverMessage) {
-        return serverMessage;
-      }
+      return t('voiceMemo.audioPlayError');
     }
   } catch {
     // Fall back to the generic playback message when the probe fails.
@@ -2739,9 +2731,9 @@ function PortalVoiceMemoReviewRequest({ aesopId }) {
   }, [idText, reviewMessage]);
 
   return (
-    <div className="portal-voice-memo-review-request">
+    <div className="portal-voice-memo-why portal-voice-memo-review-request">
       <p className="portal-voice-memo-review-request-lead">
-        {t('voiceMemo.reviewRequest1')}{' '}
+        {renderPortalRichText(t('voiceMemo.reviewRequest1'))}{' '}
         <a
           className="portal-ltr"
           href={VOICE_MEMO_SIGNAL_CONTACT_URL}
@@ -2752,22 +2744,118 @@ function PortalVoiceMemoReviewRequest({ aesopId }) {
         </a>{' '}
         {renderPortalRichText(t('voiceMemo.reviewRequest2'))}
       </p>
-      <p className="portal-voice-memo-review-request-message portal-ltr" dir="ltr">
-        Please review my voice note.
-        <br />
-        My AESOP ID is {idText || '#####'}.
-      </p>
-      {idText ? (
+      <div className="portal-voice-memo-review-request-message-row">
+        <span className="portal-voice-memo-review-request-message portal-ltr" dir="ltr">
+          Please review my voice note. My AESOP ID is {idText || '#####'}.
+        </span>
+        {idText ? (
+          <button
+            type="button"
+            className="portal-voice-memo-copy-btn"
+            onClick={copyReviewMessage}
+          >
+            {copiedReviewMessage
+              ? t('voiceMemo.reviewRequestCopied')
+              : t('voiceMemo.reviewRequestCopy')}
+          </button>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function PortalVoiceMemoResubmit({ aesopId }) {
+  const { t } = usePortalI18n();
+  const [showInstructions, setShowInstructions] = useState(false);
+
+  return (
+    <div className="portal-voice-memo-resubmit-block">
+      <div className="portal-voice-memo-resubmit-actions">
+        <a
+          className="portal-voice-memo-resubmit-btn"
+          href={VOICE_MEMO_SIGNAL_CONTACT_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          {t('voiceMemo.resubmitButton')}
+        </a>
         <button
           type="button"
-          className="portal-voice-memo-copy-id"
-          onClick={copyReviewMessage}
+          className="portal-voice-memo-resubmit-toggle"
+          aria-expanded={showInstructions}
+          onClick={() => setShowInstructions((open) => !open)}
         >
-          {copiedReviewMessage
-            ? t('voiceMemo.reviewRequestCopied')
-            : t('voiceMemo.reviewRequestCopy')}
+          {showInstructions
+            ? t('voiceMemo.resubmitSummaryHide')
+            : t('voiceMemo.resubmitSummary')}
         </button>
+      </div>
+      {showInstructions ? <PortalVoiceMemoInstructions aesopId={aesopId} /> : null}
+    </div>
+  );
+}
+
+function PortalVoiceMemoSubmissionDetails({ aesopId }) {
+  const { t } = usePortalI18n();
+  return (
+    <>
+      <div className="portal-voice-memo-why">
+        <p className="portal-voice-memo-why-title">{t('voiceMemo.whyTitle2')}</p>
+        <ul className="portal-voice-memo-why-list">
+          <li>{renderPortalRichText(t('voiceMemo.goodToKnow1'))}</li>
+          <li>{renderPortalRichText(t('voiceMemo.goodToKnow2'))}</li>
+          <li>{renderPortalRichText(t('voiceMemo.goodToKnow3'))}</li>
+        </ul>
+      </div>
+      <div className="portal-voice-memo-why">
+        <p className="portal-voice-memo-why-title">{t('voiceMemo.whyTitle')}</p>
+        <ul className="portal-voice-memo-why-list">
+          <li>{renderPortalRichText(t('voiceMemo.why2'))}</li>
+          <PortalVoiceMemoWhySignalItem />
+          <li>{renderPortalRichText(t('voiceMemo.why3'))}</li>
+          <li>{renderPortalRichText(t('voiceMemo.why4'))}</li>
+          <li>{renderPortalRichText(t('voiceMemo.why5'))}</li>
+        </ul>
+      </div>
+      <PortalVoiceMemoReviewRequest aesopId={aesopId} />
+      <PortalVoiceMemoResubmit aesopId={aesopId} />
+    </>
+  );
+}
+
+function PortalVoiceMemoSubmissionSection({ aesopId, collapsible = false }) {
+  const { t } = usePortalI18n();
+  const [expanded, setExpanded] = useState(!collapsible);
+
+  useEffect(() => {
+    if (!collapsible) {
+      setExpanded(true);
+    }
+  }, [collapsible]);
+
+  return (
+    <div className="portal-voice-memo-block">
+      <div className="portal-voice-memo-block-header">
+        <h3 className="portal-voice-memo-block-heading">
+          {t('voiceMemo.submissionSectionTitle')}
+        </h3>
+        {collapsible ? (
+          <button
+            type="button"
+            className="portal-voice-memo-section-toggle"
+            aria-expanded={expanded}
+            onClick={() => setExpanded((open) => !open)}
+          >
+            {expanded ? t('voiceMemo.submissionHide') : t('voiceMemo.submissionShowMore')}
+          </button>
+        ) : null}
+      </div>
+      {collapsible ? (
+        <p className="portal-voice-memo-submission-callout" role="status">
+          {t('voiceMemo.submissionDoneCallout')}
+        </p>
       ) : null}
+      {expanded ? <PortalVoiceMemoSubmissionDetails aesopId={aesopId} /> : null}
     </div>
   );
 }
@@ -2873,22 +2961,23 @@ function PortalVoiceMemoInstructions({ aesopId }) {
           <p className="portal-voice-memo-step-body">{t('voiceMemo.instrStep2Intro')}</p>
           <ol className="portal-voice-memo-substeps">
             <li>
-              {t('voiceMemo.instrStep2Id')}{' '}
-              <strong className="portal-ltr">{idText || '—'}</strong>
-              {idText ? (
-                <>
-                  {' '}
+              <div className="portal-voice-memo-substep-id-row">
+                <span className="portal-voice-memo-substep-id-line">
+                  {t('voiceMemo.instrStep2Id')}{' '}
+                  <strong className="portal-ltr">{idText || '—'}</strong>
+                </span>
+                {idText ? (
                   <button
                     type="button"
-                    className="portal-voice-memo-copy-id"
+                    className="portal-voice-memo-copy-btn"
                     onClick={copyAesopId}
                   >
                     {copiedAesopId
                       ? t('voiceMemo.instrStep2Copied')
                       : t('voiceMemo.instrStep2Copy')}
                   </button>
-                </>
-              ) : null}
+                ) : null}
+              </div>
             </li>
             <li>{t('voiceMemo.instrStep2Voice')}</li>
           </ol>
@@ -2927,6 +3016,8 @@ function PortalVoiceMemoSection({ studentUserId, studentEmail, enabled }) {
   const [voiceMemoAudioError, setVoiceMemoAudioError] = useState('');
   const [measuredDurationSeconds, setMeasuredDurationSeconds] = useState(null);
   const [refreshingStream, setRefreshingStream] = useState(false);
+  const [voiceMemoPlayerRequested, setVoiceMemoPlayerRequested] = useState(false);
+  const [voiceMemoPlayerLoading, setVoiceMemoPlayerLoading] = useState(false);
   const reportedDurationKeyRef = useRef('');
 
   useEffect(() => {
@@ -2934,11 +3025,15 @@ function PortalVoiceMemoSection({ studentUserId, studentEmail, enabled }) {
       setVoiceMemoStatus(null);
       setVoiceMemoAudioError('');
       setMeasuredDurationSeconds(null);
+      setVoiceMemoPlayerRequested(false);
+      setVoiceMemoPlayerLoading(false);
       reportedDurationKeyRef.current = '';
       return;
     }
     setVoiceMemoStatus(fetchedVoiceMemoStatus);
     setMeasuredDurationSeconds(null);
+    setVoiceMemoPlayerRequested(false);
+    setVoiceMemoPlayerLoading(false);
     reportedDurationKeyRef.current = '';
   }, [enabled, fetchedVoiceMemoStatus]);
 
@@ -2948,6 +3043,8 @@ function PortalVoiceMemoSection({ studentUserId, studentEmail, enabled }) {
     }
     setRefreshingStream(true);
     setVoiceMemoAudioError('');
+    setVoiceMemoPlayerRequested(false);
+    setVoiceMemoPlayerLoading(false);
     try {
       const result = await loadPortalVoiceMemoStatusFromApi({
         userId: studentUserId,
@@ -3016,6 +3113,8 @@ function PortalVoiceMemoSection({ studentUserId, studentEmail, enabled }) {
 
   useEffect(() => {
     setVoiceMemoAudioError('');
+    setVoiceMemoPlayerRequested(false);
+    setVoiceMemoPlayerLoading(false);
   }, [voiceMemoStreamSrc]);
 
   useEffect(() => {
@@ -3108,6 +3207,8 @@ function PortalVoiceMemoSection({ studentUserId, studentEmail, enabled }) {
     return null;
   }
 
+  const activeVoiceMemoStatus = voiceMemoStatus ?? fetchedVoiceMemoStatus;
+
   if (voiceMemoLoading) {
     return (
       <section className="portal-voice-memo-section" aria-label={t('voiceMemo.sectionAria')}>
@@ -3116,38 +3217,62 @@ function PortalVoiceMemoSection({ studentUserId, studentEmail, enabled }) {
     );
   }
 
-  if (!voiceMemoStatus?.eligible) {
+  if (!activeVoiceMemoStatus?.eligible) {
+    if (voiceMemoError) {
+      return (
+        <section className="portal-voice-memo-section" aria-label={t('voiceMemo.sectionAria')}>
+          <div className="portal-voice-memo-block">
+            <p className="portal-field-error" role="alert">
+              {voiceMemoError}
+            </p>
+          </div>
+        </section>
+      );
+    }
     return null;
   }
 
   return (
     <section className="portal-voice-memo-section" aria-label={t('voiceMemo.sectionAria')}>
-      {voiceMemoStatus.submitted ? (
+      {activeVoiceMemoStatus.submitted ? (
         <>
-          <div
-            className={`portal-voice-memo-status${
-              hasShortSubmissionIssue
-                ? ' portal-voice-memo-status--issues'
-                : ' portal-voice-memo-status--submitted'
-            }`}
-            role="status"
-          >
-            {hasShortSubmissionIssue
-              ? t('voiceMemo.submittedWithIssues')
-              : t('voiceMemo.submitted')}
-          </div>
-          <div className="portal-voice-memo-panel">
-            {voiceMemoError ? (
-              <p className="portal-field-error" role="alert">
-                {voiceMemoError}
-              </p>
-            ) : null}
-            <PortalVoiceMemoPrompt prompt={voiceMemoStatus.round2Prompt} />
+          <div className="portal-voice-memo-block">
+            <div className="portal-voice-memo-block-header">
+              <h3 className="portal-voice-memo-block-heading">{t('voiceMemo.statusSectionTitle')}</h3>
+              <div
+                className={`portal-voice-memo-status${
+                  hasShortSubmissionIssue
+                    ? ' portal-voice-memo-status--issues'
+                    : ' portal-voice-memo-status--submitted'
+                }`}
+                role="status"
+              >
+                {hasShortSubmissionIssue
+                  ? t('voiceMemo.submittedWithIssues')
+                  : t('voiceMemo.submitted')}
+              </div>
+            </div>
             {voiceMemoDurationWarning && hasShortSubmissionIssue ? (
               <p className="portal-voice-memo-duration-warning" role="alert">
                 {voiceMemoDurationWarning}
               </p>
             ) : null}
+            {!hasShortSubmissionIssue ? (
+              <div className="portal-voice-memo-done">
+                <p className="portal-voice-memo-done-title">{t('voiceMemo.doneTitle')}</p>
+                <p className="portal-voice-memo-done-lead">{t('voiceMemo.doneLead')}</p>
+              </div>
+            ) : null}
+          </div>
+
+          <div className="portal-voice-memo-block">
+            <h3 className="portal-voice-memo-block-heading">{t('voiceMemo.infoSectionTitle')}</h3>
+            {voiceMemoError ? (
+              <p className="portal-field-error" role="alert">
+                {voiceMemoError}
+              </p>
+            ) : null}
+            <PortalVoiceMemoPrompt prompt={activeVoiceMemoStatus.round2Prompt} />
             {displayDurationStatus === 'too_long' ? (
               <p className="portal-field-hint">
                 <span className="portal-voice-memo-duration-ok">
@@ -3165,18 +3290,39 @@ function PortalVoiceMemoSection({ studentUserId, studentEmail, enabled }) {
                 ) : null}
               </p>
             ) : null}
-            {voiceMemoStatus.hasRecording ? (
+            {activeVoiceMemoStatus.hasRecording ? (
               <>
                 {voiceMemoAudioError ? (
-                  <p className="portal-field-error" role="alert">
+                  <p className="portal-voice-memo-audio-warning" role="status">
                     {voiceMemoAudioError}
                   </p>
                 ) : null}
-                {voiceMemoStreamSrc ? (
+                {!voiceMemoPlayerRequested || voiceMemoPlayerLoading ? (
+                  <button
+                    type="button"
+                    className="portal-voice-memo-play-btn"
+                    disabled={voiceMemoPlayerLoading || !voiceMemoStreamSrc}
+                    onClick={() => {
+                      if (voiceMemoPlayerLoading || !voiceMemoStreamSrc) {
+                        return;
+                      }
+                      setVoiceMemoAudioError('');
+                      setVoiceMemoPlayerRequested(true);
+                      setVoiceMemoPlayerLoading(true);
+                    }}
+                  >
+                    {voiceMemoPlayerLoading
+                      ? t('voiceMemo.loadingRecording')
+                      : t('voiceMemo.playRecording')}
+                  </button>
+                ) : null}
+                {voiceMemoPlayerRequested && voiceMemoStreamSrc ? (
                   <audio
                     key={voiceMemoStreamSrc}
-                    className="portal-voice-memo-player"
-                    controls
+                    className={`portal-voice-memo-player${
+                      voiceMemoPlayerLoading ? ' portal-voice-memo-player--loading' : ''
+                    }`}
+                    controls={!voiceMemoPlayerLoading}
                     preload="metadata"
                     src={voiceMemoStreamSrc}
                     onLoadedMetadata={(event) => {
@@ -3184,8 +3330,11 @@ function PortalVoiceMemoSection({ studentUserId, studentEmail, enabled }) {
                       if (Number.isFinite(duration) && duration > 0) {
                         setMeasuredDurationSeconds(duration);
                       }
+                      setVoiceMemoPlayerLoading(false);
                     }}
                     onError={() => {
+                      setVoiceMemoPlayerLoading(false);
+                      setVoiceMemoPlayerRequested(false);
                       resolvePortalVoiceMemoAudioError(voiceMemoStreamSrc, t).then((message) => {
                         setVoiceMemoAudioError(message);
                       });
@@ -3194,7 +3343,7 @@ function PortalVoiceMemoSection({ studentUserId, studentEmail, enabled }) {
                     {t('voiceMemo.audioUnsupported')}
                   </audio>
                 ) : null}
-                {refreshingStream || voiceMemoAudioError === t('voiceMemo.streamExpired') ? (
+                {refreshingStream || voiceMemoAudioError ? (
                   <button
                     type="button"
                     className="portal-voice-memo-refresh-stream"
@@ -3208,60 +3357,44 @@ function PortalVoiceMemoSection({ studentUserId, studentEmail, enabled }) {
             ) : (
               <p className="portal-field-hint">{t('voiceMemo.audioUnavailable')}</p>
             )}
-            {!hasShortSubmissionIssue ? (
-              <div className="portal-voice-memo-done">
-                <p className="portal-voice-memo-done-title">{t('voiceMemo.doneTitle')}</p>
-                <p className="portal-voice-memo-done-lead">{t('voiceMemo.doneLead')}</p>
-              </div>
-            ) : null}
-            <div className="portal-voice-memo-why">
-              <p className="portal-voice-memo-why-title">{t('voiceMemo.whyTitle2')}</p>
-              <ul className="portal-voice-memo-why-list">
-                <li>{renderPortalRichText(t('voiceMemo.goodToKnow1'))}</li>
-                <li>{renderPortalRichText(t('voiceMemo.goodToKnow2'))}</li>
-                <li>{renderPortalRichText(t('voiceMemo.goodToKnow3'))}</li>
-              </ul>
-            </div>
-            <div className="portal-voice-memo-why">
-              <p className="portal-voice-memo-why-title">{t('voiceMemo.whyTitle')}</p>
-              <ul className="portal-voice-memo-why-list">
-                <PortalVoiceMemoWhySignalItem />
-                <li>{renderPortalRichText(t('voiceMemo.why2'))}</li>
-                <li>{renderPortalRichText(t('voiceMemo.why3'))}</li>
-                <li>{renderPortalRichText(t('voiceMemo.why4'))}</li>
-                <li>{renderPortalRichText(t('voiceMemo.why5'))}</li>
-              </ul>
-            </div>
-            <PortalVoiceMemoReviewRequest aesopId={studentUserId} />
-            <a
-              className="portal-voice-memo-resubmit-btn"
-              href={VOICE_MEMO_SIGNAL_CONTACT_URL}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              {t('voiceMemo.resubmitButton')}
-            </a>
-            <details className="portal-voice-memo-resubmit">
-              <summary>{t('voiceMemo.resubmitSummary')}</summary>
-              <PortalVoiceMemoInstructions aesopId={studentUserId} />
-            </details>
           </div>
+
+          <PortalVoiceMemoSubmissionSection
+            aesopId={studentUserId}
+            collapsible={!hasShortSubmissionIssue}
+          />
         </>
       ) : (
         <>
-          <div className="portal-voice-memo-warning" role="alert">
-            <p className="portal-voice-memo-warning-title">{t('voiceMemo.noneTitle')}</p>
-            <p className="portal-voice-memo-warning-lead">{t('voiceMemo.noneLead')}</p>
+          <div className="portal-voice-memo-block">
+            <div className="portal-voice-memo-block-header">
+              <h3 className="portal-voice-memo-block-heading">{t('voiceMemo.statusSectionTitle')}</h3>
+              <div className="portal-voice-memo-status portal-voice-memo-status--pending" role="status">
+                {t('voiceMemo.notSubmitted')}
+              </div>
+            </div>
+            <div className="portal-voice-memo-warning" role="alert">
+              <p className="portal-voice-memo-warning-title">{t('voiceMemo.noneTitle')}</p>
+              <p className="portal-voice-memo-warning-lead">{t('voiceMemo.noneLead')}</p>
+            </div>
           </div>
-          <PortalVoiceMemoPrompt prompt={voiceMemoStatus.round2Prompt} />
-          <div className="portal-voice-memo-panel">
-            <h3 className="portal-voice-memo-instructions-title">{t('voiceMemo.instrTitle')}</h3>
+
+          <div className="portal-voice-memo-block">
+            <h3 className="portal-voice-memo-block-heading">{t('voiceMemo.infoSectionTitle')}</h3>
+            <PortalVoiceMemoPrompt prompt={activeVoiceMemoStatus.round2Prompt} />
+          </div>
+
+          <div className="portal-voice-memo-block">
+            <h3 className="portal-voice-memo-block-heading">
+              {t('voiceMemo.submissionSectionTitle')}
+            </h3>
+            <h4 className="portal-voice-memo-instructions-title">{t('voiceMemo.instrTitle')}</h4>
             <PortalVoiceMemoInstructions aesopId={studentUserId} />
             <div className="portal-voice-memo-why portal-voice-memo-why--warning">
               <p className="portal-voice-memo-why-title">{t('voiceMemo.whyTitle')}</p>
               <ul className="portal-voice-memo-why-list">
-                <PortalVoiceMemoWhySignalItem />
                 <li>{renderPortalRichText(t('voiceMemo.why2'))}</li>
+                <PortalVoiceMemoWhySignalItem />
                 <li>{renderPortalRichText(t('voiceMemo.why3'))}</li>
                 <li>{renderPortalRichText(t('voiceMemo.why4'))}</li>
                 <li>{renderPortalRichText(t('voiceMemo.why5'))}</li>

@@ -5,6 +5,7 @@ const DEFAULT_VOICE_MEMO_FILE_EXTENSIONS = [
   "acc",
   "mp3",
   "ogg",
+  "oga",
   "opus",
   "wav",
   "mpga",
