@@ -12,8 +12,8 @@ let initPromise = null;
 let sheetsMetricsHooked = false;
 const SHEETS_SCOPE = "https://www.googleapis.com/auth/spreadsheets";
 
-/** Stay under Sheets ~60 read/write req/min/user while sync scripts run. */
-const SHEETS_SCRIPT_MAX_REQUESTS_PER_MINUTE = 45;
+/** Cap Sheets traffic hard while sync scripts/jobs run (~20 req/min). */
+const SHEETS_SCRIPT_MAX_REQUESTS_PER_MINUTE = 20;
 const SHEETS_SCRIPT_RATE_WINDOW_MS = 60 * 1000;
 /** Portal/on-demand paths use a short budget; cron jobs pass a longer deadlineAt. */
 const SHEETS_RETRY_DEFAULT_BUDGET_MS = 20 * 1000;

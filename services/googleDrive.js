@@ -42,8 +42,8 @@ function mapVoiceMemoStreamError(error) {
   return mapped;
 }
 
-/** Stay under 50 Drive requests/min while sync scripts run. */
-const DRIVE_SCRIPT_MAX_REQUESTS_PER_MINUTE = 49;
+/** Cap Drive traffic hard while sync scripts/jobs run (~20 req/min). */
+const DRIVE_SCRIPT_MAX_REQUESTS_PER_MINUTE = 20;
 const DRIVE_SCRIPT_RATE_WINDOW_MS = 60 * 1000;
 /** Google allows up to 100 sub-requests per HTTP batch; keep chunks modest. */
 const DRIVE_BATCH_MAX_SUBREQUESTS = 25;
