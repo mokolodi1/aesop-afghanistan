@@ -2916,7 +2916,6 @@ function PortalVoiceMemoSection({ studentUserId, studentEmail, enabled }) {
             durationWarning: data.durationWarning ?? prev.durationWarning,
           };
         });
-        );
       } catch {
         // Keep the browser-measured label even if cache update fails.
       }
