@@ -3080,36 +3080,30 @@ function PortalVoiceMemoSection({ studentUserId, studentEmail, enabled }) {
     return `/api/portal-voice-memo/stream?${params.toString()}`;
   }, [voiceMemoStatus?.submitted, voiceMemoStatus?.hasRecording, voiceMemoStatus?.streamToken, enabled]);
 
+  // Duration labels and issue state come from the server mirror only. Browser
+  // measurement during playback is used to backfill the cache, not to re-render
+  // status or submission UI while the student listens.
   const displayDurationSeconds =
-    measuredDurationSeconds != null && Number.isFinite(measuredDurationSeconds)
-      ? measuredDurationSeconds
-      : voiceMemoStatus?.durationSeconds != null && Number.isFinite(Number(voiceMemoStatus.durationSeconds))
-        ? Number(voiceMemoStatus.durationSeconds)
-        : null;
+    voiceMemoStatus?.durationSeconds != null && Number.isFinite(Number(voiceMemoStatus.durationSeconds))
+      ? Number(voiceMemoStatus.durationSeconds)
+      : null;
   const displayDurationLabel =
     formatVoiceMemoDurationLabel(displayDurationSeconds) || voiceMemoStatus?.durationLabel || null;
-  const displayDurationStatus =
-    displayDurationSeconds != null
-      ? classifyVoiceMemoDuration(displayDurationSeconds, {
-          minSeconds: voiceMemoStatus?.minDurationSeconds,
-          maxSeconds: voiceMemoStatus?.maxDurationSeconds,
-        })
-      : voiceMemoStatus?.durationStatus || 'unknown';
-  const hasShortSubmissionIssue =
-    displayDurationStatus === 'too_short' ||
-    (displayDurationStatus === 'unknown' && voiceMemoStatus?.durationStatus === 'too_short');
+  const displayDurationStatus = voiceMemoStatus?.durationStatus || 'unknown';
+  const hasShortSubmissionIssue = voiceMemoStatus?.durationStatus === 'too_short';
 
   const voiceMemoDurationWarning = useMemo(() => {
-    if (!displayDurationStatus || displayDurationStatus === 'unknown') {
+    const status = voiceMemoStatus?.durationStatus;
+    if (!status || status === 'unknown') {
       return voiceMemoStatus?.durationWarning || null;
     }
     return (
-      translateVoiceMemoDurationWarning(locale, displayDurationStatus, {
+      translateVoiceMemoDurationWarning(locale, status, {
         minSeconds: voiceMemoStatus?.minDurationSeconds,
         maxSeconds: voiceMemoStatus?.maxDurationSeconds,
       }) || voiceMemoStatus?.durationWarning
     );
-  }, [locale, displayDurationStatus, voiceMemoStatus]);
+  }, [locale, voiceMemoStatus]);
 
   useEffect(() => {
     setVoiceMemoAudioError('');
