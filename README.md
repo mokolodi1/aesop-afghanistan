@@ -70,14 +70,16 @@ flyctl deploy
 
 ### Local Development
 
-Run the server locally:
+Run the portal locally (watches `src/client/` and restarts the server on changes):
 
 ```bash
 npm install
-npm start
+npm run dev
 ```
 
-The server will be available at `http://localhost:3000`
+Open `http://localhost:3003` — on loopback, `/` serves the same portal SPA as `portal.*` in production (header/footer chrome, not the apex login page). Set `PORTAL_EXTRA_HOSTS=` (empty) if you need to test the apex login page instead. Use `PORT=3000 npm run dev` if you prefer port 3000.
+
+`npm start` also serves the portal on localhost (same loopback default); run `npm run build` first if `public/app.js` is missing.
 
 ## Configuration
 
@@ -136,7 +138,7 @@ If `SECRETS_JSON` is unset and `config/secrets.json` is absent (typical minimal 
 - `GMAIL_SA_CREDENTIALS_JSON` - Entire service account JSON as a single JSON string
 - `BASE_URL` - Default base URL for magic links when `PORTAL_BASE_URL` is unset (e.g., `https://aesop-afghanistan.fly.dev` or your apex domain).
 - `PORTAL_BASE_URL` - **Recommended for `portal.*` deployments.** Full origin where students should open magic links (no trailing slash), e.g. `https://portal.aesopafghanistan.org`. The app stores the signed-in student only in **sessionStorage**, which does **not** carry between different hosts (apex vs `portal.` vs `fly.dev`). If this is unset, magic links use `BASE_URL`; verifying on one host and browsing another looks “broken” (empty Ding tools).
-- `PORTAL_EXTRA_HOSTS` - Optional comma-separated hostnames that should receive the portal SPA for `/`, `/profile`, and `/faq` (for hosts that do not start with `portal.`).
+- `PORTAL_EXTRA_HOSTS` - Optional comma-separated hostnames that should receive the portal SPA for `/` (for hosts that do not start with `portal.`). Outside Fly, defaults to `localhost,127.0.0.1,::1` so local `/` matches `portal.*`. Set to empty to force the apex login page on loopback.
 - **Portal Ding history** (“Date &amp; time” column): the API returns UTC **`atMs`** per row; the browser formats it with **`Intl`** in **the student’s device timezone**. Plain-text timestamps from Sheets are normalized (commas stripped). Both **`M/D/YYYY H:mm:ss`** (24-hour) and **`M/D/YYYY h:mm:ss AM/PM`** are parsed as **UTC civil time**, aligned with **`dateToGoogleSheetsSerial`** when the spreadsheet’s **display time zone** is **UTC** (common): e.g. **`6:38 PM`** in column B means **18:38 UTC**, which displays as **`~2:38 PM EDT`** on Eastern devices — **not** “6:38 PM Eastern”. To make Google Sheets itself show Eastern wall-clock (e.g. **`2:38 PM`** with Eastern formatting), set **File → Settings → Time zone** on that spreadsheet to **`(GMT-05:00) Eastern Time`**. **`luxon`** remains for spreadsheet portal-note formatting when saving Ding rows.
 - `PORTAL_SPA_FALLBACK` - **Legacy.** `/profile` and `/faq` always serve the portal SPA; this variable is no longer read by the server.
 

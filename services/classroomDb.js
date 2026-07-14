@@ -1040,7 +1040,9 @@ function isPeopleIdentityFresh(person) {
 function personRowToProfile(person) {
   const aesopId = person.aesopId || "";
   const portalRole = person.portalRole || "";
+  // people_status is derived at mirror time from Classroom + Applicants (not People Status column).
   const storedStatus = person.peopleStatus ? String(person.peopleStatus).trim() : "";
+  const roleLower = String(portalRole).trim().toLowerCase();
   return {
     name: person.name || "",
     email: person.email || "",
@@ -1050,7 +1052,13 @@ function personRowToProfile(person) {
     reviewerRole: person.reviewerRole || "",
     peopleStatus:
       storedStatus ||
-      (String(portalRole).trim().toLowerCase() === "applied" ? "applied" : ""),
+      (roleLower === "applied"
+        ? "Applied"
+        : roleLower === "teacher"
+          ? "Teaching"
+          : roleLower === "student"
+            ? "Admitted"
+            : ""),
   };
 }
 

@@ -547,12 +547,16 @@ function readPeopleStatus(rowData, statusColumnIndex) {
 }
 
 /**
- * Read applicant/participant status from People Status column (default T).
+ * Legacy: read Status from People sheet when peopleStatusColumn is enabled.
+ * Prefer derivePeopleSheetStatus / Applicants / Classroom instead.
  * @param {import("google-spreadsheet").GoogleSpreadsheetRow | null | undefined} row
  * @param {string[]} rowData
  * @param {number | null} statusColumnIndex
  */
 function readPeopleStatusFromRow(row, rowData, statusColumnIndex) {
+  if (statusColumnIndex === null) {
+    return "";
+  }
   if (row && typeof row.get === "function") {
     for (const header of peopleStatusHeaderCandidates()) {
       try {
@@ -581,6 +585,11 @@ function normalizePeopleStatusValue(status) {
   return String(status || "").trim().toLowerCase();
 }
 
+/**
+ * Resolve participant status without the People Status column.
+ * `rawStatus` is only used when callers pass a value already derived from
+ * Classroom / Applicants / AESOP ID (or a legacy DB cache of those).
+ */
 function resolvePeopleStatus(aesopId, rawStatus) {
   const trimmed = String(rawStatus || "").trim();
   if (trimmed) {
@@ -605,22 +614,55 @@ function isTeachingPeopleStatus(status) {
 }
 
 /**
- * Derive People sheet Status column value from Classroom role + AESOP ID.
+ * Derive status from Classroom role + AESOP ID (not the People Status column).
  * Priority: Teaching > Admitted > Applied (262 applicants not yet in Classroom).
- * @param {{ aesopId?: string, isTeacher?: boolean, isStudent?: boolean }} params
+ * @param {{ aesopId?: string, isTeacher?: boolean, isStudent?: boolean, onApplicantsSheet?: boolean }} params
  * @returns {string}
  */
-function derivePeopleSheetStatus({ aesopId = "", isTeacher = false, isStudent = false }) {
+function derivePeopleSheetStatus({
+  aesopId = "",
+  isTeacher = false,
+  isStudent = false,
+  onApplicantsSheet = false,
+}) {
   if (isTeacher) {
     return PEOPLE_STATUS_TEACHING;
   }
   if (isStudent) {
     return PEOPLE_STATUS_ADMITTED;
   }
-  if (isAppliedAesopId(aesopId)) {
+  if (onApplicantsSheet || isAppliedAesopId(aesopId)) {
     return PEOPLE_STATUS_APPLIED;
   }
   return "";
+}
+
+/**
+ * Fill peopleStatus on People-row objects from Classroom + Applicants (not Status column).
+ * @param {Array<{ id?: string, email?: string, peopleStatus?: string }>} rows
+ * @param {{ teacherEmails?: Set<string>, studentEmails?: Set<string>, applicantIdSet?: Set<string> }} context
+ */
+function applyDerivedPeopleStatusToRows(rows, context = {}) {
+  const teacherEmails = context.teacherEmails || new Set();
+  const studentEmails = context.studentEmails || new Set();
+  const applicantIdSet = context.applicantIdSet || new Set();
+  for (const row of rows) {
+    const email = String(row.email || "")
+      .trim()
+      .toLowerCase();
+    const aesopId = String(row.id || "").trim();
+    const idKey = aesopId.toLowerCase();
+    const isTeacher = Boolean(email && teacherEmails.has(email));
+    const isStudent = Boolean(email && studentEmails.has(email) && !isTeacher);
+    const onApplicantsSheet = Boolean(idKey && applicantIdSet.has(idKey));
+    row.peopleStatus = derivePeopleSheetStatus({
+      aesopId,
+      isTeacher,
+      isStudent,
+      onApplicantsSheet,
+    });
+  }
+  return rows;
 }
 
 function isPeopleStatusSyncEnabled() {
@@ -816,7 +858,6 @@ async function findProfileByIdFromDb(userId) {
       return null;
     }
     const profile = personRowToProfile(person);
-    profile.peopleStatus = resolvePeopleStatus(profile.id, profile.peopleStatus);
     return profile;
   } catch (error) {
     console.warn("Profile DB lookup failed:", error.message);
@@ -981,7 +1022,6 @@ async function findProfileById(userId) {
       const person = await getPersonByAesopId(idKey);
       if (person?.email && isPeopleIdentityFresh(person)) {
         const profile = personRowToProfile(person);
-        profile.peopleStatus = resolvePeopleStatus(profile.id, profile.peopleStatus);
         // Admin status lives in People column S and is authoritative there. A
         // stale DB mirror must never strip admin access, so upgrade from the
         // sheet when the column says admin (never downgrade).
@@ -1015,7 +1055,6 @@ async function findProfileById(userId) {
     const roleColumnIndex = resolvePeopleRoleColumnIndex();
     const typeColumnIndex = resolvePeopleTypeColumnIndex();
     const reviewerColumnIndex = resolvePeopleReviewerColumnIndex();
-    const statusColumnIndex = resolvePeopleStatusColumnIndex();
     const normalizedId = idKey.trim().toLowerCase();
     const applicantIdSet = await require("./voiceMemoSync").loadApplicantAesopIdSetFromSheets();
 
@@ -1033,6 +1072,7 @@ async function findProfileById(userId) {
         const aesopId = String(rowData[idColumnIndex] || "").trim();
         const adminRole = readPeoplePortalRoleFromRow(row, rowData, roleColumnIndex);
         const peopleType = readPeopleTypeFromRow(row, rowData, typeColumnIndex);
+        const onApplicantsSheet = applicantIdSet.has(aesopId.toLowerCase());
         return {
           name: String(rowData[nameColumnIndex] || "").trim(),
           email: String(rowData[emailColumnIndex] || "").trim(),
@@ -1043,10 +1083,10 @@ async function findProfileById(userId) {
             applicantIdSet,
           ) || "",
           reviewerRole: readPeopleReviewerRoleFromRow(row, rowData, reviewerColumnIndex),
-          peopleStatus: resolvePeopleStatus(
+          peopleStatus: derivePeopleSheetStatus({
             aesopId,
-            readPeopleStatusFromRow(row, rowData, statusColumnIndex),
-          ),
+            onApplicantsSheet,
+          }),
         };
       } catch (rowError) {
         continue;
@@ -2257,7 +2297,6 @@ async function loadAllPeopleRowsFromSheets() {
     const roleColumnIndex = resolvePeopleRoleColumnIndex();
     const typeColumnIndex = resolvePeopleTypeColumnIndex();
     const reviewerColumnIndex = resolvePeopleReviewerColumnIndex();
-    const statusColumnIndex = resolvePeopleStatusColumnIndex();
     const phoneColumnIndex = resolvePeoplePhoneColumnIndex();
     const lastLoginColumnIndex = resolvePeopleLastLoginColumnIndex();
     const pastDingColumnIndex = resolvePeoplePastDingColumnIndex();
@@ -2285,10 +2324,8 @@ async function loadAllPeopleRowsFromSheets() {
         portalRole: adminRole,
         adminRole,
         reviewerRole: readPeopleReviewerRoleFromRow(row, rowData, reviewerColumnIndex),
-        peopleStatus: resolvePeopleStatus(
-          aesopId,
-          readPeopleStatusFromRow(row, rowData, statusColumnIndex),
-        ),
+        // Status is derived later from Classroom + Applicants (not People Status column).
+        peopleStatus: "",
         lastLogin: readPeopleLastLoginFromRow(row, rowData, lastLoginColumnIndex),
         pastDing: readPeoplePastDingFromRow(row, rowData, pastDingColumnIndex),
         sheetRow: buildPeopleSheetRowObject(headerValues, rowData),
@@ -2436,7 +2473,6 @@ async function searchPeopleProfiles(query, limit = 25) {
     const phoneColumnIndex = resolvePeoplePhoneColumnIndex();
 
     const matches = [];
-    const statusColumnIndex = resolvePeopleStatusColumnIndex();
     for (const row of rows) {
       const rowData = Array.isArray(row._rawData) ? row._rawData : [];
       const id = String(rowData[idColumnIndex] ?? "").trim();
@@ -2453,7 +2489,8 @@ async function searchPeopleProfiles(query, limit = 25) {
         name,
         email,
         phone,
-        peopleStatus: resolvePeopleStatus(id, readPeopleStatusFromRow(row, rowData, statusColumnIndex)),
+        // Status comes from Classroom/Applicants at admin lookup time, not People Status column.
+        peopleStatus: resolvePeopleStatus(id, ""),
       });
       if (matches.length >= limit) {
         break;
@@ -2467,7 +2504,9 @@ async function searchPeopleProfiles(query, limit = 25) {
 }
 
 /**
- * Populate People Status (column T by default): Teaching, Admitted, or Applied (262 applicants).
+ * Legacy: write derived status onto the People Status column when enabled.
+ * Disabled by default (peopleStatusColumn=OFF); status is derived at runtime /
+ * mirror time from Classroom + Applicants instead.
  * @param {{ teacherEmails?: Set<string>|string[], studentEmails?: Set<string>|string[] }} roleContext
  * @returns {Promise<{ updated: number, skipped: number }>}
  */
@@ -2924,7 +2963,9 @@ module.exports = {
   isTeachingPeopleStatus,
   isAppliedAesopId,
   derivePeopleSheetStatus,
+  applyDerivedPeopleStatusToRows,
   resolvePeopleStatus,
+  isPeopleStatusSyncEnabled,
   getClassGradeByEmail,
   getAllClassGradesByEmail,
   expandClassGradeRow,

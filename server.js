@@ -14,8 +14,8 @@ const {
   getPortalTeacherByUserId,
   getRoleByEmail,
   getClassGradeByEmail,
-  resolvePeopleStatus,
-  isAppliedPeopleStatus,
+  derivePeopleSheetStatus,
+  isAppliedAesopId,
   isPeopleSheetAdminRole,
   isPeopleSheetAdminByIdentity,
 } = require('./services/googleSheets');
@@ -36,7 +36,7 @@ const {
   getAdminViewAsStudent,
   getAdminViewAsTeacher,
 } = require('./services/adminPortal');
-const { triggerCronJob } = require('./services/cronRemote');
+const { triggerCronJob, cancelCronJob } = require('./services/cronRemote');
 const { listJobDefinitions } = require('./services/jobRegistry');
 const { getLastRunsByJob, listJobRuns, getJobRun } = require('./services/jobRuns');
 const {
@@ -147,9 +147,7 @@ async function resolveApplicationStatus(userId, isApplicant) {
   }
 }
 
-async function resolvePortalRoleAndGrade({ userId, email, name, peopleStatus = '' }) {
-  const resolvedStatus = resolvePeopleStatus(userId, peopleStatus);
-
+async function resolvePortalRoleAndGrade({ userId, email, name }) {
   try {
     const applicant = await getApplicantRowByAesopId(userId);
     if (applicant) {
@@ -161,24 +159,11 @@ async function resolvePortalRoleAndGrade({ userId, email, name, peopleStatus = '
         classGrades: [],
         isApplied: true,
         isApplicant: true,
-        peopleStatus: resolvedStatus || 'Applied',
+        peopleStatus: derivePeopleSheetStatus({ aesopId: userId, onApplicantsSheet: true }),
       };
     }
   } catch (error) {
     console.warn('Applicants sheet lookup failed:', formatErrorForLog(error));
-  }
-
-  if (isAppliedPeopleStatus(resolvedStatus)) {
-    return {
-      isTeacher: false,
-      teacherClasses: '',
-      classSection: '',
-      calculatedGrade: '',
-      classGrades: [],
-      isApplied: true,
-      isApplicant: false,
-      peopleStatus: resolvedStatus,
-    };
   }
 
   let isTeacher = false;
@@ -239,15 +224,23 @@ async function resolvePortalRoleAndGrade({ userId, email, name, peopleStatus = '
     calculatedGrade = cg.calculatedGrade;
   }
 
+  const isStudent = Boolean(classSection || calculatedGrade || classGrades.length > 0);
+  const peopleStatus = derivePeopleSheetStatus({
+    aesopId: userId,
+    isTeacher,
+    isStudent,
+  });
+  const isApplied = !isTeacher && !isStudent && isAppliedAesopId(userId);
+
   return {
     isTeacher,
     teacherClasses,
     classSection,
     calculatedGrade,
     classGrades,
-    isApplied: false,
+    isApplied,
     isApplicant: false,
-    peopleStatus: resolvedStatus,
+    peopleStatus: peopleStatus || (isApplied ? 'Applied' : ''),
   };
 }
 
@@ -273,7 +266,7 @@ const PORTAL_APPLICANT_DING_MESSAGE =
 
 /**
  * @param {string} userId
- * @param {{ peopleStatus?: string }|null|undefined} [profile]
+ * @param {{ email?: string, name?: string }|null|undefined} [profile]
  * @returns {Promise<boolean>}
  */
 async function isPortalApplicantProfile(userId, profile) {
@@ -285,7 +278,16 @@ async function isPortalApplicantProfile(userId, profile) {
   } catch (error) {
     console.warn('Applicants sheet lookup failed during Ding access check:', formatErrorForLog(error));
   }
-  return isAppliedPeopleStatus(resolvePeopleStatus(userId, profile?.peopleStatus || ''));
+  // 262 AESOP IDs are applicants unless Classroom shows them enrolled.
+  if (!isAppliedAesopId(userId)) {
+    return false;
+  }
+  const role = await resolvePortalRoleAndGrade({
+    userId,
+    email: profile?.email || '',
+    name: profile?.name || '',
+  });
+  return role.isApplied === true;
 }
 
 async function requirePortalReviewer(res, body) {
@@ -345,13 +347,29 @@ function getInboundHostname(req) {
 }
 
 /**
+ * Hostnames that should get the portal SPA at `/` (same as portal.* in prod).
+ * - Explicit PORTAL_EXTRA_HOSTS wins (comma-separated). Set to empty to force the
+ *   apex login page on localhost.
+ * - Outside Fly, default loopback so `npm start` / `npm run dev` match portal.*.
+ */
+function getPortalExtraHosts() {
+  if (Object.prototype.hasOwnProperty.call(process.env, 'PORTAL_EXTRA_HOSTS')) {
+    return String(process.env.PORTAL_EXTRA_HOSTS || '');
+  }
+  if (!isFlyProduction()) {
+    return 'localhost,127.0.0.1,::1';
+  }
+  return '';
+}
+
+/**
  * Portal SPA: portal.* (or PORTAL_EXTRA_HOSTS) serves portal.html for /. /profile and /faq always
  * serve portal.html so deep links and nav work on any host (including plain localhost).
  */
 function isPortalRequestHost(req) {
   const host = getInboundHostname(req);
-  const extras = process.env.PORTAL_EXTRA_HOSTS;
-  if (extras && typeof extras === 'string') {
+  const extras = getPortalExtraHosts();
+  if (extras) {
     const allowed = extras
       .split(',')
       .map((h) => h.trim().toLowerCase())
@@ -432,10 +450,26 @@ app.post('/api/request-magic-link', async (req, res) => {
       return res.status(400).json({ error: 'Invalid ID format' });
     }
 
-    // Never reveal whether the ID exists (prevents AESOP ID enumeration).
-    // Fire the lookup + send without awaiting so the response time is identical
-    // whether or not the ID was found; errors are logged, not surfaced.
+    // Never reveal whether the ID exists in production (prevents AESOP ID
+    // enumeration). Fire the lookup + send without awaiting so response time
+    // is identical whether or not the ID was found.
+    // Off Fly: await and return loginUrl so local UI can show the link
+    // (nothing is emailed — see sendMagicLinkEmail).
     recordMagicLinkRequest(1);
+    if (!isFlyProduction()) {
+      try {
+        const result = await checkIdAndSendMagicLink(userId);
+        return res.json({
+          success: true,
+          message: MAGIC_LINK_REQUEST_ACK_MESSAGE,
+          ...(result?.loginUrl ? { loginUrl: result.loginUrl } : {}),
+        });
+      } catch (error) {
+        console.error('Error requesting magic link:', formatErrorForLog(error));
+        return res.status(500).json({ error: 'An error occurred. Please try again later.' });
+      }
+    }
+
     checkIdAndSendMagicLink(userId).catch((error) => {
       console.error('Error requesting magic link:', formatErrorForLog(error));
     });
@@ -469,7 +503,11 @@ app.post('/api/resend-magic-link', async (req, res) => {
       return res.status(400).json({ error: result.error || 'Unable to resend login link.' });
     }
 
-    res.json({ success: true, message: result.message });
+    res.json({
+      success: true,
+      message: result.message,
+      ...(result.loginUrl ? { loginUrl: result.loginUrl } : {}),
+    });
   } catch (error) {
     console.error('Error resending magic link:', formatErrorForLog(error));
     res.status(500).json({ error: 'An error occurred sending the link.' });
@@ -511,10 +549,6 @@ app.post('/api/verify-magic-link', async (req, res) => {
           const fromDb = await getPersonByAesopId(result.userId);
           if (fromDb) {
             profile = personRowToProfile(fromDb);
-            profile.peopleStatus = resolvePeopleStatus(
-              profile.id || result.userId,
-              profile.peopleStatus,
-            );
             if (
               !isPeopleSheetAdminRole(profile.portalRole) &&
               (await isPeopleSheetAdminByIdentity(profile.id || result.userId, profile.email))
@@ -558,7 +592,6 @@ app.post('/api/verify-magic-link', async (req, res) => {
         userId: studentUserId,
         email: emailFromSheet,
         name: studentName,
-        peopleStatus: profile?.peopleStatus,
       });
       const isAdmin = isPortalAdmin({ email: emailFromSheet, portalRole: profile?.portalRole });
       const isReviewer = await resolvePortalReviewerAccess(profile);
@@ -998,7 +1031,6 @@ app.post('/api/portal-class-grade', portalClassGradeRateLimiter, async (req, res
       userId,
       email: profileEmail,
       name: studentName,
-      peopleStatus: profile?.peopleStatus,
     });
     const isAdmin = isPortalAdmin({ email: profileEmail, portalRole: profile?.portalRole });
     const isReviewer = await resolvePortalReviewerAccess(profile);
@@ -1323,7 +1355,6 @@ app.post('/api/portal-admin/impersonate', portalAdminRateLimiter, async (req, re
       userId: targetUserId,
       email: emailFromSheet,
       name: studentName,
-      peopleStatus: targetProfile.peopleStatus,
     });
     const applicationStatus = await resolveApplicationStatus(targetUserId, isApplicant);
     const isReviewer = await resolvePortalReviewerAccess(targetProfile);
@@ -1784,6 +1815,46 @@ app.post('/api/portal-admin/jobs/run', portalAdminJobsRunRateLimiter, async (req
     console.error('Error starting job:', formatErrorForLog(error));
     const status = error.statusCode || 500;
     res.status(status).json({ error: error.message || 'Could not start job.' });
+  }
+});
+
+app.post('/api/portal-admin/jobs/cancel', portalAdminRateLimiter, async (req, res) => {
+  try {
+    const profile = await requirePortalAdmin(res, req.body);
+    if (!profile) {
+      return;
+    }
+    const runId = Number.parseInt(String(req.body.runId), 10);
+    if (!Number.isFinite(runId) || runId <= 0) {
+      return res.status(400).json({ error: 'runId is required.' });
+    }
+    const restart = req.body.restart === true;
+    const reason = `Cancelled by ${profile.email}.`;
+    const { run, killedProcess, ranOn } = await cancelCronJob(runId, { reason });
+
+    let restarted = null;
+    if (restart) {
+      const jobName = typeof run.jobName === 'string' ? run.jobName : '';
+      if (!jobName) {
+        return res.status(500).json({ error: 'Cancelled, but could not determine which job to restart.' });
+      }
+      // Small delay so SIGTERM cleanup can settle before the concurrency check.
+      await new Promise((resolve) => setTimeout(resolve, 750));
+      restarted = await triggerCronJob(jobName, null, { triggeredBy: profile.email });
+    }
+
+    res.json({
+      success: true,
+      run,
+      killedProcess,
+      ranOn,
+      restartedRunId: restarted?.runId ?? null,
+      restartedOn: restarted?.ranOn ?? null,
+    });
+  } catch (error) {
+    console.error('Error cancelling job:', formatErrorForLog(error));
+    const status = error.statusCode || 500;
+    res.status(status).json({ error: error.message || 'Could not cancel job.' });
   }
 });
 

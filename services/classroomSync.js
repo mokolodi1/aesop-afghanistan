@@ -6,8 +6,6 @@ const {
   loadEmailToPeopleProfileMap,
   listAllClassroomGradeRows,
   resolvePortalRoleFromPeopleSheet,
-  derivePeopleSheetStatus,
-  syncPeopleStatusOnPeopleSheet,
 } = require("./googleSheets");
 const { formatErrorForLog } = require("../utils/errorLogging");
 const { isDatabaseEnabled } = require("../db/index");
@@ -365,20 +363,6 @@ async function runClassroomSync() {
   if (dualWriteSheets) {
     await replaceTabData(cr.rolesSheetName || "Classroom Roles", rolesHeader, rolesRows);
     await replaceTabData(cr.gradesSheetName || "Classroom Grades", gradesHeader, gradesRows);
-  }
-
-  try {
-    const statusSync = await syncPeopleStatusOnPeopleSheet({
-      teacherEmails: new Set(teacherClasses.keys()),
-      studentEmails: new Set(studentSections.keys()),
-    });
-    if (statusSync.updated > 0) {
-      console.log(
-        `[classroom-sync] People status column: updated ${statusSync.updated} row(s), skipped ${statusSync.skipped}.`,
-      );
-    }
-  } catch (statusErr) {
-    console.warn("[classroom-sync] People status sync failed:", statusErr.message);
   }
 
   const summary = {

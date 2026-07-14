@@ -7,7 +7,7 @@ const { recordMagicLinkUnknownId, recordMagicLinkSendFailed } = require('./porta
 /**
  * Look up user by ID in Google Sheet and send magic link if found
  * @param {string} userId - User ID to check (should be pre-validated)
- * @returns {Promise<{success: boolean, userFound: boolean}>}
+ * @returns {Promise<{success: boolean, userFound: boolean, loginUrl?: string}>}
  */
 async function checkIdAndSendMagicLink(userId) {
   try {
@@ -22,7 +22,7 @@ async function checkIdAndSendMagicLink(userId) {
       }
       // Local dev: profile lookups routinely fail (no Postgres, no Google
       // credentials). Don't block sign-in on that — issue a link anyway.
-      // Off Fly the link is only logged to the console, never emailed.
+      // Off Fly the link is only logged / returned to the UI, never emailed.
       console.warn(
         '[magic-link] profile lookup failed (local dev); logging a sign-in link anyway:',
         error.message
@@ -43,13 +43,17 @@ async function checkIdAndSendMagicLink(userId) {
     // Generate and store magic link
     const magicLinkData = await generateAndStoreMagicLink(sanitizedEmail, sanitizedId);
 
-    // Send magic link email
-    await sendMagicLinkEmail(sanitizedEmail, magicLinkData.token, {
+    // Send magic link email (or log + return URL off Fly)
+    const sent = await sendMagicLinkEmail(sanitizedEmail, magicLinkData.token, {
       name: profile.name,
       userId: sanitizedId,
     });
-    
-    return { success: true, userFound: true };
+
+    return {
+      success: true,
+      userFound: true,
+      ...(sent?.loginUrl ? { loginUrl: sent.loginUrl } : {}),
+    };
   } catch (error) {
     recordMagicLinkSendFailed(1);
     if (error?.code === 'EMAIL_SEND_QUOTA_EXCEEDED') {

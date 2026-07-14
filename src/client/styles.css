@@ -1215,6 +1215,31 @@ html[dir='rtl'] .portal-class-accordion-chevron {
   margin-top: 14px;
 }
 
+.magic-link-dev-login {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border-radius: var(--aesop-radius-md);
+  border: 1px solid var(--aesop-line);
+  background: var(--aesop-sky-tint);
+  text-align: start;
+}
+
+.magic-link-dev-login-label {
+  margin: 0 0 8px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--aesop-ink-soft);
+}
+
+.magic-link-dev-login-url {
+  display: block;
+  word-break: break-all;
+  font-size: 0.85rem;
+  line-height: 1.45;
+  color: var(--aesop-teal-dark);
+  font-weight: 600;
+}
+
 .portal-hub-card .portal-welcome {
   margin-top: 4px;
 }

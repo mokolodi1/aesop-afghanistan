@@ -42,9 +42,13 @@ function buildGoogleSheetsConfig(fileSection) {
     peopleRoleColumn: envOr("GOOGLE_PEOPLE_ROLE_COLUMN", "peopleRoleColumn", "S"),
     /** Header label on People sheet for manual admin flag (used with loadHeaderRow). */
     peopleRoleHeader: envOr("GOOGLE_PEOPLE_ROLE_COLUMN_HEADER", "peopleRoleHeader", "Admins"),
-    /** People sheet column for applicant/participant status (e.g. Applied). Blank or OFF disables. */
-    peopleStatusColumn: envOr("GOOGLE_PEOPLE_STATUS_COLUMN", "peopleStatusColumn", "T"),
-    /** Header label on People sheet for status (used with loadHeaderRow). */
+    /**
+     * People sheet Status column — disabled by default (OFF).
+     * Status is derived from Classroom Roles/Grades, Applicants, and 262 AESOP IDs
+     * instead of reading/writing this column. Set a letter only for legacy sheet sync.
+     */
+    peopleStatusColumn: envOr("GOOGLE_PEOPLE_STATUS_COLUMN", "peopleStatusColumn", "OFF"),
+    /** Header label on People sheet for status (used with loadHeaderRow). Legacy only. */
     peopleStatusHeader: envOr("GOOGLE_PEOPLE_STATUS_COLUMN_HEADER", "peopleStatusHeader", "Status"),
     /** People sheet column for portal last-login timestamp. Blank or OFF disables. */
     peopleLastLoginColumn: envOr("GOOGLE_PEOPLE_LAST_LOGIN_COLUMN", "peopleLastLoginColumn", "U"),

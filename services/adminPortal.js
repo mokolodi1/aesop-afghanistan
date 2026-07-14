@@ -27,10 +27,11 @@ const {
   getPortalDingChangeHistory,
   isPeopleSheetAdminRole,
   isPeopleSheetReviewerRole,
-  isAppliedPeopleStatus,
-  resolvePeopleStatus,
+  derivePeopleSheetStatus,
+  isAppliedAesopId,
 } = require("./googleSheets");
 const { listActiveCourses, getClassRosterByCourseId, getStudentGrades, getTeacherRoster } = require("./classroomSync");
+const { getApplicantRowByAesopId } = require("./voiceMemoSync");
 
 const DING_MAP_CACHE_TTL_MS = 5 * 60 * 1000;
 /** @type {{ at: number, map: Map<string, string> | null }} */
@@ -453,6 +454,26 @@ async function lookupStudentForAdmin(query) {
     .join(", ");
   const calculatedGrade = classGrades.length === 1 ? classGrades[0].calculatedGrade : "";
 
+  let onApplicantsSheet = false;
+  if (primary.id) {
+    try {
+      onApplicantsSheet = Boolean(await getApplicantRowByAesopId(primary.id));
+    } catch {
+      onApplicantsSheet = false;
+    }
+  }
+
+  const peopleStatus = derivePeopleSheetStatus({
+    aesopId: primary.id,
+    isTeacher: role.isTeacher === true,
+    isStudent: classGrades.length > 0,
+    onApplicantsSheet,
+  });
+  const isApplied =
+    role.isApplied === true ||
+    onApplicantsSheet ||
+    (!role.isTeacher && classGrades.length === 0 && isAppliedAesopId(primary.id));
+
   return {
     matches,
     detail: {
@@ -460,11 +481,8 @@ async function lookupStudentForAdmin(query) {
       dingNumber,
       role: role.role,
       isTeacher: role.isTeacher,
-      isApplied:
-        role.isApplied === true ||
-        isAppliedPeopleStatus(primary.peopleStatus) ||
-        isAppliedPeopleStatus(resolvePeopleStatus(primary.id, '')),
-      peopleStatus: resolvePeopleStatus(primary.id, primary.peopleStatus),
+      isApplied,
+      peopleStatus,
       teacherClasses: role.teacherClasses,
       classSection,
       calculatedGrade,

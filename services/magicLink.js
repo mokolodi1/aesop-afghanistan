@@ -239,7 +239,8 @@ async function sendMagicLinkEmail(email, token, { name = '', userId = '' } = {})
     const magicLink = `${localDevMagicLinkOrigin()}/verify.html#token=${token}`;
     console.log(`[magic-link] sign-in link for ${email}${safeName ? ` (${safeName})` : ''}${safeUserId ? ` [${safeUserId}]` : ''}:`);
     console.log(magicLink);
-    return;
+    // Returned so local UI can show the link (nothing is emailed off Fly).
+    return { loginUrl: magicLink };
   }
 
   const origin = magicLinkSiteOrigin();
@@ -311,6 +312,7 @@ async function sendMagicLinkEmail(email, token, { name = '', userId = '' } = {})
     html: emailHtml,
     text: emailText,
   });
+  return {};
 }
 
 /**
@@ -342,7 +344,12 @@ async function resendMagicLinkByToken(token) {
     profileName = '';
   }
   try {
-    await sendMagicLinkEmail(email, newToken, { name: profileName, userId });
+    const sent = await sendMagicLinkEmail(email, newToken, { name: profileName, userId });
+    return {
+      success: true,
+      message: 'A new login link has been sent to your registered email.',
+      ...(sent?.loginUrl ? { loginUrl: sent.loginUrl } : {}),
+    };
   } catch (error) {
     if (error?.code === 'EMAIL_SEND_QUOTA_EXCEEDED') {
       return {
@@ -352,11 +359,6 @@ async function resendMagicLinkByToken(token) {
     }
     throw error;
   }
-
-  return {
-    success: true,
-    message: 'A new login link has been sent to your registered email.',
-  };
 }
 
 module.exports = {

@@ -208,6 +208,9 @@ const TRANSLATIONS = {
       'Your ID is invalid. Please enter a correct ID. Please enter the AESOP ID you received in your email.',
     'magicLink.linkSent':
       'If your AESOP ID is on file, check your email for a login link (including spam). It may take a minute to arrive.',
+    'magicLink.linkSentDev':
+      'Local dev: email is not sent. Use the sign-in link below.',
+    'magicLink.devLinkLabel': 'Your local sign-in link:',
     'magicLink.sending': 'Checking your ID and sending a login link...',
     'magicLink.networkError': 'Internal error. Please try again.',
     'magicLink.alreadySentWait':
@@ -535,6 +538,9 @@ const TRANSLATIONS = {
       'AESOP ID شما معتبر نیست. لطفاً AESOP ID درست را وارد کنید — همان شناسه‌ای که در ایمیل خود دریافت کرده‌اید.',
     'magicLink.linkSent':
       'اگر AESOP ID شما در پرونده باشد، ایمیل خود را برای لینک ورود بررسی کنید (از جمله هرزنامه). ممکن است یک دقیقه طول بکشد.',
+    'magicLink.linkSentDev':
+      'حالت توسعهٔ محلی: ایمیلی فرستاده نمی‌شود. از لینک ورود زیر استفاده کنید.',
+    'magicLink.devLinkLabel': 'لینک ورود محلی شما:',
     'magicLink.sending': 'در حال بررسی AESOP ID و ارسال لینک ورود…',
     'magicLink.networkError': 'خطای داخلی. لطفاً دوباره تلاش کنید.',
     'magicLink.alreadySentWait':

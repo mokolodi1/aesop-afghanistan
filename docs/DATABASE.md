@@ -55,7 +55,7 @@ When cache is stale, reads fall back to live Sheets/Classroom (slower but curren
 
 All scheduled syncs are defined in the repo's `crontab` and run by Supercronic on the `cron` process group Machine (see `[processes]` in `fly.toml` and `scripts/cron-server.js`). They deploy with the app image on every `fly deploy` — no manual scheduling scripts.
 
-Every run — scheduled or admin-triggered — goes through `scripts/run-job.js`, which records it in the **`job_runs`** table (status, duration, trigger, result summary, and captured console logs, pruned to the last 100 runs per job). Job definitions live in `services/jobRegistry.js`; the admin portal's **Jobs tab** lists each job with its last run, run history, logs, and a **Run now** button.
+Every run — scheduled or admin-triggered — goes through `scripts/run-job.js`, which records it in the **`job_runs`** table (status, duration, trigger, result summary, and captured console logs, pruned to the last 100 runs per job). Job definitions live in `services/jobRegistry.js`; the admin portal's **Jobs tab** lists each job with its last run, run history, logs, and a **Run now** button. While a run is active, **Stop** kills the process (SIGTERM, then SIGKILL) and clears the `job_runs` lock; **Stop & restart** does the same and immediately starts a new run.
 
 On-demand runs from the Jobs tab are forwarded to the cron Machine over Fly private networking (`cron.process.<app>.internal`, port `CRON_TRIGGER_PORT`, default 3100), so heavy syncs run on the 1GB cron Machine instead of a 512MB web Machine. The trigger returns a `job_runs` id immediately and the UI polls for progress. If the cron Machine is unreachable (e.g. local dev), the web process spawns the job locally instead.
 
@@ -69,7 +69,7 @@ This runs `mirrorPeopleAndDingFromSheets()` every hour (without full Ding change
 
 | Source | Postgres `people` columns |
 |--------|---------------------------|
-| People tab | `aesop_id`, `name`, `email`, `phone`, `people_type`, `admin_role`, `people_status`, `last_login`, `past_ding`, `reviewer_role`, `portal_role` (derived), `sheet_row` (full header→value JSON) |
+| People tab | `aesop_id`, `name`, `email`, `phone`, `people_type`, `admin_role`, `people_status` (derived from Classroom + Applicants + 262 IDs — not the People Status column), `last_login`, `past_ding`, `reviewer_role`, `portal_role` (derived), `sheet_row` (full header→value JSON) |
 
 Other hourly mirrors:
 

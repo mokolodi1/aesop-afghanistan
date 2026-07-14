@@ -16,6 +16,9 @@ const KEEP_RUNS_PER_JOB = 100;
 
 const RUN_JOB_SCRIPT = path.join(__dirname, "..", "scripts", "run-job.js");
 
+/** Live child processes started by startJobRunChild on this Machine, keyed by run id. */
+const activeChildrenByRunId = new Map();
+
 function truncateLogsText(text) {
   if (typeof text !== "string" || text.length <= MAX_LOG_CHARS) {
     return text;
@@ -302,11 +305,20 @@ async function startJobRunChild({ jobName, triggerSource, triggeredBy = null, pa
     stdio: "inherit",
     env: process.env,
   });
+  if (runId != null) {
+    activeChildrenByRunId.set(runId, child);
+  }
   child.on("error", (error) => {
     console.error(`[job-runs] could not start ${jobName}:`, error.message);
+    if (runId != null) {
+      activeChildrenByRunId.delete(runId);
+    }
     failJobRunIfStillRunning(runId, `Could not start job process: ${error.message}`).catch(() => {});
   });
   child.on("exit", (code, signal) => {
+    if (runId != null) {
+      activeChildrenByRunId.delete(runId);
+    }
     if (code !== 0) {
       // Normally run-job.js finalizes its own row; this covers hard crashes.
       failJobRunIfStillRunning(
@@ -319,9 +331,69 @@ async function startJobRunChild({ jobName, triggerSource, triggeredBy = null, pa
   return { runId };
 }
 
+/**
+ * Stop a running job: SIGTERM the child when it was spawned on this Machine,
+ * and mark the job_runs row failed so it no longer blocks new runs. Works for
+ * zombie rows too (process already dead) — those only need the DB update.
+ *
+ * @param {number} runId
+ * @param {{ reason?: string }} [options]
+ * @returns {Promise<{ run: Record<string, unknown>, killedProcess: boolean }>}
+ */
+async function cancelJobRun(runId, { reason = "Cancelled by admin." } = {}) {
+  const id = Number(runId);
+  if (!Number.isFinite(id) || id <= 0) {
+    const bad = new Error("runId is required.");
+    bad.statusCode = 400;
+    throw bad;
+  }
+
+  const run = await getJobRun(id);
+  if (!run) {
+    const missing = new Error("Run not found.");
+    missing.statusCode = 404;
+    throw missing;
+  }
+  if (run.status !== "running") {
+    const done = new Error(`Run #${id} is already ${run.status}.`);
+    done.statusCode = 409;
+    throw done;
+  }
+
+  // Clear the DB lock first so a concurrent "Run now" is unblocked even if
+  // the process is already dead or ignores signals. run-job's SIGTERM handler
+  // uses failJobRunIfStillRunning, so it won't overwrite this reason.
+  await failJobRunIfStillRunning(id, reason);
+
+  const child = activeChildrenByRunId.get(id);
+  let killedProcess = false;
+  if (child && !child.killed) {
+    try {
+      killedProcess = Boolean(child.kill("SIGTERM"));
+    } catch (error) {
+      console.warn(`[job-runs] could not SIGTERM run #${id}:`, error.message);
+    }
+    // Escalate if the process ignores SIGTERM (hung I/O, etc.).
+    const escalate = setTimeout(() => {
+      if (!child.killed && child.exitCode == null) {
+        try {
+          child.kill("SIGKILL");
+        } catch {
+          /* ignore */
+        }
+      }
+    }, 5000);
+    escalate.unref?.();
+  }
+
+  const updated = (await getJobRun(id)) || { ...run, status: "failed", error: reason };
+  return { run: updated, killedProcess };
+}
+
 module.exports = {
   MAX_LOG_CHARS,
   KEEP_RUNS_PER_JOB,
+  ACTIVE_RUN_STALE_MS,
   truncateLogsText,
   createJobRun,
   finalizeJobRun,
@@ -334,4 +406,5 @@ module.exports = {
   getLastRunsByJob,
   pruneJobRuns,
   startJobRunChild,
+  cancelJobRun,
 };

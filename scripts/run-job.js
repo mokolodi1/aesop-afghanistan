@@ -23,6 +23,7 @@ const { getJobDefinition, getConflictingJobNames } = require("../services/jobReg
 const {
   createJobRun,
   finalizeJobRun,
+  failJobRunIfStillRunning,
   updateJobRunLogs,
   findActiveJobRunAmong,
   pruneJobRuns,
@@ -133,15 +134,15 @@ async function main() {
   }
 
   // Finalize the row before the process dies on deploys/machine stops.
+  // Use failJobRunIfStillRunning so an admin cancel's reason is preserved.
   for (const signal of ["SIGTERM", "SIGINT"]) {
     process.on(signal, () => {
       console.error(`[run-job] received ${signal}; marking run as failed.`);
       const done = recording
-        ? finalizeJobRun(runId, {
-            status: "failed",
-            error: `Interrupted by ${signal} (deploy or machine stop).`,
-            logs: capture.getText(),
-          })
+        ? failJobRunIfStillRunning(
+            runId,
+            `Interrupted by ${signal} (deploy or machine stop).`,
+          ).then(() => updateJobRunLogs(runId, capture.getText()))
         : Promise.resolve();
       done.catch(() => {}).finally(() => process.exit(1));
     });

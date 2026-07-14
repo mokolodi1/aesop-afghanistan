@@ -12,7 +12,8 @@
  *
  * Endpoints (see services/cronRemote.js for the client):
  *   GET  /health
- *   POST /jobs/run  { job, payload?, triggeredBy? } → 202 { success, runId }
+ *   POST /jobs/run     { job, payload?, triggeredBy? } → 202 { success, runId }
+ *   POST /jobs/cancel  { runId, reason? } → 200 { success, run, killedProcess }
  *
  * Triggers return immediately; progress and logs are read from job_runs.
  */
@@ -22,7 +23,7 @@ const path = require("path");
 const { spawn } = require("child_process");
 const { getCronTriggerPort } = require("../services/cronRemote");
 const { listJobDefinitions } = require("../services/jobRegistry");
-const { startJobRunChild } = require("../services/jobRuns");
+const { startJobRunChild, cancelJobRun } = require("../services/jobRuns");
 
 const CRONTAB_PATH = process.env.CRONTAB_PATH || path.join(__dirname, "..", "crontab");
 // On Fly, fly-local-6pn maps to the Machine's private IPv6 address.
@@ -66,7 +67,7 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  if (req.method !== "POST" || req.url !== "/jobs/run") {
+  if (req.method !== "POST" || (req.url !== "/jobs/run" && req.url !== "/jobs/cancel")) {
     sendJson(res, 404, { success: false, error: "Unknown endpoint." });
     return;
   }
@@ -76,6 +77,28 @@ const server = http.createServer(async (req, res) => {
     body = await readJsonBody(req);
   } catch (error) {
     sendJson(res, 400, { success: false, error: error.message });
+    return;
+  }
+
+  if (req.url === "/jobs/cancel") {
+    const runId = Number.parseInt(String(body.runId), 10);
+    const reason =
+      typeof body.reason === "string" && body.reason.trim()
+        ? body.reason.trim()
+        : "Cancelled by admin.";
+    try {
+      const { run, killedProcess } = await cancelJobRun(runId, { reason });
+      console.log(
+        `[cron-server] cancelled run #${runId}` +
+          `${killedProcess ? " (SIGTERM sent)" : " (DB lock cleared; no local process)"}`,
+      );
+      sendJson(res, 200, { success: true, run, killedProcess });
+    } catch (error) {
+      sendJson(res, error.statusCode || 500, {
+        success: false,
+        error: error.message || "Could not cancel job.",
+      });
+    }
     return;
   }
 

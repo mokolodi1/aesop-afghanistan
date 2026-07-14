@@ -79,7 +79,14 @@ function PortalLanguageToggle() {
 
 function isPortalHostname() {
   if (typeof window === 'undefined') return false;
-  return window.location.hostname.toLowerCase().startsWith('portal.');
+  const host = window.location.hostname.toLowerCase();
+  if (host.startsWith('portal.')) return true;
+  // Local loopback serves the portal SPA at `/` (see PORTAL_EXTRA_HOSTS / server defaults).
+  // Treat it like portal.* so hub links stay on `/` instead of `/portal.html`.
+  if (host === 'localhost' || host === '127.0.0.1' || host === '::1') {
+    return isPortalSpaDocument();
+  }
+  return false;
 }
 
 function getPortalRouteSegment() {
@@ -1850,6 +1857,7 @@ function MagicLinkRequestForm({ inputId, submitLabel }) {
   const [userId, setUserId] = useState(() => readRememberedUserId());
   const [rememberUserId, setRememberUserId] = useState(() => readRememberUserIdEnabled());
   const [status, setStatus] = useState({ type: '', text: '' });
+  const [devLoginUrl, setDevLoginUrl] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const canSubmit = useMemo(
@@ -1880,10 +1888,12 @@ function MagicLinkRequestForm({ inputId, submitLabel }) {
 
     if (!trimmedUserId || trimmedUserId.length > 100) {
       setStatus({ type: 'error', text: t('magicLink.invalidId') });
+      setDevLoginUrl('');
       return;
     }
 
     setStatus({ type: 'loading', text: t('magicLink.sending') });
+    setDevLoginUrl('');
     setIsSubmitting(true);
 
     try {
@@ -1897,9 +1907,11 @@ function MagicLinkRequestForm({ inputId, submitLabel }) {
         return;
       }
 
+      const loginUrl = String(result.data?.loginUrl || '').trim();
+      setDevLoginUrl(loginUrl);
       setStatus({
         type: 'success',
-        text: t('magicLink.linkSent'),
+        text: loginUrl ? t('magicLink.linkSentDev') : t('magicLink.linkSent'),
       });
       persistRememberUserId(trimmedUserId, rememberUserId);
     } catch {
@@ -1949,6 +1961,14 @@ function MagicLinkRequestForm({ inputId, submitLabel }) {
       <div className={`status ${status.type || ''}`} aria-live="polite">
         {status.text}
       </div>
+      {devLoginUrl ? (
+        <div className="magic-link-dev-login" role="status">
+          <p className="magic-link-dev-login-label">{t('magicLink.devLinkLabel')}</p>
+          <a className="magic-link-dev-login-url portal-ltr" href={devLoginUrl} dir="ltr">
+            {devLoginUrl}
+          </a>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -1995,6 +2015,7 @@ function VerifyMagicLinkApp() {
   const t = (key, params) => translatePortalText(getStoredPortalLocale(), key, params);
   const [status, setStatus] = useState(() => t('verify.verifying'));
   const [message, setMessage] = useState({ type: '', text: '' });
+  const [devLoginUrl, setDevLoginUrl] = useState('');
   const [showSpinner, setShowSpinner] = useState(true);
   const [verificationFailed, setVerificationFailed] = useState(false);
   const [canResendByToken, setCanResendByToken] = useState(false);
@@ -2090,9 +2111,7 @@ function VerifyMagicLinkApp() {
             return;
           }
           window.setTimeout(() => {
-            const hub =
-              window.location.hostname.toLowerCase().startsWith('portal.') ? '/' : '/portal.html';
-            window.location.assign(hub);
+            window.location.assign(portalHubHref());
           }, 600);
           return;
         }
@@ -2136,6 +2155,7 @@ function VerifyMagicLinkApp() {
   const requestMagicLinkByUserId = async (userId) => {
     setIsResending(true);
     setMessage({ type: 'loading', text: t('magicLink.sending') });
+    setDevLoginUrl('');
 
     try {
       const result = await postMagicLinkRequest(userId, { t });
@@ -2150,10 +2170,12 @@ function VerifyMagicLinkApp() {
         return;
       }
 
+      const loginUrl = String(result.data?.loginUrl || '').trim();
+      setDevLoginUrl(loginUrl);
       setStatus(t('verify.checkEmail'));
       setMessage({
         type: 'success',
-        text: t('magicLink.linkSent'),
+        text: loginUrl ? t('magicLink.linkSentDev') : t('magicLink.linkSent'),
       });
       setVerificationFailed(false);
     } catch {
@@ -2173,15 +2195,20 @@ function VerifyMagicLinkApp() {
     if (canResendByToken && linkToken) {
       setIsResending(true);
       setMessage({ type: 'loading', text: t('magicLink.sending') });
+      setDevLoginUrl('');
 
       try {
         const result = await postResendMagicLink(linkToken, { t });
 
         if (result.ok) {
+          const loginUrl = String(result.data?.loginUrl || '').trim();
+          setDevLoginUrl(loginUrl);
           setStatus(t('verify.checkEmail'));
           setMessage({
             type: 'success',
-            text: result.data?.message || t('magicLink.linkSent'),
+            text: loginUrl
+              ? t('magicLink.linkSentDev')
+              : result.data?.message || t('magicLink.linkSent'),
           });
           setVerificationFailed(false);
           setCanOneClickResend(false);
@@ -2225,6 +2252,14 @@ function VerifyMagicLinkApp() {
       {showSpinner ? <div className="spinner" /> : null}
       <h2>{status}</h2>
       <div className={`message ${message.type || ''}`}>{message.text}</div>
+      {devLoginUrl ? (
+        <div className="magic-link-dev-login" role="status">
+          <p className="magic-link-dev-login-label">{t('magicLink.devLinkLabel')}</p>
+          <a className="magic-link-dev-login-url portal-ltr" href={devLoginUrl} dir="ltr">
+            {devLoginUrl}
+          </a>
+        </div>
+      ) : null}
       {verificationFailed && canOneClickResend && !showIdForm ? (
         <div className="verify-resend">
           <button
@@ -4050,6 +4085,7 @@ function PortalAdminJobsTab({ mirrorCacheStatus }) {
   const [runsLoading, setRunsLoading] = useState(false);
   const [expandedJob, setExpandedJob] = useState('');
   const [triggeringJob, setTriggeringJob] = useState('');
+  const [cancellingAction, setCancellingAction] = useState(null); // { jobName, restart }
   const [actionError, setActionError] = useState('');
   const [logView, setLogView] = useState(null);
   const [logRun, setLogRun] = useState(null);
@@ -4157,11 +4193,34 @@ function PortalAdminJobsTab({ mirrorCacheStatus }) {
     }
   };
 
+  const cancelJob = async (jobName, runId, { restart = false } = {}) => {
+    setCancellingAction({ jobName, restart });
+    setActionError('');
+    try {
+      const data = await adminApiPost('/api/portal-admin/jobs/cancel', {
+        runId,
+        restart,
+      });
+      setExpandedJob(jobName);
+      if (restart && data.restartedRunId != null) {
+        setLogView({ runId: data.restartedRunId, jobName });
+      } else if (data.run?.id != null) {
+        setLogView({ runId: data.run.id, jobName });
+      }
+      setRefreshTick((tick) => tick + 1);
+    } catch (err) {
+      setActionError(err.message || (restart ? 'Could not stop and restart the job.' : 'Could not stop the job.'));
+    } finally {
+      setCancellingAction(null);
+    }
+  };
+
   return (
     <section className="portal-admin-panel" aria-label="Jobs">
       <p className="portal-admin-hint">
         Sync jobs run on the dedicated cron machine — on their schedule and on demand from here.
-        Every run is recorded with its logs.
+        Every run is recorded with its logs. Use Stop if a run is stuck; Stop &amp; restart kills it
+        and starts a fresh run.
       </p>
       {mirrorCacheStatus ? (
         <dl className="portal-admin-stats portal-admin-stats--compact">
@@ -4234,18 +4293,39 @@ function PortalAdminJobsTab({ mirrorCacheStatus }) {
               ) : null}
             </dl>
             <div className="portal-admin-job-actions">
-              <button
-                type="button"
-                className="portal-btn portal-btn--secondary"
-                disabled={isRunning || triggeringJob === job.name}
-                onClick={() => runJob(job.name)}
-              >
-                {isRunning
-                  ? 'Running…'
-                  : triggeringJob === job.name
-                    ? 'Starting…'
-                    : 'Run now'}
-              </button>
+              {isRunning ? (
+                <>
+                  <button
+                    type="button"
+                    className="portal-btn portal-btn--secondary"
+                    disabled={Boolean(cancellingAction) || !lastRun?.id}
+                    onClick={() => cancelJob(job.name, lastRun.id, { restart: false })}
+                  >
+                    {cancellingAction?.jobName === job.name && !cancellingAction.restart
+                      ? 'Stopping…'
+                      : 'Stop'}
+                  </button>
+                  <button
+                    type="button"
+                    className="portal-btn portal-btn--secondary"
+                    disabled={Boolean(cancellingAction) || !lastRun?.id}
+                    onClick={() => cancelJob(job.name, lastRun.id, { restart: true })}
+                  >
+                    {cancellingAction?.jobName === job.name && cancellingAction.restart
+                      ? 'Restarting…'
+                      : 'Stop & restart'}
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  className="portal-btn portal-btn--secondary"
+                  disabled={triggeringJob === job.name}
+                  onClick={() => runJob(job.name)}
+                >
+                  {triggeringJob === job.name ? 'Starting…' : 'Run now'}
+                </button>
+              )}
               <button
                 type="button"
                 className="portal-btn portal-btn--secondary"

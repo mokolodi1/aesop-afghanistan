@@ -13,7 +13,7 @@ const {
   buildLatestDingNumberByUserIdMap,
   getPortalDingChangeHistory,
   resolvePortalRoleFromPeopleSheet,
-  syncPeopleStatusOnPeopleSheet,
+  applyDerivedPeopleStatusToRows,
   loadClassroomRoleEmailSetsFromSheets,
   initGoogleSheets,
   getWorksheetByTitle,
@@ -282,13 +282,22 @@ async function mirrorAllPeopleFromSheets(options = {}) {
     return { mirrored: 0, pruned: 0, duplicateSheetRowsCollapsed: 0 };
   }
 
-  const [rawRows, applicantIdSet] = await Promise.all([
+  const [rawRows, applicantIdSet, classroomRoles] = await Promise.all([
     loadAllPeopleRowsFromSheets(),
     loadApplicantAesopIdSetFromSheets(),
+    loadClassroomRoleEmailSetsFromSheets().catch((error) => {
+      console.warn("[people-mirror] Classroom role sets unavailable:", error.message);
+      return { teacherEmails: new Set(), studentEmails: new Set() };
+    }),
   ]);
   const prepared = preparePeopleRowsForMirror(rawRows);
   logPeopleMirrorDedupeStats(prepared);
   const { rows } = prepared;
+  applyDerivedPeopleStatusToRows(rows, {
+    teacherEmails: classroomRoles.teacherEmails,
+    studentEmails: classroomRoles.studentEmails,
+    applicantIdSet,
+  });
   const syncedAt = new Date();
   let mirrored = 0;
 
@@ -320,9 +329,13 @@ async function rebuildPeopleTableFromSheets(options = {}) {
     throw new Error("DATABASE_URL is not set.");
   }
 
-  const [rawRows, applicantIdSet] = await Promise.all([
+  const [rawRows, applicantIdSet, classroomRoles] = await Promise.all([
     loadAllPeopleRowsFromSheets(),
     loadApplicantAesopIdSetFromSheets(),
+    loadClassroomRoleEmailSetsFromSheets().catch((error) => {
+      console.warn("[people-mirror] Classroom role sets unavailable:", error.message);
+      return { teacherEmails: new Set(), studentEmails: new Set() };
+    }),
   ]);
   const prepared = preparePeopleRowsForMirror(rawRows);
 
@@ -343,6 +356,11 @@ async function rebuildPeopleTableFromSheets(options = {}) {
 
   logPeopleMirrorDedupeStats(prepared);
   const { rows } = prepared;
+  applyDerivedPeopleStatusToRows(rows, {
+    teacherEmails: classroomRoles.teacherEmails,
+    studentEmails: classroomRoles.studentEmails,
+    applicantIdSet,
+  });
 
   const pool = getPool();
   const client = await pool.connect();
@@ -673,18 +691,6 @@ async function mirrorApplicantReviewsFromSheets() {
  *   includeDingHistory — mirror full Ding change history (heavy; use daily sync only).
  */
 async function mirrorPeopleAndDingFromSheets(options = {}) {
-  try {
-    const { teacherEmails, studentEmails } = await loadClassroomRoleEmailSetsFromSheets();
-    const statusSync = await syncPeopleStatusOnPeopleSheet({ teacherEmails, studentEmails });
-    if (statusSync.updated > 0) {
-      console.log(
-        `[people-mirror] People status column: updated ${statusSync.updated} row(s), skipped ${statusSync.skipped}.`,
-      );
-    }
-  } catch (error) {
-    console.warn("[people-mirror] People status sync failed:", error.message);
-  }
-
   const applicantIdSet = await loadApplicantAesopIdSetFromSheets();
   const peopleResult = await mirrorAllPeopleFromSheets();
   const dingResult = await mirrorDingNumbersFromSheets(applicantIdSet);

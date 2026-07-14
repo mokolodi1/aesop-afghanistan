@@ -1,7 +1,6 @@
 const {
   findProfileById,
-  isAppliedPeopleStatus,
-  resolvePeopleStatus,
+  isAppliedAesopId,
 } = require("./googleSheets");
 const { getPortalApplicationCalendar } = require("./portalApplicationCalendar");
 const { getApplicantRowByAesopId } = require("./voiceMemoSync");
@@ -52,9 +51,7 @@ async function getPortalCalendarForApplicant({ userId, email }) {
   }
 
   const applicant = await getApplicantRowByAesopId(profile.id || userId);
-  const peopleStatus = resolvePeopleStatus(profile.id || userId, profile.peopleStatus || "");
-  const isApplicant = Boolean(applicant);
-  const isApplied = isApplicant || isAppliedPeopleStatus(peopleStatus);
+  const isApplied = Boolean(applicant) || isAppliedAesopId(profile.id || userId);
 
   if (!isApplied) {
     return { eligible: false };

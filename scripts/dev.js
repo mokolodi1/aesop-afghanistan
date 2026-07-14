@@ -24,9 +24,10 @@ async function main() {
       ...process.env,
       PORT: process.env.PORT || '3003',
       // Serve the portal SPA (header/footer chrome) at / on localhost, like the
-      // portal.* host in prod. Set PORTAL_EXTRA_HOSTS= (empty) to test the plain
-      // apex login page instead.
-      PORTAL_EXTRA_HOSTS: process.env.PORTAL_EXTRA_HOSTS ?? 'localhost,127.0.0.1',
+      // portal.* host in prod. server.js also defaults this outside Fly; set
+      // PORTAL_EXTRA_HOSTS= (empty) to test the plain apex login page instead.
+      PORTAL_EXTRA_HOSTS:
+        process.env.PORTAL_EXTRA_HOSTS ?? 'localhost,127.0.0.1,::1',
     },
   });
 

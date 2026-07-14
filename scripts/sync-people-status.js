@@ -1,14 +1,21 @@
 #!/usr/bin/env node
 /**
- * Populate People column X (Status) from Classroom Roles/Grades + 262 applicant IDs.
- * Teaching | Admitted | Applied
+ * Legacy no-op: People Status column is no longer used.
+ *
+ * Status is derived from Classroom Roles/Grades, the Applicants sheet, and
+ * 262-prefix AESOP IDs during people mirror / portal role resolution.
+ * Re-enable sheet writes only by setting GOOGLE_PEOPLE_STATUS_COLUMN to a
+ * column letter, then use syncPeopleStatusOnPeopleSheet.
  */
-const {
-  loadClassroomRoleEmailSetsFromSheets,
-  syncPeopleStatusOnPeopleSheet,
-} = require("../services/googleSheets");
+const { isPeopleStatusSyncEnabled, syncPeopleStatusOnPeopleSheet, loadClassroomRoleEmailSetsFromSheets } = require("../services/googleSheets");
 
 async function main() {
+  if (!isPeopleStatusSyncEnabled()) {
+    console.log(
+      "[sync-people-status] People Status column is OFF — status is derived from Classroom + Applicants. Nothing to write.",
+    );
+    return;
+  }
   const { teacherEmails, studentEmails } = await loadClassroomRoleEmailSetsFromSheets();
   console.log(
     `[sync-people-status] teachers=${teacherEmails.size} students=${studentEmails.size}`,

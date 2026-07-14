@@ -50,15 +50,12 @@ function buildPeopleAppendRow({ aesopId, name, email, portalRole }) {
   const nameIdx = resolveColumnIndex(config.googleSheets.nameColumn || "C");
   const emailIdx = resolveColumnIndex(config.googleSheets.emailColumn || "D");
   const typeIdx = resolveColumnIndex(config.googleSheets.peopleTypeColumn || "E");
-  const statusIdx = resolveColumnIndex(config.googleSheets.peopleStatusColumn || "T");
   const typeValue = portalRole === "Teacher" ? "Teacher: Classroom" : "Student: Classroom";
-  const statusValue = portalRole === "Teacher" ? "Teaching" : "Admitted";
   return buildIndexedRow({
     [idIdx]: googleSheetPlainText(aesopId),
     [nameIdx]: name || "",
     [emailIdx]: email || "",
     [typeIdx]: typeValue,
-    [statusIdx]: statusValue,
   });
 }
 
