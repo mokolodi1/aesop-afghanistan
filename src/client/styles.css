@@ -2112,10 +2112,28 @@ html[dir='rtl'] .portal-voice-memo-substeps {
 }
 
 .portal-voice-memo-review-request {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
   margin: 0;
   font-size: 0.92rem;
   line-height: 1.5;
   color: var(--aesop-ink-soft);
+}
+
+.portal-voice-memo-review-request-lead {
+  margin: 0;
+}
+
+.portal-voice-memo-review-request-message {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: var(--aesop-radius-md);
+  background: var(--aesop-surface-muted, #f8fafc);
+  border: 1px solid var(--aesop-border, #e2e8f0);
+  font-weight: 600;
+  color: var(--aesop-ink);
 }
 
 .portal-voice-memo-done {

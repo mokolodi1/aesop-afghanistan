@@ -2657,6 +2657,86 @@ function PortalVoiceMemoWhySignalItem() {
   );
 }
 
+function PortalVoiceMemoReviewRequest({ aesopId }) {
+  const { t } = usePortalI18n();
+  const [copiedReviewMessage, setCopiedReviewMessage] = useState(false);
+  const copyResetTimerRef = useRef(null);
+  const idText = String(aesopId || '').trim();
+  const reviewMessage = `Please review my voice note.\nMy AESOP ID is ${idText || '#####'}.`;
+
+  useEffect(() => {
+    return () => {
+      if (copyResetTimerRef.current) {
+        clearTimeout(copyResetTimerRef.current);
+      }
+    };
+  }, []);
+
+  const copyReviewMessage = useCallback(async () => {
+    if (!idText) {
+      return;
+    }
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(reviewMessage);
+      } else {
+        const textarea = document.createElement('textarea');
+        textarea.value = reviewMessage;
+        textarea.setAttribute('readonly', '');
+        textarea.style.position = 'fixed';
+        textarea.style.left = '-9999px';
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textarea);
+      }
+      setCopiedReviewMessage(true);
+      if (copyResetTimerRef.current) {
+        clearTimeout(copyResetTimerRef.current);
+      }
+      copyResetTimerRef.current = setTimeout(() => {
+        setCopiedReviewMessage(false);
+        copyResetTimerRef.current = null;
+      }, 2000);
+    } catch (err) {
+      console.warn('Failed to copy voice note review message', err);
+    }
+  }, [idText, reviewMessage]);
+
+  return (
+    <div className="portal-voice-memo-review-request">
+      <p className="portal-voice-memo-review-request-lead">
+        {t('voiceMemo.reviewRequest1')}{' '}
+        <a
+          className="portal-ltr"
+          href={VOICE_MEMO_SIGNAL_CONTACT_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          noreplyaesop.55
+        </a>{' '}
+        {renderPortalRichText(t('voiceMemo.reviewRequest2'))}
+      </p>
+      <p className="portal-voice-memo-review-request-message portal-ltr" dir="ltr">
+        Please review my voice note.
+        <br />
+        My AESOP ID is {idText || '#####'}.
+      </p>
+      {idText ? (
+        <button
+          type="button"
+          className="portal-voice-memo-copy-id"
+          onClick={copyReviewMessage}
+        >
+          {copiedReviewMessage
+            ? t('voiceMemo.reviewRequestCopied')
+            : t('voiceMemo.reviewRequestCopy')}
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
 function PortalVoiceMemoPrompt({ prompt }) {
   const { t } = usePortalI18n();
   const text = String(prompt || '').trim();
@@ -3117,6 +3197,7 @@ function PortalVoiceMemoSection({ studentUserId, studentEmail, enabled }) {
                 <li>{renderPortalRichText(t('voiceMemo.why5'))}</li>
               </ul>
             </div>
+            <PortalVoiceMemoReviewRequest aesopId={studentUserId} />
             <a
               className="portal-voice-memo-resubmit-btn"
               href={VOICE_MEMO_SIGNAL_CONTACT_URL}
@@ -3159,18 +3240,7 @@ function PortalVoiceMemoSection({ studentUserId, studentEmail, enabled }) {
                 <li>{renderPortalRichText(t('voiceMemo.goodToKnow3'))}</li>
               </ul>
             </div>
-            <p className="portal-voice-memo-review-request">
-              {t('voiceMemo.reviewRequest1')}{' '}
-              <a
-                className="portal-ltr"
-                href={VOICE_MEMO_SIGNAL_CONTACT_URL}
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                noreplyaesop.55
-              </a>{' '}
-              {renderPortalRichText(t('voiceMemo.reviewRequest2'))}
-            </p>
+            <PortalVoiceMemoReviewRequest aesopId={studentUserId} />
           </div>
         </>
       )}

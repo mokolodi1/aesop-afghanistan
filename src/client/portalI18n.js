@@ -110,7 +110,9 @@ const TRANSLATIONS = {
     'voiceMemo.reviewRequest1':
       'If you believe you have followed all the steps above, please send a message on Signal to',
     'voiceMemo.reviewRequest2':
-      'saying "Please review my voice note" **in English**. (You will **not** receive a response, but I will check your application again. It\'s very likely you mis-typed your AESOP ID.)',
+      'saying the following **in English**. (You will **not** receive a response, but I will check your application again. It\'s very likely you mis-typed your AESOP ID.)',
+    'voiceMemo.reviewRequestCopy': 'Click here to copy',
+    'voiceMemo.reviewRequestCopied': 'Copied!',
     'voiceMemo.durationWithin': 'This is within the required range of 30 seconds to 2 minutes.',
     'voiceMemo.durationExceeding': 'You\'re exceeding expectations!',
     'voiceMemo.resubmitButton': 'Resubmit on Signal',
@@ -435,7 +437,9 @@ const TRANSLATIONS = {
     'voiceMemo.reviewRequest1':
       'اگر فکر می‌کنید همهٔ مراحل بالا را انجام داده‌اید، لطفاً در Signal پیامی به',
     'voiceMemo.reviewRequest2':
-      'بفرستید و در آن **به انگلیسی** بنویسید: «Please review my voice note» (پاسخی **نخواهید** دریافت کرد، اما من درخواست شما را دوباره بررسی می‌کنم. خیلی محتمل است که شمارهٔ شناسایی ایساپ خود را اشتباه تایپ کرده باشید.)',
+      'بفرستید و در آن **به انگلیسی** متن زیر را بنویسید. (پاسخی **نخواهید** دریافت کرد، اما من درخواست شما را دوباره بررسی می‌کنم. خیلی محتمل است که شمارهٔ شناسایی ایساپ خود را اشتباه تایپ کرده باشید.)',
+    'voiceMemo.reviewRequestCopy': 'برای کپی اینجا کلیک کنید',
+    'voiceMemo.reviewRequestCopied': 'کپی شد!',
     'voiceMemo.durationWithin': 'این مدت در محدودهٔ لازم، یعنی بین ۳۰ ثانیه تا ۲ دقیقه است.',
     'voiceMemo.durationExceeding': 'شما فراتر از انتظار عمل کردید!',
     'voiceMemo.resubmitButton': 'ارسال دوباره در Signal',
