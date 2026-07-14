@@ -1605,8 +1605,12 @@ app.get('/api/portal-reviews/voice-memo/stream', portalVoiceMemoStreamRateLimite
     }
 
     const rangeHeader = typeof req.headers.range === 'string' ? req.headers.range : '';
+    const download =
+      req.query.download === '1' ||
+      req.query.download === 'true' ||
+      String(req.query.download || '').toLowerCase() === 'yes';
     const streamResult = await getReviewVoiceMemoStreamByToken({ token, rangeHeader });
-    writeVoiceMemoStream(res, streamResult);
+    writeVoiceMemoStream(res, streamResult, { download });
   } catch (error) {
     console.error('Error streaming review voice memo:', formatErrorForLog(error));
     respondVoiceMemoStreamError(res, error);
@@ -1655,20 +1659,30 @@ function respondVoiceMemoStreamError(res, error) {
   const mapped = mapVoiceMemoStreamError(error);
   const status = mapped.statusCode || 503;
   if (!res.headersSent) {
-    res.status(status).json({ error: mapped.message || 'Could not play voice memo. Please reload this page and try again.' });
+    res.status(status).json({ error: mapped.message || 'Could not play voice memo. Refresh the stream and try again.' });
     return;
   }
   res.end();
 }
 
-function writeVoiceMemoStream(res, streamResult) {
+function writeVoiceMemoStream(res, streamResult, options = {}) {
   const { stream, mimeType, fileName, size, status, contentRange, contentLength } = streamResult;
+  const download = options.download === true;
+  const safeName = String(fileName || (download ? 'voice-memo.mp4' : 'voice-memo.m4a')).replace(/"/g, '');
+  const downloadName = download
+    ? safeName.replace(/\.(m4a|aac|mp3|ogg|opus|wav)$/i, '.mp4')
+    : safeName;
 
   res.status(status === 206 ? 206 : 200);
   res.setHeader('Content-Type', mimeType || 'audio/mp4');
   res.setHeader('Accept-Ranges', 'bytes');
   res.setHeader('Cache-Control', 'private, no-store');
-  res.setHeader('Content-Disposition', `inline; filename="${String(fileName || 'voice-memo.m4a').replace(/"/g, '')}"`);
+  // Reviewer downloads use attachment; applicant/reviewer playback stays inline
+  // so browsers do not offer a download affordance by default.
+  res.setHeader(
+    'Content-Disposition',
+    `${download ? 'attachment' : 'inline'}; filename="${downloadName}"`,
+  );
   if (contentRange) {
     res.setHeader('Content-Range', contentRange);
   }

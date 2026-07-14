@@ -145,7 +145,11 @@ const TRANSLATIONS = {
     'voiceMemo.audioUnavailable':
       'Your submission is recorded, but the audio file is not available to play yet. Please check again later.',
     'voiceMemo.audioPlayError':
-      'Could not play your voice memo. Please reload this page and try again.',
+      'Could not play your voice memo. Refresh the stream and try again.',
+    'voiceMemo.streamExpired':
+      'This playback link has expired. Refresh the stream to continue.',
+    'voiceMemo.refreshStream': 'Refresh stream',
+    'voiceMemo.refreshingStream': 'Refreshing…',
     'voiceMemo.audioTryAgainLater': 'Please try again later.',
     'voiceMemo.instructionsParagraph':
       'Submit your Round 2 voice memo using the instructions you received by email. Once it is received, this page will show Submitted and you can listen to your recording here. Your voice note can take up to 3 days to appear on the AESOP Portal after you send it. You may submit your voice notes as many times as you\'d like, but only ONE voice notes will be saved.',
@@ -263,9 +267,15 @@ const TRANSLATIONS = {
     'reviews.essayLabel': 'Essay',
     'reviews.essayMissing': 'No essay on file.',
     'reviews.playVoice': 'Play voice note',
+    'reviews.downloadMp4': 'Download MP4',
+    'reviews.durationExceeding': 'They exceeded expectations!',
+    'reviews.refreshStream': 'Refresh stream',
+    'reviews.refreshingStream': 'Refreshing…',
     'reviews.voiceComingSoon': 'Coming soon',
     'reviews.voiceNotAvailable': 'No voice note on file',
     'reviews.voiceAudioUnsupported': 'Your browser does not support audio playback.',
+    'reviews.streamExpired':
+      'This playback link has expired. Refresh the stream to continue.',
     'reviews.levelLabel': 'English Level',
     'reviews.suspectedAi': 'Suspected AI',
     'reviews.suspectedAiFlagged': 'Suspected AI — Flagged',
@@ -457,7 +467,11 @@ const TRANSLATIONS = {
     'voiceMemo.audioUnavailable':
       'ارسال شما ثبت شده، اما فایل صوتی هنوز برای پخش در دسترس نیست. لطفاً بعداً دوباره بررسی کنید.',
     'voiceMemo.audioPlayError':
-      'پخش یادداشت صوتی ممکن نشد. لطفاً این صفحه را دوباره بارگذاری کنید و دوباره تلاش کنید.',
+      'پخش یادداشت صوتی ممکن نشد. جریان را تازه کنید و دوباره تلاش کنید.',
+    'voiceMemo.streamExpired':
+      'این پیوند پخش منقضی شده است. برای ادامه، جریان را تازه کنید.',
+    'voiceMemo.refreshStream': 'تازه کردن جریان',
+    'voiceMemo.refreshingStream': 'در حال تازه‌سازی…',
     'voiceMemo.audioTryAgainLater': 'لطفاً بعداً دوباره تلاش کنید.',
     'voiceMemo.instructionsParagraph':
       'یادداشت صوتی دور دوم را طبق دستورالعمل ایمیل‌شده ارسال کنید. پس از دریافت، این صفحه «ثبت شده» را نشان می‌دهد و می‌توانید ضبط خود را بشنوید. یادداشت صوتی شما ممکن است تا ۳ روز پس از ارسال در پورتال AESOP نمایان شود. می‌توانید هر چند بار که بخواهید یادداشت صوتی بفرستید، اما فقط یک یادداشت صوتی ذخیره می‌شود.',
@@ -575,9 +589,15 @@ const TRANSLATIONS = {
     'reviews.essayLabel': 'انشا',
     'reviews.essayMissing': 'انشا موجود نیست.',
     'reviews.playVoice': 'پخش یادداشت صوتی',
+    'reviews.downloadMp4': 'دانلود MP4',
+    'reviews.durationExceeding': 'آنها فراتر از انتظار عمل کردند!',
+    'reviews.refreshStream': 'تازه کردن جریان',
+    'reviews.refreshingStream': 'در حال تازه‌سازی…',
     'reviews.voiceComingSoon': 'به‌زودی',
     'reviews.voiceNotAvailable': 'یادداشت صوتی موجود نیست',
     'reviews.voiceAudioUnsupported': 'مرورگر شما از پخش صدا پشتیبانی نمی‌کند.',
+    'reviews.streamExpired':
+      'این پیوند پخش منقضی شده است. برای ادامه، جریان را تازه کنید.',
     'reviews.levelLabel': 'سطح انگلیسی',
     'reviews.suspectedAi': 'مشکوک به هوش مصنوعی',
     'reviews.suspectedAiFlagged': 'مشکوک به هوش مصنوعی — علامت‌گذاری شد',

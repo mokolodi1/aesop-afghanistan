@@ -211,7 +211,7 @@ function persistRememberUserId(userId, enabled) {
   localStorage.removeItem(REMEMBERED_USER_ID_KEY);
 }
 
-const PORTAL_SESSION_MS = 60 * 60 * 1000;
+const PORTAL_SESSION_MS = 3 * 60 * 60 * 1000;
 const PORTAL_ADMIN_SESSION_MS = 7 * 24 * 60 * 60 * 1000;
 const PORTAL_SESSION_EXPIRES_AT_KEY = 'studentPortalSessionExpiresAt';
 const PORTAL_ADMIN_SESSION_LOCAL_KEY = 'studentPortalAdminPersistedSession';
@@ -806,6 +806,9 @@ async function resolvePortalVoiceMemoAudioError(streamSrc, t) {
       if (/try again later/i.test(serverMessage)) {
         return t('voiceMemo.audioTryAgainLater');
       }
+      if (/reload|expired/i.test(serverMessage)) {
+        return t('voiceMemo.streamExpired');
+      }
       if (serverMessage) {
         return serverMessage;
       }
@@ -814,6 +817,9 @@ async function resolvePortalVoiceMemoAudioError(streamSrc, t) {
     if (!response.ok) {
       const payload = await response.json().catch(() => null);
       const serverMessage = String(payload?.error || '').trim();
+      if (/reload|expired/i.test(serverMessage)) {
+        return t('voiceMemo.streamExpired');
+      }
       if (serverMessage) {
         return serverMessage;
       }
@@ -2748,6 +2754,7 @@ function PortalVoiceMemoSection({ studentUserId, studentEmail, enabled }) {
   const [voiceMemoStatus, setVoiceMemoStatus] = useState(null);
   const [voiceMemoAudioError, setVoiceMemoAudioError] = useState('');
   const [measuredDurationSeconds, setMeasuredDurationSeconds] = useState(null);
+  const [refreshingStream, setRefreshingStream] = useState(false);
   const reportedDurationKeyRef = useRef('');
 
   useEffect(() => {
@@ -2762,6 +2769,34 @@ function PortalVoiceMemoSection({ studentUserId, studentEmail, enabled }) {
     setMeasuredDurationSeconds(null);
     reportedDurationKeyRef.current = '';
   }, [enabled, fetchedVoiceMemoStatus]);
+
+  const refreshVoiceMemoStream = useCallback(async () => {
+    if (!studentUserId || !studentEmail || refreshingStream) {
+      return;
+    }
+    setRefreshingStream(true);
+    setVoiceMemoAudioError('');
+    try {
+      const result = await loadPortalVoiceMemoStatusFromApi({
+        userId: studentUserId,
+        email: studentEmail,
+      });
+      if (!result.ok) {
+        setVoiceMemoAudioError(
+          result.errorMessage ||
+            (result.errorKind === 'network' ? t('voiceMemo.networkError') : t('voiceMemo.loadError')),
+        );
+        return;
+      }
+      setVoiceMemoStatus(result.status);
+      setMeasuredDurationSeconds(null);
+      reportedDurationKeyRef.current = '';
+    } catch {
+      setVoiceMemoAudioError(t('voiceMemo.networkError'));
+    } finally {
+      setRefreshingStream(false);
+    }
+  }, [studentUserId, studentEmail, refreshingStream, t]);
 
   const voiceMemoStreamSrc = useMemo(() => {
     if (!voiceMemoStatus?.submitted || !voiceMemoStatus?.hasRecording || !enabled) {
@@ -2784,10 +2819,13 @@ function PortalVoiceMemoSection({ studentUserId, studentEmail, enabled }) {
         : null;
   const displayDurationLabel =
     formatVoiceMemoDurationLabel(displayDurationSeconds) || voiceMemoStatus?.durationLabel || null;
-  const displayDurationStatus = classifyVoiceMemoDuration(displayDurationSeconds, {
-    minSeconds: voiceMemoStatus?.minDurationSeconds,
-    maxSeconds: voiceMemoStatus?.maxDurationSeconds,
-  });
+  const displayDurationStatus =
+    displayDurationSeconds != null
+      ? classifyVoiceMemoDuration(displayDurationSeconds, {
+          minSeconds: voiceMemoStatus?.minDurationSeconds,
+          maxSeconds: voiceMemoStatus?.maxDurationSeconds,
+        })
+      : voiceMemoStatus?.durationStatus || 'unknown';
   const hasShortSubmissionIssue =
     displayDurationStatus === 'too_short' ||
     (displayDurationStatus === 'unknown' && voiceMemoStatus?.durationStatus === 'too_short');
@@ -2819,7 +2857,18 @@ function PortalVoiceMemoSection({ studentUserId, studentEmail, enabled }) {
     ) {
       return undefined;
     }
-    if (!voiceMemoDurationsDiffer(voiceMemoStatus.durationSeconds, measuredDurationSeconds)) {
+    const measuredStatus = classifyVoiceMemoDuration(measuredDurationSeconds, {
+      minSeconds: voiceMemoStatus?.minDurationSeconds,
+      maxSeconds: voiceMemoStatus?.maxDurationSeconds,
+    });
+    const serverMaskedOverachieve =
+      voiceMemoStatus.durationStatus === 'too_long' &&
+      voiceMemoStatus.durationSeconds == null &&
+      measuredStatus === 'too_long';
+    if (
+      !serverMaskedOverachieve &&
+      !voiceMemoDurationsDiffer(voiceMemoStatus.durationSeconds, measuredDurationSeconds)
+    ) {
       return undefined;
     }
     const reportKey = `${voiceMemoStatus.fileId}:${Math.round(measuredDurationSeconds)}`;
@@ -2844,19 +2893,29 @@ function PortalVoiceMemoSection({ studentUserId, studentEmail, enabled }) {
         if (cancelled || !response.ok) {
           return;
         }
-        setVoiceMemoStatus((prev) =>
-          prev
-            ? {
-                ...prev,
-                durationSeconds: data.durationSeconds ?? Math.round(measuredDurationSeconds),
-                durationLabel: data.durationLabel || formatVoiceMemoDurationLabel(measuredDurationSeconds),
-                durationStatus: data.durationStatus || classifyVoiceMemoDuration(measuredDurationSeconds, {
-                  minSeconds: prev.minDurationSeconds,
-                  maxSeconds: prev.maxDurationSeconds,
-                }),
-                durationWarning: data.durationWarning ?? prev.durationWarning,
-              }
-            : prev,
+        setVoiceMemoStatus((prev) => {
+          if (!prev) {
+            return prev;
+          }
+          const durationStatus =
+            data.durationStatus ||
+            classifyVoiceMemoDuration(measuredDurationSeconds, {
+              minSeconds: prev.minDurationSeconds,
+              maxSeconds: prev.maxDurationSeconds,
+            });
+          const isOverachieved = durationStatus === 'too_long';
+          return {
+            ...prev,
+            durationStatus,
+            durationSeconds: isOverachieved
+              ? null
+              : (data.durationSeconds ?? Math.round(measuredDurationSeconds)),
+            durationLabel: isOverachieved
+              ? null
+              : (data.durationLabel || formatVoiceMemoDurationLabel(measuredDurationSeconds)),
+            durationWarning: data.durationWarning ?? prev.durationWarning,
+          };
+        });
         );
       } catch {
         // Keep the browser-measured label even if cache update fails.
@@ -2918,15 +2977,16 @@ function PortalVoiceMemoSection({ studentUserId, studentEmail, enabled }) {
                 {voiceMemoDurationWarning}
               </p>
             ) : null}
-            {displayDurationLabel ? (
+            {displayDurationStatus === 'too_long' ? (
+              <p className="portal-field-hint">
+                <span className="portal-voice-memo-duration-ok">
+                  {t('voiceMemo.durationExceeding')}
+                </span>
+              </p>
+            ) : displayDurationLabel ? (
               <p className="portal-field-hint">
                 {t('voiceMemo.recordingLength')}: <strong>{displayDurationLabel}</strong>
-                {displayDurationStatus === 'too_long' ? (
-                  <span className="portal-voice-memo-duration-ok">
-                    {' '}
-                    {t('voiceMemo.durationExceeding')}
-                  </span>
-                ) : displayDurationStatus === 'valid' ? (
+                {displayDurationStatus === 'valid' ? (
                   <span className="portal-voice-memo-duration-ok">
                     {' '}
                     {t('voiceMemo.durationWithin')}
@@ -2963,6 +3023,14 @@ function PortalVoiceMemoSection({ studentUserId, studentEmail, enabled }) {
                     {t('voiceMemo.audioUnsupported')}
                   </audio>
                 ) : null}
+                <button
+                  type="button"
+                  className="portal-voice-memo-refresh-stream"
+                  onClick={refreshVoiceMemoStream}
+                  disabled={refreshingStream}
+                >
+                  {refreshingStream ? t('voiceMemo.refreshingStream') : t('voiceMemo.refreshStream')}
+                </button>
               </>
             ) : (
               <p className="portal-field-hint">{t('voiceMemo.audioUnavailable')}</p>
@@ -7795,8 +7863,9 @@ function useReviewAutoSave({ drafts, onSaveOne }) {
   return { markDirty, saveStatus, lastSavedAt };
 }
 
-function PortalReviewVoicePlayer({ assignment, t }) {
+function PortalReviewVoicePlayer({ assignment, t, onRefreshStream }) {
   const [audioError, setAudioError] = useState('');
+  const [refreshingStream, setRefreshingStream] = useState(false);
 
   const streamSrc = useMemo(() => {
     if (!assignment?.hasVoiceMemo || !assignment?.streamToken) {
@@ -7806,9 +7875,32 @@ function PortalReviewVoicePlayer({ assignment, t }) {
     return `/api/portal-reviews/voice-memo/stream?${params.toString()}`;
   }, [assignment?.hasVoiceMemo, assignment?.streamToken]);
 
+  const downloadHref = useMemo(() => {
+    if (!streamSrc) {
+      return '';
+    }
+    const params = new URLSearchParams({ st: assignment.streamToken, download: '1' });
+    return `/api/portal-reviews/voice-memo/stream?${params.toString()}`;
+  }, [streamSrc, assignment?.streamToken]);
+
   useEffect(() => {
     setAudioError('');
   }, [streamSrc]);
+
+  const handleRefreshStream = useCallback(async () => {
+    if (!onRefreshStream || refreshingStream) {
+      return;
+    }
+    setRefreshingStream(true);
+    setAudioError('');
+    try {
+      await onRefreshStream();
+    } catch (error) {
+      setAudioError(error?.message || t('reviews.streamExpired'));
+    } finally {
+      setRefreshingStream(false);
+    }
+  }, [onRefreshStream, refreshingStream, t]);
 
   if (!assignment?.hasVoiceMemo || !streamSrc) {
     return (
@@ -7820,6 +7912,11 @@ function PortalReviewVoicePlayer({ assignment, t }) {
 
   return (
     <div className="portal-review-voice-row">
+      {assignment.durationStatus === 'too_long' ? (
+        <p className="portal-field-hint portal-voice-memo-duration-ok">
+          {t('reviews.durationExceeding')}
+        </p>
+      ) : null}
       <div className="portal-review-voice-player" aria-label={t('reviews.playVoice')}>
         <audio
           controls
@@ -7836,11 +7933,37 @@ function PortalReviewVoicePlayer({ assignment, t }) {
         </audio>
         {audioError ? <p className="portal-field-hint portal-review-voice-error">{audioError}</p> : null}
       </div>
+      <div className="portal-review-voice-actions">
+        <button
+          type="button"
+          className="portal-review-voice-btn"
+          onClick={handleRefreshStream}
+          disabled={refreshingStream || !onRefreshStream}
+        >
+          <span className="portal-review-voice-btn-label">
+            {refreshingStream ? t('reviews.refreshingStream') : t('reviews.refreshStream')}
+          </span>
+        </button>
+        {downloadHref ? (
+          <a className="portal-review-voice-btn" href={downloadHref} download>
+            <span className="portal-review-voice-btn-label">{t('reviews.downloadMp4')}</span>
+          </a>
+        ) : null}
+      </div>
     </div>
   );
 }
 
-function PortalReviewCard({ assignment, draft, onDraftChange, onMarkDirty, onNextStudent, showNextStudent, t }) {
+function PortalReviewCard({
+  assignment,
+  draft,
+  onDraftChange,
+  onMarkDirty,
+  onNextStudent,
+  showNextStudent,
+  onRefreshStream,
+  t,
+}) {
   const ageDisplay = assignment.age?.trim() || t('reviews.notAvailable');
 
   return (
@@ -7863,7 +7986,7 @@ function PortalReviewCard({ assignment, draft, onDraftChange, onMarkDirty, onNex
         )}
       </section>
 
-      <PortalReviewVoicePlayer assignment={assignment} t={t} />
+      <PortalReviewVoicePlayer assignment={assignment} t={t} onRefreshStream={onRefreshStream} />
 
       <div className="portal-review-scoring-panel" aria-label={t('reviews.scoringAria')}>
         <section className="portal-review-scoring-section portal-review-scoring-section--english">
@@ -8003,6 +8126,26 @@ function PortalReviewApplicationsPage() {
   }, []);
 
   const { markDirty, saveStatus, lastSavedAt } = useReviewAutoSave({ drafts, onSaveOne: saveOne });
+
+  const refreshStreamTokens = useCallback(async () => {
+    const data = await portalApiPost('/api/portal-reviews/list', {}, { timeoutMs: 45000 });
+    const rows = Array.isArray(data.assignments) ? data.assignments : [];
+    setAssignments((prev) => {
+      const byId = new Map(rows.map((row) => [row.applicantId, row]));
+      return prev.map((assignment) => {
+        const fresh = byId.get(assignment.applicantId);
+        if (!fresh) {
+          return assignment;
+        }
+        return {
+          ...assignment,
+          hasVoiceMemo: fresh.hasVoiceMemo,
+          streamToken: fresh.streamToken,
+          durationStatus: fresh.durationStatus,
+        };
+      });
+    });
+  }, []);
 
   useEffect(() => {
     if (!signedIn || !isReviewer) {
@@ -8165,6 +8308,7 @@ function PortalReviewApplicationsPage() {
                       onMarkDirty={markDirty}
                       onNextStudent={goToNextStudent}
                       showNextStudent={showNextStudent}
+                      onRefreshStream={refreshStreamTokens}
                       t={t}
                     />
                   ) : null}

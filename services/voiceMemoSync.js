@@ -4,8 +4,10 @@ const { formatEasternSheetTimestamp } = require("../utils/dingSheetTime");
 const {
   VOICE_MEMO_MIN_DURATION_SEC,
   VOICE_MEMO_MAX_DURATION_SEC,
+  VOICE_MEMO_OVERACHIEVE_SHEET_SECONDS,
   classifyVoiceMemoDuration,
   formatVoiceMemoDurationLabel,
+  sheetVoiceMemoLengthSeconds,
 } = require("../utils/voiceMemoDuration");
 const {
   DEFAULT_VOICE_MEMO_FILE_EXTENSIONS,
@@ -530,15 +532,18 @@ async function getRound1ApplicationStats() {
       : null;
     const durationSeconds =
       entry.cachedDurationSeconds != null
-        ? entry.cachedDurationSeconds
+        ? sheetVoiceMemoLengthSeconds(entry.cachedDurationSeconds, durationLimits)
         : probedDuration != null && Number.isFinite(probedDuration)
-          ? probedDuration
+          ? sheetVoiceMemoLengthSeconds(probedDuration, durationLimits)
           : null;
     const durationStatus = classifyVoiceMemoDuration(durationSeconds, durationLimits);
     const personWithDuration = {
       ...entry.person,
       durationSeconds: durationSeconds ?? null,
-      durationLabel: formatVoiceMemoDurationLabel(durationSeconds),
+      durationLabel:
+        durationStatus === "too_long"
+          ? String(durationSeconds)
+          : formatVoiceMemoDurationLabel(durationSeconds),
       fileName: entry.memo.fileName,
     };
     if (durationStatus === "valid") {
@@ -927,7 +932,7 @@ async function cacheProbedDurationsInPostgres(candidates, durationByFileId, file
     if (probed == null || !Number.isFinite(probed)) {
       continue;
     }
-    const seconds = Math.round(probed);
+    const seconds = sheetVoiceMemoLengthSeconds(probed, getVoiceMemoDurationLimits());
     candidate.lengthSeconds = seconds;
     candidate.lengthFromProbe = false;
     writes.push(
@@ -956,6 +961,7 @@ async function runVoiceMemoRound2Sync(options = {}) {
   const deadlineAt = Date.now() + timeBudgetMs;
 
   const cfg = getVoiceMemoSheetConfig();
+  const durationLimits = getVoiceMemoDurationLimits(cfg.voiceMemo);
   const folderId = String(cfg.voiceMemo.driveFolderId || "").trim();
   if (!folderId) {
     throw new Error("voiceMemo.driveFolderId is not configured.");
@@ -1080,6 +1086,13 @@ async function runVoiceMemoRound2Sync(options = {}) {
           probeFileIds.add(memo.fileId);
           lengthFromProbe = true;
         }
+      } else if (
+        classifyVoiceMemoDuration(sheetLengthSeconds, durationLimits) === "too_long" &&
+        sheetLengthSeconds !== VOICE_MEMO_OVERACHIEVE_SHEET_SECONDS
+      ) {
+        // Normalize legacy over-max lengths to the fixed sheet sentinel (300).
+        needsLength = true;
+        lengthSeconds = VOICE_MEMO_OVERACHIEVE_SHEET_SECONDS;
       }
     }
 
@@ -1157,9 +1170,10 @@ async function runVoiceMemoRound2Sync(options = {}) {
       }
 
       if (seconds != null) {
-        if (String(seconds) !== candidate.currentLengthRaw) {
+        const sheetSeconds = sheetVoiceMemoLengthSeconds(seconds, durationLimits);
+        if (sheetSeconds != null && String(sheetSeconds) !== candidate.currentLengthRaw) {
           writeLength = true;
-          lengthCellValue = seconds;
+          lengthCellValue = sheetSeconds;
           lengthsWritten += 1;
         }
       } else {

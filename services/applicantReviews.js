@@ -16,6 +16,8 @@ const {
 const {
   mintReviewVoiceStreamToken,
 } = require("./portalVoiceMemo");
+const { classifyVoiceMemoDuration } = require("../utils/voiceMemoDuration");
+const { getVoiceMemoDurationLimits } = require("./voiceMemoSync");
 
 const ENGLISH_LEVELS = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"];
 const FITNESS_SCORES = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"];
@@ -185,7 +187,7 @@ function getApplicantsReviewConfig() {
 }
 
 /**
- * @returns {Promise<Map<string, { age: string, essay: string, driveFileId: string }>>}
+ * @returns {Promise<Map<string, { age: string, essay: string, driveFileId: string, driveDurationSeconds: number|null }>>}
  */
 async function loadApplicantsByIdMap() {
   if (isDatabaseEnabled()) {
@@ -204,7 +206,7 @@ async function loadApplicantsByIdMap() {
 
   await worksheet.loadHeaderRow(cfg.headerRowNum);
   const rows = await worksheet.getRows();
-  /** @type {Map<string, { age: string, essay: string, driveFileId: string }>} */
+  /** @type {Map<string, { age: string, essay: string, driveFileId: string, driveDurationSeconds: number|null }>} */
   const byId = new Map();
 
   for (const row of rows) {
@@ -217,6 +219,7 @@ async function loadApplicantsByIdMap() {
       age: String(rowData[cfg.ageColumnIndex] ?? "").trim(),
       essay: String(rowData[cfg.essayColumnIndex] ?? "").trim(),
       driveFileId: "",
+      driveDurationSeconds: null,
     });
   }
 
@@ -268,12 +271,23 @@ function readReviewFieldsFromDbRow(row, slot) {
 }
 
 /**
+ * @param {number|null|undefined} durationSeconds
+ * @returns {'valid'|'too_short'|'too_long'|'unknown'}
+ */
+function classifyReviewVoiceDuration(durationSeconds) {
+  return classifyVoiceMemoDuration(
+    durationSeconds,
+    getVoiceMemoDurationLimits(config.voiceMemo || {}),
+  );
+}
+
+/**
  * @param {Array<Record<string, unknown>>} rows
  * @param {string} reviewerKey
- * @returns {Array<{ applicantId: string, age: string, essay: string, slot: 'A'|'B', englishLevel: string, suspectedAi: boolean, instructionFollowing: string, originalThinking: string, character: string, hasVoiceMemo: boolean }>}
+ * @returns {Array<{ applicantId: string, age: string, essay: string, slot: 'A'|'B', englishLevel: string, suspectedAi: boolean, instructionFollowing: string, originalThinking: string, character: string, hasVoiceMemo: boolean, durationStatus: 'valid'|'too_short'|'too_long'|'unknown' }>}
  */
 function mapReviewAssignmentsFromDbRows(rows, reviewerKey) {
-  /** @type {Array<{ applicantId: string, age: string, essay: string, slot: 'A'|'B', englishLevel: string, suspectedAi: boolean, instructionFollowing: string, originalThinking: string, character: string, hasVoiceMemo: boolean }>} */
+  /** @type {Array<{ applicantId: string, age: string, essay: string, slot: 'A'|'B', englishLevel: string, suspectedAi: boolean, instructionFollowing: string, originalThinking: string, character: string, hasVoiceMemo: boolean, durationStatus: 'valid'|'too_short'|'too_long'|'unknown' }>} */
   const assignments = [];
 
   for (const row of rows) {
@@ -295,6 +309,8 @@ function mapReviewAssignmentsFromDbRows(rows, reviewerKey) {
 
     const reviewFields = readReviewFieldsFromDbRow(row, slot);
     const driveFileId = String(row.drive_file_id ?? "").trim();
+    const durationRaw = Number(row.drive_duration_seconds);
+    const durationSeconds = Number.isFinite(durationRaw) ? durationRaw : null;
 
     assignments.push({
       applicantId,
@@ -303,6 +319,7 @@ function mapReviewAssignmentsFromDbRows(rows, reviewerKey) {
       slot,
       ...reviewFields,
       hasVoiceMemo: Boolean(driveFileId),
+      durationStatus: classifyReviewVoiceDuration(durationSeconds),
     });
   }
 
@@ -325,7 +342,7 @@ async function loadReviewAssignmentsForReviewerFromSheets(reviewerKey) {
   const rows = await worksheet.getRows();
   const applicantsById = await loadApplicantsByIdMap();
 
-  /** @type {Array<{ applicantId: string, age: string, essay: string, slot: 'A'|'B', englishLevel: string, suspectedAi: boolean, instructionFollowing: string, originalThinking: string, character: string, hasVoiceMemo: boolean }>} */
+  /** @type {Array<{ applicantId: string, age: string, essay: string, slot: 'A'|'B', englishLevel: string, suspectedAi: boolean, instructionFollowing: string, originalThinking: string, character: string, hasVoiceMemo: boolean, durationStatus: 'valid'|'too_short'|'too_long'|'unknown' }>} */
   const assignments = [];
 
   for (const row of rows) {
@@ -358,6 +375,7 @@ async function loadReviewAssignmentsForReviewerFromSheets(reviewerKey) {
       slot,
       ...reviewFields,
       hasVoiceMemo,
+      durationStatus: classifyReviewVoiceDuration(applicant?.driveDurationSeconds),
     });
   }
 

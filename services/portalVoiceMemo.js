@@ -5,6 +5,7 @@ const {
   classifyVoiceMemoDuration,
   voiceMemoDurationWarning,
   formatVoiceMemoDurationLabel,
+  sheetVoiceMemoLengthSeconds,
 } = require("../utils/voiceMemoDuration");
 const { findProfileById } = require("./googleSheets");
 const { streamVoiceMemoFile, getVoiceMemoFileForAesopId, getVoiceMemoDurationSeconds } = require("./googleDrive");
@@ -295,8 +296,9 @@ async function resolveVoiceMemoRecordingFromApplicant(applicant, durationLimits,
   // Probe Drive when the file is new/unknown, duration is missing, or a refresh is requested.
   let durationSeconds = !forceRefreshDuration && cacheMatchesCurrentFile ? cachedDurationSeconds : null;
   if (durationSeconds == null) {
-    durationSeconds = await getVoiceMemoDurationSeconds(driveFile.fileId);
-    if (durationSeconds != null) {
+    const probed = await getVoiceMemoDurationSeconds(driveFile.fileId);
+    if (probed != null) {
+      durationSeconds = sheetVoiceMemoLengthSeconds(probed, durationLimits);
       updateApplicantDriveDurationSeconds(applicant.aesopId, {
         driveDurationSeconds: durationSeconds,
         driveFileId: driveFile.fileId,
@@ -306,6 +308,9 @@ async function resolveVoiceMemoRecordingFromApplicant(applicant, durationLimits,
       // Keep the previous cache if a refresh probe fails.
       durationSeconds = cachedDurationSeconds;
     }
+  } else {
+    // Normalize legacy over-max caches to the sheet sentinel.
+    durationSeconds = sheetVoiceMemoLengthSeconds(durationSeconds, durationLimits);
   }
 
   const durationStatus = classifyVoiceMemoDuration(durationSeconds, durationLimits);
@@ -399,8 +404,9 @@ async function getPortalVoiceMemoStatus({ userId, email, refreshDuration = false
     // Short-lived signed token the <audio> element uses to stream, so the URL
     // carries no email/ID (keeps PII out of access logs and browser history).
     streamToken: hasRecording ? mintVoiceStreamToken(profile.id || userId) : null,
-    durationSeconds,
-    durationLabel: formatVoiceMemoDurationLabel(durationSeconds),
+    durationSeconds: durationStatus === "too_long" ? null : durationSeconds,
+    durationLabel:
+      durationStatus === "too_long" ? null : formatVoiceMemoDurationLabel(durationSeconds),
     durationStatus,
     durationWarning,
     minDurationSeconds: durationLimits.minSeconds,
@@ -449,20 +455,21 @@ async function reportPortalVoiceMemoDuration({ userId, email, durationSeconds, f
     throw error;
   }
 
-  const rounded = Math.round(seconds);
+  const durationLimits = getVoiceMemoDurationLimits(cfg.voiceMemo);
+  const rounded = sheetVoiceMemoLengthSeconds(seconds, durationLimits);
   await updateApplicantDriveDurationSeconds(applicant.aesopId, {
     driveDurationSeconds: rounded,
     driveFileId: driveFile.fileId,
     driveFileName: driveFile.fileName,
   });
 
-  const durationLimits = getVoiceMemoDurationLimits(cfg.voiceMemo);
   const durationStatus = classifyVoiceMemoDuration(rounded, durationLimits);
   return {
     success: true,
     fileId: driveFile.fileId,
-    durationSeconds: rounded,
-    durationLabel: formatVoiceMemoDurationLabel(rounded),
+    durationSeconds: durationStatus === "too_long" ? null : rounded,
+    durationLabel:
+      durationStatus === "too_long" ? null : formatVoiceMemoDurationLabel(rounded),
     durationStatus,
     durationWarning: voiceMemoDurationWarning(durationStatus, durationLimits),
     minDurationSeconds: durationLimits.minSeconds,
@@ -522,7 +529,7 @@ async function getPortalVoiceMemoStream({ userId, email, rangeHeader = "" }) {
 async function getReviewVoiceMemoStreamByToken({ token, rangeHeader = "" }) {
   const verified = verifyReviewVoiceStreamToken(token);
   if (!verified) {
-    const error = new Error("This voice memo link has expired. Reload the page and try again.");
+    const error = new Error("This voice memo link has expired. Refresh the stream and try again.");
     error.statusCode = 403;
     throw error;
   }
@@ -561,7 +568,7 @@ async function getReviewVoiceMemoStreamByToken({ token, rangeHeader = "" }) {
 async function getPortalVoiceMemoStreamByToken({ token, rangeHeader = "" }) {
   const verified = verifyVoiceStreamToken(token);
   if (!verified) {
-    const error = new Error("This voice memo link has expired. Reload the page and try again.");
+    const error = new Error("This voice memo link has expired. Refresh the stream and try again.");
     error.statusCode = 403;
     throw error;
   }

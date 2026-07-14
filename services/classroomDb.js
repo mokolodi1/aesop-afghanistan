@@ -1269,22 +1269,24 @@ async function getApplicantsReviewFieldsMapFromDb() {
   }
 
   const result = await pool.query(
-    `SELECT lower(aesop_id) AS aesop_key, age, essay, drive_file_id
+    `SELECT lower(aesop_id) AS aesop_key, age, essay, drive_file_id, drive_duration_seconds
      FROM applicants
      WHERE aesop_id IS NOT NULL AND trim(aesop_id) <> ''`,
   );
 
-  /** @type {Map<string, { age: string, essay: string, driveFileId: string }>} */
+  /** @type {Map<string, { age: string, essay: string, driveFileId: string, driveDurationSeconds: number|null }>} */
   const byId = new Map();
   for (const row of result.rows) {
     const key = String(row.aesop_key || "").trim().toLowerCase();
     if (!key) {
       continue;
     }
+    const durationRaw = Number(row.drive_duration_seconds);
     byId.set(key, {
       age: String(row.age ?? "").trim(),
       essay: String(row.essay ?? "").trim(),
       driveFileId: String(row.drive_file_id ?? "").trim(),
+      driveDurationSeconds: Number.isFinite(durationRaw) ? durationRaw : null,
     });
   }
   return byId;
@@ -1529,7 +1531,8 @@ async function getReviewAssignmentsForReviewerFromDb(reviewerAesopId) {
        ar.b_character,
        a.age,
        a.essay,
-       a.drive_file_id
+       a.drive_file_id,
+       a.drive_duration_seconds
      FROM applicant_reviews ar
      LEFT JOIN applicants a ON lower(a.aesop_id) = lower(ar.aesop_id)
      WHERE lower(ar.reviewer_a) = $1 OR lower(ar.reviewer_b) = $1`,

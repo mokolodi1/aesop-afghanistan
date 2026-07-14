@@ -24,10 +24,12 @@ const {
   loadApplicantsDataForStats,
   loadApplicantAesopIdSetFromSheets,
   getVoiceMemoDriveScanOptions,
+  getVoiceMemoDurationLimits,
   findVoiceMemoInScan,
   readApplicantRound2Prompt,
   parseVoiceMemoSheetLengthSeconds,
 } = require("./voiceMemoSync");
+const { sheetVoiceMemoLengthSeconds } = require("../utils/voiceMemoDuration");
 const {
   scanVoiceMemoFolder,
   resolveVoiceMemoDurationsMap,
@@ -481,6 +483,7 @@ async function mirrorApplicantsAndDriveFromSheets() {
   const syncedAt = new Date();
   const deadlineAt = Date.now() + MIRROR_DRIVE_TIME_BUDGET_MS;
   const { dataRows, columns, cfg } = await loadApplicantsDataForStats();
+  const durationLimits = getVoiceMemoDurationLimits(cfg.voiceMemo);
 
   const folderId = String(cfg.voiceMemo?.driveFolderId || "").trim();
   /** @type {Map<string, { aesopId: string, fileId: string, fileName: string }>} */
@@ -548,10 +551,10 @@ async function mirrorApplicantsAndDriveFromSheets() {
       const sheetLinkFileId = extractDriveFileIdFromLink(applicantLinks);
       const cached = cachedDurationByFileId.get(driveFileId);
       if (sheetLengthSeconds != null && sheetLinkFileId === driveFileId) {
-        driveDurationSeconds = sheetLengthSeconds;
+        driveDurationSeconds = sheetVoiceMemoLengthSeconds(sheetLengthSeconds, durationLimits);
         durationsFromSheet += 1;
       } else if (cached != null && Number.isFinite(cached)) {
-        driveDurationSeconds = Math.round(cached);
+        driveDurationSeconds = sheetVoiceMemoLengthSeconds(cached, durationLimits);
         durationsFromDb += 1;
       } else {
         probeFileIds.add(driveFileId);
@@ -596,7 +599,7 @@ async function mirrorApplicantsAndDriveFromSheets() {
     if (entry.driveFileId && entry.driveDurationSeconds == null) {
       const probed = probedDurations.get(entry.driveFileId);
       if (probed != null && Number.isFinite(Number(probed))) {
-        entry.driveDurationSeconds = Math.round(Number(probed));
+        entry.driveDurationSeconds = sheetVoiceMemoLengthSeconds(probed, durationLimits);
       } else {
         durationsUnknown += 1;
       }

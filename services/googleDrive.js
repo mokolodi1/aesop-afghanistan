@@ -37,7 +37,7 @@ function mapVoiceMemoStreamError(error) {
       return /** @type {Error & { statusCode?: number }} */ (error);
     }
   }
-  const mapped = new Error("Could not play voice memo. Please reload this page and try again.");
+  const mapped = new Error("Could not play voice memo. Refresh the stream and try again.");
   mapped.statusCode = 503;
   return mapped;
 }

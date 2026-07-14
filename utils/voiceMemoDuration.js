@@ -1,5 +1,7 @@
 const VOICE_MEMO_MIN_DURATION_SEC = 30;
 const VOICE_MEMO_MAX_DURATION_SEC = 120;
+/** Sheet / stats value written for recordings longer than the allowed max. */
+const VOICE_MEMO_OVERACHIEVE_SHEET_SECONDS = 300;
 
 /**
  * @param {number|null|undefined} seconds
@@ -19,6 +21,25 @@ function classifyVoiceMemoDuration(seconds, limits = {}) {
     return "too_long";
   }
   return "valid";
+}
+
+/**
+ * Value to store in the Applicants sheet (and matching Postgres cache) for a
+ * measured duration. Over-max recordings are written as 300 so length checks
+ * do not expose the true length.
+ * @param {number|null|undefined} seconds
+ * @param {{ minSeconds?: number, maxSeconds?: number }} [limits]
+ * @returns {number|null}
+ */
+function sheetVoiceMemoLengthSeconds(seconds, limits = {}) {
+  if (seconds == null || !Number.isFinite(seconds) || seconds < 0) {
+    return null;
+  }
+  const rounded = Math.round(seconds);
+  if (classifyVoiceMemoDuration(rounded, limits) === "too_long") {
+    return VOICE_MEMO_OVERACHIEVE_SHEET_SECONDS;
+  }
+  return rounded;
 }
 
 /**
@@ -79,8 +100,10 @@ function voiceMemoDurationsDiffer(cachedSeconds, measuredSeconds) {
 module.exports = {
   VOICE_MEMO_MIN_DURATION_SEC,
   VOICE_MEMO_MAX_DURATION_SEC,
+  VOICE_MEMO_OVERACHIEVE_SHEET_SECONDS,
   VOICE_MEMO_DURATION_MISMATCH_SECONDS,
   classifyVoiceMemoDuration,
+  sheetVoiceMemoLengthSeconds,
   voiceMemoDurationWarning,
   formatVoiceMemoDurationLabel,
   voiceMemoDurationsDiffer,
