@@ -2059,6 +2059,30 @@ html[dir='rtl'] .portal-class-accordion-chevron {
   color: var(--aesop-ink-soft);
 }
 
+.portal-voice-memo-copy-id {
+  display: inline;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--aesop-teal-dark);
+  font: inherit;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.portal-voice-memo-copy-id:hover {
+  color: var(--aesop-teal);
+}
+
+.portal-voice-memo-copy-id:focus-visible {
+  outline: 2px solid var(--aesop-teal-dark);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
 html[dir='rtl'] .portal-voice-memo-steps,
 html[dir='rtl'] .portal-voice-memo-substeps {
   list-style-type: persian;

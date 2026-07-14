@@ -75,7 +75,7 @@ const JOB_DEFINITIONS = {
     description:
       "Mirrors the People tab, current Ding numbers, Applicants, ApplicantReviews, and " +
       "Drive voice memo metadata from Google Sheets and Drive into the Postgres cache.",
-    schedule: "Hourly at :00 UTC",
+    schedule: "Every hour 1:30–4:30 AM Afghanistan time",
     // Shares the cron VM with voice-memo-sync; both download Drive media.
     exclusiveGroup: "driveHeavy",
     async run(payload = {}) {
@@ -140,7 +140,7 @@ const JOB_DEFINITIONS = {
       "Pulls rosters and grades from Google Classroom, rewrites the Classroom Roles and " +
       "Classroom Grades tabs, and mirrors Ding change history. Requires Classroom sync " +
       "to be enabled.",
-    schedule: "Daily at 02:30 UTC",
+    schedule: "Daily at 2:00 AM Afghanistan time",
     async run() {
       const { runClassroomSync } = require("./classroomSync");
       const { mirrorDingHistoryFromSheets } = require("./peopleMirror");
@@ -181,7 +181,7 @@ const JOB_DEFINITIONS = {
     description:
       "Checks Google Drive for applicant voice notes and updates the Applicants sheet: " +
       "Round 2, voice note link, last updated, and memo length.",
-    schedule: "Daily at 03:30 UTC",
+    schedule: "Daily at 4:00 AM Afghanistan time",
     // Shares the cron VM with hourly-cache; both download Drive media.
     exclusiveGroup: "driveHeavy",
     async run() {

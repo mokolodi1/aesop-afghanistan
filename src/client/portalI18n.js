@@ -97,7 +97,8 @@ const TRANSLATIONS = {
     'voiceMemo.why1After': ' on Signal.',
     'voiceMemo.why2': 'It has been less than three days since you sent your messages.',
     'voiceMemo.why3': 'You submitted a voice note but did not send your AESOP ID.',
-    'voiceMemo.why4':
+    'voiceMemo.why4': 'You mis-typed your AESOP ID.',
+    'voiceMemo.why5':
       'You sent a message on Signal with your AESOP ID but did not send a voice note.',
     'voiceMemo.whyTitle2': 'Good to know:',
     'voiceMemo.goodToKnow1':
@@ -108,7 +109,8 @@ const TRANSLATIONS = {
       'If you send a new voice note later, your submission will be updated within **3 days**.',
     'voiceMemo.reviewRequest1':
       'If you believe you have followed all the steps above, please send a message on Signal to',
-    'voiceMemo.reviewRequest2': 'saying "Please review my voice note" **in English**.',
+    'voiceMemo.reviewRequest2':
+      'saying "Please review my voice note" **in English**. (You will **not** receive a response, but I will check your application again. It\'s very likely you mis-typed your AESOP ID.)',
     'voiceMemo.durationWithin': 'This is within the required range of 30 seconds to 2 minutes.',
     'voiceMemo.durationExceeding': 'You\'re exceeding expectations!',
     'voiceMemo.resubmitButton': 'Resubmit on Signal',
@@ -128,6 +130,8 @@ const TRANSLATIONS = {
     'voiceMemo.instrStep2Link': 'Message noreplyaesop.55',
     'voiceMemo.instrStep2Intro': 'Then send these two messages:',
     'voiceMemo.instrStep2Id': 'Your AESOP ID number:',
+    'voiceMemo.instrStep2Copy': 'Click here to copy to clipboard',
+    'voiceMemo.instrStep2Copied': 'Copied!',
     'voiceMemo.instrStep2Voice':
       'A voice note in your own best English answering the Round 2 Prompt above. It must be between 30 seconds and 2 minutes. Do NOT use ChatGPT or grammar checkers. Anything under 30 seconds is too short and will be rejected.',
     'voiceMemo.instrStep3Title': 'Check your status here',
@@ -418,7 +422,8 @@ const TRANSLATIONS = {
     'voiceMemo.why1After': ' نفرستاده‌اید.',
     'voiceMemo.why2': 'از زمان ارسال پیام‌های شما کمتر از سه روز گذشته است.',
     'voiceMemo.why3': 'یادداشت صوتی فرستاده‌اید اما شمارهٔ شناسایی ایساپ خود را نفرستاده‌اید.',
-    'voiceMemo.why4':
+    'voiceMemo.why4': 'شمارهٔ شناسایی ایساپ خود را اشتباه تایپ کرده‌اید.',
+    'voiceMemo.why5':
       'در Signal پیامی با شمارهٔ شناسایی ایساپ خود فرستاده‌اید اما یادداشت صوتی نفرستاده‌اید.',
     'voiceMemo.whyTitle2': 'خوب است بدانید:',
     'voiceMemo.goodToKnow1':
@@ -430,7 +435,7 @@ const TRANSLATIONS = {
     'voiceMemo.reviewRequest1':
       'اگر فکر می‌کنید همهٔ مراحل بالا را انجام داده‌اید، لطفاً در Signal پیامی به',
     'voiceMemo.reviewRequest2':
-      'بفرستید و در آن **به انگلیسی** بنویسید: «Please review my voice note»',
+      'بفرستید و در آن **به انگلیسی** بنویسید: «Please review my voice note» (پاسخی **نخواهید** دریافت کرد، اما من درخواست شما را دوباره بررسی می‌کنم. خیلی محتمل است که شمارهٔ شناسایی ایساپ خود را اشتباه تایپ کرده باشید.)',
     'voiceMemo.durationWithin': 'این مدت در محدودهٔ لازم، یعنی بین ۳۰ ثانیه تا ۲ دقیقه است.',
     'voiceMemo.durationExceeding': 'شما فراتر از انتظار عمل کردید!',
     'voiceMemo.resubmitButton': 'ارسال دوباره در Signal',
@@ -450,6 +455,8 @@ const TRANSLATIONS = {
     'voiceMemo.instrStep2Link': 'پیام به noreplyaesop.55',
     'voiceMemo.instrStep2Intro': 'سپس این دو پیام را بفرستید:',
     'voiceMemo.instrStep2Id': 'شمارهٔ شناسایی ایساپ شما:',
+    'voiceMemo.instrStep2Copy': 'برای کپی در کلیپ‌بورد اینجا کلیک کنید',
+    'voiceMemo.instrStep2Copied': 'کپی شد!',
     'voiceMemo.instrStep2Voice':
       'یک پیام صوتی به بهترین زبان انگلیسی خودتان در پاسخ به سؤال مرحلهٔ دوم در بالا. باید بین ۳۰ ثانیه تا ۲ دقیقه باشد. از ChatGPT یا برنامه‌های تصحیح گرامر استفاده نکنید. هر پیام کوتاه‌تر از ۳۰ ثانیه بسیار کوتاه است و رد خواهد شد.',
     'voiceMemo.instrStep3Title': 'وضعیت خود را همین‌جا بررسی کنید',

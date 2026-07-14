@@ -9,6 +9,7 @@ const DEFAULT_VOICE_MEMO_FILE_EXTENSIONS = [
   "wav",
   "mpga",
   "mpg",
+  "mp4",
 ];
 
 const DEFAULT_VOICE_MEMO_FILE_EXTENSIONS_CSV = DEFAULT_VOICE_MEMO_FILE_EXTENSIONS.join(",");

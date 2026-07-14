@@ -2676,6 +2676,49 @@ function PortalVoiceMemoPrompt({ prompt }) {
 
 function PortalVoiceMemoInstructions({ aesopId }) {
   const { t } = usePortalI18n();
+  const [copiedAesopId, setCopiedAesopId] = useState(false);
+  const copyResetTimerRef = useRef(null);
+  const idText = String(aesopId || '').trim();
+
+  useEffect(() => {
+    return () => {
+      if (copyResetTimerRef.current) {
+        clearTimeout(copyResetTimerRef.current);
+      }
+    };
+  }, []);
+
+  const copyAesopId = useCallback(async () => {
+    if (!idText) {
+      return;
+    }
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(idText);
+      } else {
+        const textarea = document.createElement('textarea');
+        textarea.value = idText;
+        textarea.setAttribute('readonly', '');
+        textarea.style.position = 'fixed';
+        textarea.style.left = '-9999px';
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textarea);
+      }
+      setCopiedAesopId(true);
+      if (copyResetTimerRef.current) {
+        clearTimeout(copyResetTimerRef.current);
+      }
+      copyResetTimerRef.current = setTimeout(() => {
+        setCopiedAesopId(false);
+        copyResetTimerRef.current = null;
+      }, 2000);
+    } catch (err) {
+      console.warn('Failed to copy AESOP ID', err);
+    }
+  }, [idText]);
+
   return (
     <div className="portal-voice-memo-instructions">
       <p className="portal-voice-memo-instructions-deadline">{t('voiceMemo.instrDeadline')}</p>
@@ -2716,7 +2759,21 @@ function PortalVoiceMemoInstructions({ aesopId }) {
           <ol className="portal-voice-memo-substeps">
             <li>
               {t('voiceMemo.instrStep2Id')}{' '}
-              <strong className="portal-ltr">{aesopId || '—'}</strong>
+              <strong className="portal-ltr">{idText || '—'}</strong>
+              {idText ? (
+                <>
+                  {' '}
+                  <button
+                    type="button"
+                    className="portal-voice-memo-copy-id"
+                    onClick={copyAesopId}
+                  >
+                    {copiedAesopId
+                      ? t('voiceMemo.instrStep2Copied')
+                      : t('voiceMemo.instrStep2Copy')}
+                  </button>
+                </>
+              ) : null}
             </li>
             <li>{t('voiceMemo.instrStep2Voice')}</li>
           </ol>
@@ -3055,6 +3112,7 @@ function PortalVoiceMemoSection({ studentUserId, studentEmail, enabled }) {
                 <li>{renderPortalRichText(t('voiceMemo.why2'))}</li>
                 <li>{renderPortalRichText(t('voiceMemo.why3'))}</li>
                 <li>{renderPortalRichText(t('voiceMemo.why4'))}</li>
+                <li>{renderPortalRichText(t('voiceMemo.why5'))}</li>
               </ul>
             </div>
             <a
@@ -3088,6 +3146,7 @@ function PortalVoiceMemoSection({ studentUserId, studentEmail, enabled }) {
                 <li>{renderPortalRichText(t('voiceMemo.why2'))}</li>
                 <li>{renderPortalRichText(t('voiceMemo.why3'))}</li>
                 <li>{renderPortalRichText(t('voiceMemo.why4'))}</li>
+                <li>{renderPortalRichText(t('voiceMemo.why5'))}</li>
               </ul>
             </div>
             <div className="portal-voice-memo-why">
@@ -3796,11 +3855,12 @@ function formatMirrorCacheFreshness(entry) {
   if (!entry) {
     return '—';
   }
+  if (entry.lastSyncedAt) {
+    const when = new Date(entry.lastSyncedAt).toLocaleString();
+    return entry.fresh ? `Fresh (last ${when})` : `Stale (last ${when})`;
+  }
   if (entry.fresh) {
     return 'Fresh';
-  }
-  if (entry.lastSyncedAt) {
-    return `Stale (last ${new Date(entry.lastSyncedAt).toLocaleString()})`;
   }
   return 'Never synced';
 }
