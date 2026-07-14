@@ -3079,14 +3079,16 @@ function PortalVoiceMemoSection({ studentUserId, studentEmail, enabled }) {
                     {t('voiceMemo.audioUnsupported')}
                   </audio>
                 ) : null}
-                <button
-                  type="button"
-                  className="portal-voice-memo-refresh-stream"
-                  onClick={refreshVoiceMemoStream}
-                  disabled={refreshingStream}
-                >
-                  {refreshingStream ? t('voiceMemo.refreshingStream') : t('voiceMemo.refreshStream')}
-                </button>
+                {refreshingStream || voiceMemoAudioError === t('voiceMemo.streamExpired') ? (
+                  <button
+                    type="button"
+                    className="portal-voice-memo-refresh-stream"
+                    onClick={refreshVoiceMemoStream}
+                    disabled={refreshingStream}
+                  >
+                    {refreshingStream ? t('voiceMemo.refreshingStream') : t('voiceMemo.refreshStream')}
+                  </button>
+                ) : null}
               </>
             ) : (
               <p className="portal-field-hint">{t('voiceMemo.audioUnavailable')}</p>
@@ -7993,16 +7995,20 @@ function PortalReviewVoicePlayer({ assignment, t, onRefreshStream }) {
         {audioError ? <p className="portal-field-hint portal-review-voice-error">{audioError}</p> : null}
       </div>
       <div className="portal-review-voice-actions">
-        <button
-          type="button"
-          className="portal-review-voice-btn"
-          onClick={handleRefreshStream}
-          disabled={refreshingStream || !onRefreshStream}
-        >
-          <span className="portal-review-voice-btn-label">
-            {refreshingStream ? t('reviews.refreshingStream') : t('reviews.refreshStream')}
-          </span>
-        </button>
+        {refreshingStream ||
+        audioError === t('voiceMemo.streamExpired') ||
+        audioError === t('reviews.streamExpired') ? (
+          <button
+            type="button"
+            className="portal-review-voice-btn"
+            onClick={handleRefreshStream}
+            disabled={refreshingStream || !onRefreshStream}
+          >
+            <span className="portal-review-voice-btn-label">
+              {refreshingStream ? t('reviews.refreshingStream') : t('reviews.refreshStream')}
+            </span>
+          </button>
+        ) : null}
         {downloadHref ? (
           <a className="portal-review-voice-btn" href={downloadHref} download>
             <span className="portal-review-voice-btn-label">{t('reviews.downloadMp4')}</span>

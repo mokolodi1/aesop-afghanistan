@@ -51,7 +51,7 @@ Freshness is checked per domain:
 
 When cache is stale, reads fall back to live Sheets/Classroom (slower but current).
 
-### Refresh the cache (overnight on Fly)
+### Refresh the cache (hourly on Fly)
 
 All scheduled syncs are defined in the repo's `crontab` and run by Supercronic on the `cron` process group Machine (see `[processes]` in `fly.toml` and `scripts/cron-server.js`). They deploy with the app image on every `fly deploy` — no manual scheduling scripts.
 
@@ -59,19 +59,19 @@ Every run — scheduled or admin-triggered — goes through `scripts/run-job.js`
 
 On-demand runs from the Jobs tab are forwarded to the cron Machine over Fly private networking (`cron.process.<app>.internal`, port `CRON_TRIGGER_PORT`, default 3100), so heavy syncs run on the 1GB cron Machine instead of a 512MB web Machine. The trigger returns a `job_runs` id immediately and the UI polls for progress. If the cron Machine is unreachable (e.g. local dev), the web process spawns the job locally instead.
 
-**Overnight cache job** (1:30, 2:30, 3:30, and 4:30 AM Afghanistan time / Asia/Kabul) — People, current Ding numbers, **Applicants**, **ApplicantReviews**, and **Google Drive** voice memo metadata:
+**Hourly job** (every hour on the hour, Afghanistan time / Asia/Kabul, except 2:00 AM and 4:00 AM when the daily jobs below run instead) — People, current Ding numbers, **Applicants**, **ApplicantReviews**, and **Google Drive** voice memo metadata:
 
 ```bash
 npm run sync:hourly-cache
 ```
 
-This runs `mirrorPeopleAndDingFromSheets()` during the overnight window (without full Ding change history). `MIRROR_CACHE_TTL_HOURS` is 24 so the last overnight refresh stays fresh through the day:
+This runs `mirrorPeopleAndDingFromSheets()` every hour (without full Ding change history):
 
 | Source | Postgres `people` columns |
 |--------|---------------------------|
 | People tab | `aesop_id`, `name`, `email`, `phone`, `people_type`, `admin_role`, `people_status`, `last_login`, `past_ding`, `reviewer_role`, `portal_role` (derived), `sheet_row` (full header→value JSON) |
 
-Other overnight mirrors:
+Other hourly mirrors:
 
 | Source | Postgres tables |
 |--------|-----------------|
@@ -82,7 +82,7 @@ Other overnight mirrors:
 
 Google Classroom is **not** included in the hourly job by default (too heavy). Keep Classroom on a daily schedule (below). To also run Classroom hourly, set `HOURLY_CACHE_INCLUDE_CLASSROOM=true` in `fly.toml` `[env]`.
 
-**Daily Classroom job** (2:00 AM Afghanistan time; see `crontab`) — Google Classroom rosters, grades, enrollments (+ sheet dual-write + backup export), and **Ding change history**. Voice memo sync runs at 4:00 AM Afghanistan time. All scheduled jobs stay within 1:30–5:00 AM Asia/Kabul:
+**Daily jobs** (see `crontab`) — voice memo sync at **2:00 AM** Afghanistan time; Classroom sync (rosters, grades, enrollments + sheet dual-write + backup export, and **Ding change history**) at **4:00 AM** Afghanistan time:
 
 ```bash
 npm run sync:classroom

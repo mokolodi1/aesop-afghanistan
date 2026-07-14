@@ -9,10 +9,9 @@ primary_region = "iad"
 [build]
 
 # Process groups. `app` serves HTTP; `cron` runs the scheduled syncs
-# (overnight cache, daily Classroom, daily voice memos) via Supercronic and a
+# (hourly cache, daily Classroom, daily voice memos) via Supercronic and a
 # private on-demand trigger API for the admin panel (scripts/cron-server.js
-# + crontab). Scheduled jobs run 1:30–5:00 AM Asia/Kabul. Both deploy from
-# the same image on `fly deploy`.
+# + crontab). Both deploy from the same image on `fly deploy`.
 # Keep the cron group at exactly one Machine (fly scale count cron=1).
 [processes]
   app = "node server.js"
@@ -43,6 +42,5 @@ primary_region = "iad"
 [env]
   BASE_URL = "https://aesop-afghanistan.fly.dev"
   DATABASE_AUTO_MIGRATE = "true"
-  # Overnight cron only (1:30–5:00 AM Asia/Kabul); keep cache fresh through the day.
-  MIRROR_CACHE_TTL_HOURS = "24"
+  MIRROR_CACHE_TTL_HOURS = "1"
   REQUEST_LOG = "true"

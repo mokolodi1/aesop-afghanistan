@@ -176,7 +176,7 @@ Setup:
 npm run sync:classroom
 ```
 
-5. Scheduling is declarative: the `cron` process group in `fly.toml` runs Supercronic with the repo's `crontab`. All scheduled jobs run between 1:30 AM and 5:00 AM Afghanistan time (Asia/Kabul); Classroom sync is daily at 2:00 AM AFT. It deploys automatically with `fly deploy` — no manual scheduling step. A dedicated cron Machine is used (rather than in-process `node-cron`) because the web machines can auto-stop when idle. Edit `crontab` to change timing; inspect with `fly machine list -a <app>`. Every run is recorded in the `job_runs` table and can be reviewed (with logs) or re-run from the admin portal's **Jobs** tab.
+5. Scheduling is declarative: the `cron` process group in `fly.toml` runs Supercronic with the repo's `crontab`. Hourly cache runs every hour on the hour (Afghanistan time), except 2:00 AM AFT (voice memo sync) and 4:00 AM AFT (Classroom sync). It deploys automatically with `fly deploy` — no manual scheduling step. A dedicated cron Machine is used (rather than in-process `node-cron`) because the web machines can auto-stop when idle. Edit `crontab` to change timing; inspect with `fly machine list -a <app>`. Every run is recorded in the `job_runs` table and can be reviewed (with logs) or re-run from the admin portal's **Jobs** tab.
 
 > The sync reuses the existing `email.gmailServiceAccount.credentials`, so no second key is needed - the service account just needs the Classroom scopes added to its delegation.
 
