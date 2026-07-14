@@ -45,8 +45,12 @@ function mapVoiceMemoStreamError(error) {
 /** Cap Drive traffic hard while sync scripts/jobs run (~20 req/min). */
 const DRIVE_SCRIPT_MAX_REQUESTS_PER_MINUTE = 20;
 const DRIVE_SCRIPT_RATE_WINDOW_MS = 60 * 1000;
-/** Google allows up to 100 sub-requests per HTTP batch; keep chunks modest. */
-const DRIVE_BATCH_MAX_SUBREQUESTS = 25;
+/**
+ * Google allows up to 100 sub-requests per HTTP batch.
+ * Keep chunks at/under the script rate cap so acquireDriveRequestSlots can ever succeed
+ * (requestSlots === chunk.length; wanting more than the cap spins forever).
+ */
+const DRIVE_BATCH_MAX_SUBREQUESTS = DRIVE_SCRIPT_MAX_REQUESTS_PER_MINUTE;
 
 /** @type {number[]} */
 let driveScriptRequestTimestamps = [];
@@ -87,7 +91,11 @@ async function acquireDriveRequestSlots(count = 1) {
   if (!driveScriptRateLimitEnabled || count <= 0) {
     return;
   }
-  const want = Math.max(1, Math.floor(count));
+  // Cap at the window max — asking for more can never succeed and busy-loops.
+  const want = Math.min(
+    DRIVE_SCRIPT_MAX_REQUESTS_PER_MINUTE,
+    Math.max(1, Math.floor(count)),
+  );
   for (;;) {
     const now = Date.now();
     driveScriptRequestTimestamps = driveScriptRequestTimestamps.filter(
@@ -102,7 +110,8 @@ async function acquireDriveRequestSlots(count = 1) {
       return;
     }
     const oldest = driveScriptRequestTimestamps[0];
-    const waitMs = Math.max(DRIVE_SCRIPT_RATE_WINDOW_MS - (now - oldest) + 50, 250);
+    const elapsed = Number.isFinite(oldest) ? now - oldest : DRIVE_SCRIPT_RATE_WINDOW_MS;
+    const waitMs = Math.max(DRIVE_SCRIPT_RATE_WINDOW_MS - elapsed + 50, 250);
     console.warn(
       `[drive] pacing script traffic (${driveScriptRequestTimestamps.length}/${DRIVE_SCRIPT_MAX_REQUESTS_PER_MINUTE} req/min); waiting ${Math.ceil(waitMs / 1000)}s`,
     );
@@ -111,8 +120,9 @@ async function acquireDriveRequestSlots(count = 1) {
 }
 
 function sleep(ms) {
+  const delay = Number.isFinite(ms) ? Math.max(0, ms) : 250;
   return new Promise((resolve) => {
-    setTimeout(resolve, ms);
+    setTimeout(resolve, delay);
   });
 }
 
