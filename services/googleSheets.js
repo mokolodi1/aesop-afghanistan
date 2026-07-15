@@ -53,7 +53,8 @@ function maybeEnableSheetsScriptRateLimit(deadlineAt) {
 }
 
 function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, Math.max(0, ms)));
+  const delay = Number.isFinite(ms) ? Math.max(0, ms) : 250;
+  return new Promise((resolve) => setTimeout(resolve, delay));
 }
 
 /**
@@ -64,6 +65,7 @@ async function acquireSheetsRequestSlots(count = 1) {
   if (!sheetsScriptRateLimitEnabled || count <= 0) {
     return;
   }
+  // Cap at the window max — asking for more can never succeed and busy-loops.
   const want = Math.min(
     SHEETS_SCRIPT_MAX_REQUESTS_PER_MINUTE,
     Math.max(1, Math.floor(count)),
@@ -81,8 +83,9 @@ async function acquireSheetsRequestSlots(count = 1) {
       }
       return;
     }
-    const oldest = sheetsScriptRequestTimestamps[0] || now;
-    const waitMs = Math.max(1000, SHEETS_SCRIPT_RATE_WINDOW_MS - (now - oldest) + 50);
+    const oldest = sheetsScriptRequestTimestamps[0];
+    const elapsed = Number.isFinite(oldest) ? now - oldest : SHEETS_SCRIPT_RATE_WINDOW_MS;
+    const waitMs = Math.max(1000, SHEETS_SCRIPT_RATE_WINDOW_MS - elapsed + 50);
     console.warn(
       `[sheets] pacing script traffic (${sheetsScriptRequestTimestamps.length}/${SHEETS_SCRIPT_MAX_REQUESTS_PER_MINUTE} req/min); waiting ${Math.ceil(waitMs / 1000)}s`,
     );

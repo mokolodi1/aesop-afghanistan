@@ -98,7 +98,7 @@ const { getClientIp } = require('./utils/clientIp');
 const { securityHeaders } = require('./middleware/security');
 const { formatDingChangeTimestamp } = require('./utils/dingSheetTime');
 const { sendDingNumberUpdatedEmail, sendPortalDingHelpRequestEmail } = require('./services/email');
-const { formatErrorForLog, formatGoogleSheetsWriteErrorForLog, isGoogleSheetsForbidden, formatDbErrorMessage } = require('./utils/errorLogging');
+const { formatErrorForLog, formatGoogleDriveOperationError, formatGoogleSheetsWriteErrorForLog, isGoogleSheetsForbidden, formatDbErrorMessage } = require('./utils/errorLogging');
 const {
   createPortalMetricsMiddleware,
   createRequestLogMiddleware,
@@ -1602,15 +1602,13 @@ app.post('/api/portal-voice-memo/status', portalVoiceMemoRateLimiter, async (req
       return res.status(400).json({ error: 'Invalid ID or email.' });
     }
 
-    const refreshDuration = req.body?.refreshDuration === true;
     const status = await getPortalVoiceMemoStatus({
       userId,
       email: emailSan,
-      refreshDuration,
     });
     res.json({ success: true, ...status });
   } catch (error) {
-    console.error('Error loading portal voice memo status:', formatErrorForLog(error));
+    console.error('Error loading portal voice memo status:', formatGoogleDriveOperationError(error));
     const status = error.statusCode || 500;
     res.status(status).json({ error: error.message || 'Could not load voice memo status.' });
   }
@@ -1746,7 +1744,11 @@ function respondVoiceMemoStreamError(res, error) {
   const mapped = mapVoiceMemoStreamError(error);
   const status = mapped.statusCode || 503;
   if (!res.headersSent) {
-    res.status(status).json({ error: mapped.message || 'Could not play voice memo. Refresh the stream and try again.' });
+    res.status(status).json({
+      error:
+        mapped.message ||
+        'Your voice note is safe and submitted. We are experiencing high traffic volume and cannot play your audio right now. You may try refreshing the stream later to try again.',
+    });
     return;
   }
   res.end();
@@ -1757,7 +1759,7 @@ function writeVoiceMemoStream(res, streamResult, options = {}) {
   const download = options.download === true;
   const safeName = String(fileName || (download ? 'voice-memo.mp4' : 'voice-memo.m4a')).replace(/"/g, '');
   const downloadName = download
-    ? safeName.replace(/\.(m4a|aac|mp3|ogg|opus|wav)$/i, '.mp4')
+    ? safeName.replace(/\.(m4a|aac|mp3|ogg|oga|opus|wav)$/i, '.mp4')
     : safeName;
 
   res.status(status === 206 ? 206 : 200);

@@ -17,7 +17,8 @@ const DRIVE_RETRY_BACKOFF_CAP_MS = 60 * 1000;
 const DRIVE_RETRY_AFTER_CAP_MS = 15 * 60 * 1000;
 
 /** User-facing copy when Drive throttles on-demand portal streaming. */
-const DRIVE_TRY_AGAIN_LATER_MESSAGE = "Please try again later.";
+const DRIVE_TRY_AGAIN_LATER_MESSAGE =
+  "Your voice note is safe and submitted. We are experiencing high traffic volume and cannot play your audio right now. You may try refreshing the stream later to try again.";
 
 /**
  * Map a Drive streaming failure to a safe portal error (no internal details).
@@ -37,7 +38,7 @@ function mapVoiceMemoStreamError(error) {
       return /** @type {Error & { statusCode?: number }} */ (error);
     }
   }
-  const mapped = new Error("Could not play voice memo. Refresh the stream and try again.");
+  const mapped = new Error(DRIVE_TRY_AGAIN_LATER_MESSAGE);
   mapped.statusCode = 503;
   return mapped;
 }
@@ -45,8 +46,12 @@ function mapVoiceMemoStreamError(error) {
 /** Cap Drive traffic hard while sync scripts/jobs run (~20 req/min). */
 const DRIVE_SCRIPT_MAX_REQUESTS_PER_MINUTE = 20;
 const DRIVE_SCRIPT_RATE_WINDOW_MS = 60 * 1000;
-/** Google allows up to 100 sub-requests per HTTP batch; keep chunks modest. */
-const DRIVE_BATCH_MAX_SUBREQUESTS = 25;
+/**
+ * Google allows up to 100 sub-requests per HTTP batch.
+ * Keep chunks at/under the script rate cap so acquireDriveRequestSlots can ever succeed
+ * (requestSlots === chunk.length; wanting more than the cap spins forever).
+ */
+const DRIVE_BATCH_MAX_SUBREQUESTS = DRIVE_SCRIPT_MAX_REQUESTS_PER_MINUTE;
 
 /** @type {number[]} */
 let driveScriptRequestTimestamps = [];
@@ -81,14 +86,13 @@ function maybeEnableDriveScriptRateLimit(deadlineAt) {
 
 /**
  * Wait until the rolling minute window has room for `count` more Drive calls.
- * Caps `count` at the per-minute max so a batch can never deadlock waiting for
- * more slots than the limiter will ever grant.
  * @param {number} [count]
  */
 async function acquireDriveRequestSlots(count = 1) {
   if (!driveScriptRateLimitEnabled || count <= 0) {
     return;
   }
+  // Cap at the window max — asking for more can never succeed and busy-loops.
   const want = Math.min(
     DRIVE_SCRIPT_MAX_REQUESTS_PER_MINUTE,
     Math.max(1, Math.floor(count)),
@@ -106,9 +110,9 @@ async function acquireDriveRequestSlots(count = 1) {
       }
       return;
     }
-    // Empty window + missing oldest used to yield NaN waitMs and a tight log spin.
-    const oldest = driveScriptRequestTimestamps[0] || now;
-    const waitMs = Math.max(1000, DRIVE_SCRIPT_RATE_WINDOW_MS - (now - oldest) + 50);
+    const oldest = driveScriptRequestTimestamps[0];
+    const elapsed = Number.isFinite(oldest) ? now - oldest : DRIVE_SCRIPT_RATE_WINDOW_MS;
+    const waitMs = Math.max(DRIVE_SCRIPT_RATE_WINDOW_MS - elapsed + 50, 250);
     console.warn(
       `[drive] pacing script traffic (${driveScriptRequestTimestamps.length}/${DRIVE_SCRIPT_MAX_REQUESTS_PER_MINUTE} req/min); waiting ${Math.ceil(waitMs / 1000)}s`,
     );
@@ -117,7 +121,7 @@ async function acquireDriveRequestSlots(count = 1) {
 }
 
 function sleep(ms) {
-  const delay = Number.isFinite(ms) ? Math.max(0, ms) : 1000;
+  const delay = Number.isFinite(ms) ? Math.max(0, ms) : 250;
   return new Promise((resolve) => {
     setTimeout(resolve, delay);
   });
@@ -642,7 +646,7 @@ function resolveVoiceMemoStreamMimeType(fileName, driveMimeType) {
   if (name.endsWith(".mp3") || name.endsWith(".mpga")) {
     return "audio/mpeg";
   }
-  if (name.endsWith(".ogg")) {
+  if (name.endsWith(".ogg") || name.endsWith(".oga")) {
     return "audio/ogg";
   }
   if (name.endsWith(".opus")) {
@@ -758,7 +762,7 @@ const VOICE_MEMO_FULL_DURATION_PROBE_MAX_BYTES = 8 * 1024 * 1024;
  */
 function isLikelyAudioVoiceMemo(fileName, mimeType) {
   const name = String(fileName || "").trim().toLowerCase();
-  if (/\.(m4a|aac|acc|mp3|mpga|mpg|ogg|opus|wav|flac|mp4)$/i.test(name)) {
+  if (/\.(m4a|aac|acc|mp3|mpga|mpg|ogg|oga|opus|wav|flac|mp4)$/i.test(name)) {
     return true;
   }
   const mime = String(mimeType || "").trim().toLowerCase();
