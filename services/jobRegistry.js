@@ -94,7 +94,7 @@ const JOB_DEFINITIONS = {
       );
 
       await runMigrations();
-      const result = await refreshPortalCaches({ includeClassroom });
+      const result = await refreshPortalCaches({ includeClassroom, jobRunId: payload.jobRunId ?? null });
       if (result.mirror) {
         console.log("[hourly-cache] mirror result:", result.mirror);
       }

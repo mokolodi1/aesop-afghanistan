@@ -8,6 +8,7 @@ const {
   classifyVoiceMemoDuration,
   formatVoiceMemoDurationLabel,
   sheetVoiceMemoLengthSeconds,
+  isTrustedVoiceMemoCachedDurationSeconds,
 } = require("../utils/voiceMemoDuration");
 const {
   DEFAULT_VOICE_MEMO_FILE_EXTENSIONS,
@@ -32,6 +33,7 @@ const {
   getApplicantVoiceMemoDurationsMapFromDb,
   updateApplicantDriveDurationSeconds,
 } = require("./classroomDb");
+const { syncVoiceMemoAudioFromScan } = require("./voiceMemoAudio");
 
 const VOICE_NOTE_LINK_HEADERS = ["Voice note link", "Links"];
 const VOICE_NOTE_DATE_HEADERS = [
@@ -497,7 +499,7 @@ async function getRound1ApplicationStats() {
         : null;
     // Otherwise fall back to the DB cache when it matches this Drive file id
     // (includes browser-corrected lengths).
-    if (cachedDurationSeconds == null && cachedByFile != null && Number.isFinite(cachedByFile)) {
+    if (cachedDurationSeconds == null && isTrustedVoiceMemoCachedDurationSeconds(cachedByFile)) {
       cachedDurationSeconds = cachedByFile;
     }
     if (
@@ -505,7 +507,7 @@ async function getRound1ApplicationStats() {
       cachedByApplicant &&
       cachedByApplicant.fileId &&
       cachedByApplicant.fileId === entry.memo.fileId &&
-      Number.isFinite(cachedByApplicant.durationSeconds)
+      isTrustedVoiceMemoCachedDurationSeconds(cachedByApplicant.durationSeconds)
     ) {
       cachedDurationSeconds = cachedByApplicant.durationSeconds;
     }
@@ -718,10 +720,15 @@ async function getApplicantRowByAesopId(aesopId) {
 
   if (isDatabaseEnabled()) {
     try {
-      return await getApplicantRowByAesopIdFromDb(idKey);
+      const { isHourlyMirrorFresh } = require("./mirrorPromote");
+      if (await isHourlyMirrorFresh()) {
+        const row = await getApplicantRowByAesopIdFromDb(idKey);
+        if (row) {
+          return row;
+        }
+      }
     } catch (error) {
       console.warn("Applicants DB lookup failed:", error.message);
-      return null;
     }
   }
 
@@ -971,6 +978,18 @@ async function runVoiceMemoRound2Sync(options = {}) {
   const scan = await scanVoiceMemoFolder(folderId, { ...scanOptions, deadlineAt });
   const memoById = scan.memosById;
 
+  let audioCacheResult = { driveFiles: 0, downloaded: 0, pruned: 0, skipped: 0 };
+  try {
+    audioCacheResult = await syncVoiceMemoAudioFromScan(scan, { deadlineAt });
+    console.info(
+      `[sync-voice-memos] voice memo audio cache: driveFiles=${audioCacheResult.driveFiles}, ` +
+        `downloaded=${audioCacheResult.downloaded}, pruned=${audioCacheResult.pruned}`,
+    );
+  } catch (error) {
+    console.warn("[sync-voice-memos] voice memo audio cache failed:", error.message || error);
+    throw error;
+  }
+
   // One values.get is much lighter than worksheet.getRows() on large Applicants tabs.
   let {
     dataRows,
@@ -1080,7 +1099,7 @@ async function runVoiceMemoRound2Sync(options = {}) {
       if (!sheetLengthIsCurrent) {
         needsLength = true;
         const cached = cachedDurationByFileId.get(memo.fileId);
-        if (cached != null && Number.isFinite(cached)) {
+        if (isTrustedVoiceMemoCachedDurationSeconds(cached)) {
           lengthSeconds = Math.round(cached);
         } else {
           probeFileIds.add(memo.fileId);
@@ -1277,6 +1296,9 @@ async function runVoiceMemoRound2Sync(options = {}) {
     lengthsCleared,
     lengthsUnknown,
     lengthProbes: probeFileIds.size,
+    audioDownloaded: audioCacheResult.downloaded,
+    audioPruned: audioCacheResult.pruned,
+    audioSkipped: audioCacheResult.skipped,
     ...driveWarnings,
   };
   logVoiceMemoSyncAudit(result);

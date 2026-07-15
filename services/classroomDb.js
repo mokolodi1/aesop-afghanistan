@@ -6,6 +6,13 @@ const {
   describeMirrorTimestamp,
 } = require("./mirrorCache");
 const {
+  isHourlyMirrorFresh,
+  isApplicantsMirrorTableFresh,
+  isApplicantReviewsMirrorTableFresh,
+  describeHourlyMirrorFreshness,
+  getHourlyMirrorLastSyncedAt,
+} = require("./mirrorPromote");
+const {
   syncRuns,
   people,
   courses,
@@ -968,14 +975,7 @@ async function isClassroomMirrorFresh() {
 
 /** @returns {Promise<boolean>} */
 async function isPeopleMirrorFresh() {
-  const pool = getPool();
-  if (!pool) {
-    return false;
-  }
-  const result = await pool.query(
-    `SELECT MAX(synced_at) AS latest FROM people WHERE synced_at IS NOT NULL`,
-  );
-  return isMirrorTimestampFresh(result.rows[0]?.latest);
+  return isHourlyMirrorFresh();
 }
 
 /**
@@ -1001,20 +1001,22 @@ async function getMirrorCacheStatus() {
   let applicantReviewsStatus = { fresh: false, ageMs: null, maxAgeMs, lastSyncedAt: null };
 
   if (pool) {
-    const [peopleResult, applicantsResult, reviewsResult] = await Promise.all([
-      pool.query(`SELECT MAX(synced_at) AS latest FROM people WHERE synced_at IS NOT NULL`),
-      pool.query(`SELECT MAX(synced_at) AS latest FROM applicants WHERE synced_at IS NOT NULL`),
-      pool.query(`SELECT MAX(synced_at) AS latest FROM applicant_reviews WHERE synced_at IS NOT NULL`),
+    const [peopleFreshness, applicantsFresh, reviewsFresh] = await Promise.all([
+      describeHourlyMirrorFreshness(),
+      (async () => {
+        const lastSyncedAt = (await getHourlyMirrorLastSyncedAt()) || null;
+        const fresh = await isApplicantsMirrorTableFresh();
+        return { ...describeMirrorTimestamp(lastSyncedAt), fresh, lastSyncedAt };
+      })(),
+      (async () => {
+        const lastSyncedAt = (await getHourlyMirrorLastSyncedAt()) || null;
+        const fresh = await isApplicantReviewsMirrorTableFresh();
+        return { ...describeMirrorTimestamp(lastSyncedAt), fresh, lastSyncedAt };
+      })(),
     ]);
-    const peopleLatest = peopleResult.rows[0]?.latest || null;
-    const applicantsLatest = applicantsResult.rows[0]?.latest || null;
-    const reviewsLatest = reviewsResult.rows[0]?.latest || null;
-    people = { ...describeMirrorTimestamp(peopleLatest), lastSyncedAt: peopleLatest };
-    applicants = { ...describeMirrorTimestamp(applicantsLatest), lastSyncedAt: applicantsLatest };
-    applicantReviewsStatus = {
-      ...describeMirrorTimestamp(reviewsLatest),
-      lastSyncedAt: reviewsLatest,
-    };
+    people = peopleFreshness;
+    applicants = applicantsFresh;
+    applicantReviewsStatus = reviewsFresh;
   }
 
   return { maxAgeMs, classroom, people, applicants, applicantReviews: applicantReviewsStatus };
@@ -1293,14 +1295,7 @@ async function updateApplicantDriveDurationSeconds(aesopId, fields = {}) {
 
 /** @returns {Promise<boolean>} */
 async function isApplicantsTableMirrorFresh() {
-  const pool = getPool();
-  if (!pool) {
-    return false;
-  }
-  const result = await pool.query(
-    `SELECT MAX(synced_at) AS latest FROM applicants WHERE synced_at IS NOT NULL`,
-  );
-  return isMirrorTimestampFresh(result.rows[0]?.latest);
+  return isApplicantsMirrorTableFresh();
 }
 
 /**
@@ -1372,7 +1367,7 @@ async function getApplicantVoiceMemoDurationsMapFromDb() {
     const aesopKey = String(row.aesop_key || "").trim().toLowerCase();
     const fileId = String(row.drive_file_id || "").trim();
     const durationRaw = Number(row.drive_duration_seconds);
-    if (!aesopKey || !Number.isFinite(durationRaw) || durationRaw < 0) {
+    if (!aesopKey || !Number.isFinite(durationRaw) || durationRaw <= 0) {
       continue;
     }
     byAesopId.set(aesopKey, {
@@ -1440,14 +1435,7 @@ async function isListedAsApplicantReviewerFromDb(reviewerAesopId) {
 
 /** @returns {Promise<boolean>} */
 async function isApplicantReviewsMirrorFresh() {
-  const pool = getPool();
-  if (!pool) {
-    return false;
-  }
-  const result = await pool.query(
-    `SELECT MAX(synced_at) AS latest FROM applicant_reviews WHERE synced_at IS NOT NULL`,
-  );
-  return isMirrorTimestampFresh(result.rows[0]?.latest);
+  return isApplicantReviewsMirrorTableFresh();
 }
 
 /**

@@ -7,11 +7,11 @@ const { runClassroomSync } = require("./classroomSync");
 /**
  * Refresh Postgres mirror caches from Google Sheets, Drive, and optionally Classroom.
  *
- * When Classroom sync is enabled and included, it runs the full Classroom pull
- * (which also re-mirrors People/Ding at the end). Otherwise only the hourly
- * People/Ding/Applicants/Drive mirror runs.
+ * When Classroom sync is enabled and included, it runs the full Classroom pull only.
+ * Otherwise the hourly People/Ding/Applicants/Drive mirror runs (staging + promote
+ * when MIRROR_USE_STAGING=true).
  *
- * @param {{ includeClassroom?: boolean }} [options]
+ * @param {{ includeClassroom?: boolean, jobRunId?: number|null }} [options]
  * @returns {Promise<{
  *   mirror: { people: number, dingNumbers: number, dingHistory: number, applicants: number, driveFiles: number }|null,
  *   classroom: { courses: number, teachers: number, students: number, gradeRows: number }|null,
@@ -35,7 +35,7 @@ async function refreshPortalCaches(options = {}) {
   if (includeClassroom) {
     classroom = await runClassroomSync();
   } else {
-    mirror = await mirrorPeopleAndDingFromSheets();
+    mirror = await mirrorPeopleAndDingFromSheets({ jobRunId: options.jobRunId ?? null });
   }
 
   const mirrorCache = await getMirrorCacheStatus();

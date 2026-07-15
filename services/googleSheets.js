@@ -1084,8 +1084,9 @@ async function findProfileById(userId) {
 
   if (isDatabaseEnabled()) {
     try {
+      const { isHourlyMirrorFresh } = require("./mirrorPromote");
       const person = await getPersonByAesopId(idKey);
-      if (person?.email && isPeopleIdentityFresh(person)) {
+      if (person?.email && (await isHourlyMirrorFresh()) && isPeopleIdentityFresh(person)) {
         const profile = personRowToProfile(person);
         // Admin status lives in People column S and is authoritative there. A
         // stale DB mirror must never strip admin access, so upgrade from the
@@ -1239,10 +1240,15 @@ async function findLatestDingNumberById(userId) {
 
   if (isDatabaseEnabled()) {
     try {
-      return await findLatestDingNumberByAesopIdFromDb(idKey);
+      const { isHourlyMirrorFresh } = require("./mirrorPromote");
+      if (await isHourlyMirrorFresh()) {
+        const fromDb = await findLatestDingNumberByAesopIdFromDb(idKey);
+        if (fromDb) {
+          return fromDb;
+        }
+      }
     } catch (error) {
       console.warn("Latest Ding DB lookup failed:", error.message);
-      return null;
     }
   }
 

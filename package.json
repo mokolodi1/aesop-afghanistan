@@ -18,7 +18,8 @@
     "db:migrate": "node db/migrate.js",
     "db:rebuild-people": "node scripts/rebuild-people-from-sheets.js",
     "db:mirror-people": "node scripts/mirror-people-ding.js",
-    "mirror:applicants-drive": "node scripts/mirror-applicants-drive.js"
+    "mirror:applicants-drive": "node scripts/mirror-applicants-drive.js",
+    "test": "node --test test/*.test.js"
   },
   "engines": {
     "node": ">=18.0.0"

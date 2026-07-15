@@ -36,10 +36,24 @@ function sheetVoiceMemoLengthSeconds(seconds, limits = {}) {
     return null;
   }
   const rounded = Math.round(seconds);
+  // Sub-second probes round to 0; never persist that as a real length.
+  if (rounded <= 0) {
+    return null;
+  }
   if (classifyVoiceMemoDuration(rounded, limits) === "too_long") {
     return VOICE_MEMO_OVERACHIEVE_SHEET_SECONDS;
   }
   return rounded;
+}
+
+/**
+ * Cached Drive/sheet lengths of 0 came from bad mislabeled-file probes and should
+ * be recomputed instead of reused.
+ * @param {number|null|undefined} seconds
+ * @returns {boolean}
+ */
+function isTrustedVoiceMemoCachedDurationSeconds(seconds) {
+  return seconds != null && Number.isFinite(seconds) && seconds > 0;
 }
 
 /**
@@ -107,4 +121,5 @@ module.exports = {
   voiceMemoDurationWarning,
   formatVoiceMemoDurationLabel,
   voiceMemoDurationsDiffer,
+  isTrustedVoiceMemoCachedDurationSeconds,
 };

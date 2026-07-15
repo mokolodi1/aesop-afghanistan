@@ -6,8 +6,10 @@ const {
   voiceMemoDurationWarning,
   formatVoiceMemoDurationLabel,
   sheetVoiceMemoLengthSeconds,
+  isTrustedVoiceMemoCachedDurationSeconds,
 } = require("../utils/voiceMemoDuration");
-const { streamVoiceMemoFile, extractDriveFileIdFromLink } = require("./googleDrive");
+const { extractDriveFileIdFromLink } = require("./googleDrive");
+const { streamVoiceMemoFromCache } = require("./voiceMemoAudio");
 const { updateApplicantDriveDurationSeconds, getPersonByAesopId, personRowToProfile } = require("./classroomDb");
 const {
   getApplicantRowByAesopId,
@@ -278,12 +280,15 @@ function resolveVoiceMemoRecordingFromApplicantCache(applicant, durationLimits) 
   const linkFileId = extractDriveFileIdFromLink(applicant?.links);
   const durationMatchesFile =
     driveFile.fileId === cachedFileId || driveFile.fileId === linkFileId;
-  const cachedDurationSeconds =
+  const rawDurationSeconds =
     durationMatchesFile &&
     applicant.driveDurationSeconds != null &&
     Number.isFinite(Number(applicant.driveDurationSeconds))
       ? Number(applicant.driveDurationSeconds)
       : null;
+  const cachedDurationSeconds = isTrustedVoiceMemoCachedDurationSeconds(rawDurationSeconds)
+    ? rawDurationSeconds
+    : null;
   const durationSeconds =
     cachedDurationSeconds == null
       ? null
@@ -480,7 +485,7 @@ async function streamVoiceMemoForUserId(userId, rangeHeader = "") {
     throw error;
   }
 
-  return streamVoiceMemoFile(driveFile.fileId, rangeHeader);
+  return streamVoiceMemoFromCache(driveFile.fileId, rangeHeader);
 }
 
 async function getPortalVoiceMemoStream({ userId, email, rangeHeader = "" }) {
@@ -528,7 +533,7 @@ async function getReviewVoiceMemoStreamByToken({ token, rangeHeader = "" }) {
     throw error;
   }
 
-  return streamVoiceMemoFile(driveFile.fileId, rangeHeader);
+  return streamVoiceMemoFromCache(driveFile.fileId, rangeHeader);
 }
 
 /**

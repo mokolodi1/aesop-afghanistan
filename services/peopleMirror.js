@@ -29,7 +29,12 @@ const {
   readApplicantRound2Prompt,
   parseVoiceMemoSheetLengthSeconds,
 } = require("./voiceMemoSync");
-const { sheetVoiceMemoLengthSeconds } = require("../utils/voiceMemoDuration");
+const { useMirrorStaging } = require("./mirrorPromote");
+const { syncVoiceMemoAudioFromScan } = require("./voiceMemoAudio");
+const {
+  sheetVoiceMemoLengthSeconds,
+  isTrustedVoiceMemoCachedDurationSeconds,
+} = require("../utils/voiceMemoDuration");
 const {
   scanVoiceMemoFolder,
   resolveVoiceMemoDurationsMap,
@@ -509,8 +514,18 @@ async function mirrorApplicantsAndDriveFromSheets() {
 
   if (folderId) {
     const scanOptions = getVoiceMemoDriveScanOptions(cfg.voiceMemo);
-    const scan = await scanVoiceMemoFolder(folderId, { ...scanOptions, deadlineAt });
-    memoById = scan.memosById;
+    const driveScan = await scanVoiceMemoFolder(folderId, { ...scanOptions, deadlineAt });
+    memoById = driveScan.memosById;
+    try {
+      const audioResult = await syncVoiceMemoAudioFromScan(driveScan, { deadlineAt });
+      console.info(
+        `[mirror] voice memo audio cache: driveFiles=${audioResult.driveFiles}, ` +
+          `downloaded=${audioResult.downloaded}, pruned=${audioResult.pruned}`,
+      );
+    } catch (error) {
+      console.warn("[mirror] voice memo audio cache failed:", error.message || error);
+      throw error;
+    }
   }
 
   // Durations come from the sheet's "Voice memo length (secs)" column (when its
@@ -571,7 +586,7 @@ async function mirrorApplicantsAndDriveFromSheets() {
       if (sheetLengthSeconds != null && sheetLinkFileId === driveFileId) {
         driveDurationSeconds = sheetVoiceMemoLengthSeconds(sheetLengthSeconds, durationLimits);
         durationsFromSheet += 1;
-      } else if (cached != null && Number.isFinite(cached)) {
+      } else if (isTrustedVoiceMemoCachedDurationSeconds(cached)) {
         driveDurationSeconds = sheetVoiceMemoLengthSeconds(cached, durationLimits);
         durationsFromDb += 1;
       } else {
@@ -687,10 +702,21 @@ async function mirrorApplicantReviewsFromSheets() {
 }
 
 /**
- * @param {{ includeDingHistory?: boolean }} [options]
+ * @param {{ includeDingHistory?: boolean, jobRunId?: number|null }} [options]
  *   includeDingHistory — mirror full Ding change history (heavy; use daily sync only).
  */
 async function mirrorPeopleAndDingFromSheets(options = {}) {
+  if (useMirrorStaging()) {
+    const { mirrorPeopleAndDingViaStaging } = require("./mirrorStaging");
+    const stagingResult = await mirrorPeopleAndDingViaStaging(options);
+    if (options.includeDingHistory === true) {
+      const applicantIdSet = await loadApplicantAesopIdSetFromSheets();
+      const historyResult = await mirrorDingHistoryFromSheets({}, applicantIdSet);
+      return { ...stagingResult, dingHistory: historyResult.mirrored };
+    }
+    return stagingResult;
+  }
+
   const applicantIdSet = await loadApplicantAesopIdSetFromSheets();
   const peopleResult = await mirrorAllPeopleFromSheets();
   const dingResult = await mirrorDingNumbersFromSheets(applicantIdSet);
@@ -779,4 +805,9 @@ module.exports = {
   mirrorPeopleAndDingFromSheets,
   upsertPersonFromSheetProfile,
   getPersonIdByAesopId,
+  findExistingPersonId,
+  buildPersonInsertParams,
+  INSERT_PERSON_FROM_SHEET_SQL,
+  UPDATE_PERSON_FROM_SHEET_SQL,
+  logPeopleMirrorDedupeStats,
 };

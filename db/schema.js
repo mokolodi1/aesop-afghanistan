@@ -379,9 +379,88 @@ const portalMetricBuckets = pgTable(
   }),
 );
 
+const mirrorSyncRuns = pgTable(
+  "mirror_sync_runs",
+  {
+    id: serial("id").primaryKey(),
+    jobRunId: integer("job_run_id").references(() => jobRuns.id),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+    status: varchar("status", { length: 20 }).notNull(),
+    peopleCount: integer("people_count"),
+    dingCount: integer("ding_count"),
+    applicantsCount: integer("applicants_count"),
+    applicantReviewsCount: integer("applicant_reviews_count"),
+    error: text("error"),
+  },
+  (table) => ({
+    statusFinishedIdx: index("mirror_sync_runs_status_finished_idx").on(table.status, table.finishedAt),
+  }),
+);
+
+const peopleStaging = pgTable("people_staging", {
+  identityKey: varchar("identity_key", { length: 512 }).primaryKey(),
+  aesopId: varchar("aesop_id", { length: 64 }),
+  email: varchar("email", { length: 320 }).notNull(),
+  name: varchar("name", { length: 255 }),
+  phone: varchar("phone", { length: 64 }),
+  portalRole: varchar("portal_role", { length: 20 }),
+  reviewerRole: varchar("reviewer_role", { length: 64 }),
+  peopleType: text("people_type"),
+  adminRole: varchar("admin_role", { length: 64 }),
+  peopleStatus: varchar("people_status", { length: 64 }),
+  lastLogin: varchar("last_login", { length: 128 }),
+  pastDing: text("past_ding"),
+  sheetRow: jsonb("sheet_row"),
+});
+
+const dingNumbersStaging = pgTable("ding_numbers_staging", {
+  identityKey: varchar("identity_key", { length: 512 }).primaryKey(),
+  number: varchar("number", { length: 32 }).notNull(),
+});
+
+const applicantsStaging = pgTable("applicants_staging", {
+  aesopId: varchar("aesop_id", { length: 64 }).primaryKey(),
+  email: varchar("email", { length: 320 }),
+  name: varchar("name", { length: 255 }),
+  appliedLevel: varchar("applied_level", { length: 64 }),
+  age: varchar("age", { length: 64 }),
+  essay: text("essay"),
+  round1: varchar("round1", { length: 64 }),
+  round2: varchar("round2", { length: 64 }),
+  round2Prompt: text("round2_prompt"),
+  applicantLinks: text("applicant_links"),
+  submittedAt: varchar("submitted_at", { length: 128 }),
+  driveFileId: varchar("drive_file_id", { length: 128 }),
+  driveFileName: varchar("drive_file_name", { length: 255 }),
+  driveDurationSeconds: integer("drive_duration_seconds"),
+});
+
+const applicantReviewsStaging = pgTable("applicant_reviews_staging", {
+  aesopId: varchar("aesop_id", { length: 64 }).primaryKey(),
+  reviewerA: varchar("reviewer_a", { length: 64 }),
+  reviewerB: varchar("reviewer_b", { length: 64 }),
+  aEnglishLevel: varchar("a_english_level", { length: 32 }),
+  aSuspectedAi: varchar("a_suspected_ai", { length: 32 }),
+  aInstructionFollowing: varchar("a_instruction_following", { length: 32 }),
+  aOriginalThinking: varchar("a_original_thinking", { length: 32 }),
+  aCharacter: varchar("a_character", { length: 32 }),
+  bEnglishLevel: varchar("b_english_level", { length: 32 }),
+  bSuspectedAi: varchar("b_suspected_ai", { length: 32 }),
+  bInstructionFollowing: varchar("b_instruction_following", { length: 32 }),
+  bOriginalThinking: varchar("b_original_thinking", { length: 32 }),
+  bCharacter: varchar("b_character", { length: 32 }),
+  sheetRowNumber: integer("sheet_row_number"),
+});
+
 module.exports = {
   syncRuns,
+  mirrorSyncRuns,
   people,
+  peopleStaging,
+  dingNumbersStaging,
+  applicantsStaging,
+  applicantReviewsStaging,
   applicants,
   applicantReviews,
   courses,

@@ -154,7 +154,7 @@ async function main() {
   );
   const startedMs = Date.now();
   try {
-    const result = await definition.run(payload);
+    const result = await definition.run({ ...payload, jobRunId: runId });
     console.log(`[run-job] ${jobName} succeeded in ${Math.round((Date.now() - startedMs) / 1000)}s.`);
     if (flusher) {
       clearInterval(flusher);
