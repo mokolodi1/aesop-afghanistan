@@ -1,8 +1,13 @@
 const { spawn } = require("child_process");
 const { PassThrough, Readable } = require("stream");
+const { sniffVoiceMemoMimeTypeFromBuffer } = require("./voiceMemoContentType");
+const { voiceMemoExtensionFromFileName } = require("./voiceMemoExtensions");
 
 /** Extensions that browsers may not play reliably; normalize to m4a when ffmpeg is available. */
 const VOICE_MEMO_TRANSCODE_EXTENSIONS = new Set(["acc", "mpg", "mpga"]);
+
+/** Codecs that <audio> can usually play inside MP4 without server-side re-encode. */
+const BROWSER_SAFE_MP4_AUDIO_CODECS = new Set(["aac", "mp3"]);
 
 /** @type {boolean|null} */
 let ffmpegAvailableCache = null;
@@ -32,6 +37,166 @@ async function isFfmpegAvailable() {
     child.on("close", (code) => resolve(code === 0));
   });
   return ffmpegAvailableCache;
+}
+
+/**
+ * @param {Buffer} buffer
+ * @returns {string|null}
+ */
+function getMp4FtypBrand(buffer) {
+  if (!isMp4FamilyBuffer(buffer) || buffer.length < 12) {
+    return null;
+  }
+  return buffer.subarray(8, 12).toString("ascii");
+}
+
+/**
+ * @param {Buffer} buffer
+ * @returns {Promise<string|null>}
+ */
+async function probeVoiceMemoAudioCodecName(buffer) {
+  if (!(await isFfmpegAvailable()) || !buffer || buffer.length === 0) {
+    return null;
+  }
+
+  return new Promise((resolve) => {
+    const child = spawn(
+      "ffprobe",
+      [
+        "-v",
+        "error",
+        "-select_streams",
+        "a:0",
+        "-show_entries",
+        "stream=codec_name",
+        "-of",
+        "csv=p=0",
+        "-i",
+        "pipe:0",
+      ],
+      { stdio: ["pipe", "pipe", "ignore"] },
+    );
+    let output = "";
+    child.stdout.on("data", (chunk) => {
+      output += String(chunk || "");
+    });
+    child.on("error", () => resolve(null));
+    child.on("close", () => {
+      resolve(String(output).trim().toLowerCase() || null);
+    });
+    child.stdin.end(buffer);
+  });
+}
+
+/**
+ * Signal/Android voice notes are often 3GP containers with AMR audio that browsers
+ * reject as audio/mp4 even when range streaming succeeds.
+ * @param {Buffer} buffer
+ * @param {string} [fileName]
+ * @returns {Promise<boolean>}
+ */
+async function voiceMemoNeedsBrowserPlaybackTranscode(buffer, fileName = "") {
+  const extension = voiceMemoExtensionFromFileName(fileName);
+  if (extension != null && voiceMemoNeedsTranscodeForPlayback(extension)) {
+    return true;
+  }
+
+  const sniffedMimeType = sniffVoiceMemoMimeTypeFromBuffer(buffer);
+  if (
+    sniffedMimeType === "audio/ogg" ||
+    sniffedMimeType === "audio/opus" ||
+    sniffedMimeType === "audio/flac" ||
+    sniffedMimeType === "audio/wav"
+  ) {
+    return true;
+  }
+
+  if (!isMp4FamilyBuffer(buffer)) {
+    return false;
+  }
+
+  const brand = getMp4FtypBrand(buffer);
+  if (brand && /^3gp/i.test(brand)) {
+    return true;
+  }
+
+  const codecName = await probeVoiceMemoAudioCodecName(buffer);
+  if (codecName && !BROWSER_SAFE_MP4_AUDIO_CODECS.has(codecName)) {
+    console.warn(
+      `[voice-memo-transcode] codec ${codecName} in ${fileName || "voice memo"} needs browser transcode`,
+    );
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * @param {Buffer} buffer
+ * @param {string[]} ffmpegArgs
+ * @returns {Promise<Buffer>}
+ */
+function runFfmpegBufferTransform(buffer, ffmpegArgs) {
+  return new Promise((resolve) => {
+    const input = Readable.from(buffer);
+    /** @type {Buffer[]} */
+    const chunks = [];
+    const ffmpeg = spawn("ffmpeg", ffmpegArgs, { stdio: ["pipe", "pipe", "pipe"] });
+
+    const finish = (result) => {
+      input.destroy();
+      ffmpeg.kill("SIGKILL");
+      resolve(result);
+    };
+
+    ffmpeg.stdout.on("data", (chunk) => {
+      chunks.push(chunk);
+    });
+    ffmpeg.stderr.on("data", (chunk) => {
+      const message = String(chunk || "").trim();
+      if (message) {
+        console.warn("[voice-memo-transcode]", message);
+      }
+    });
+    ffmpeg.on("error", () => finish(buffer));
+    ffmpeg.on("close", (code) => {
+      if (code === 0 && chunks.length > 0) {
+        finish(Buffer.concat(chunks));
+        return;
+      }
+      finish(buffer);
+    });
+    input.on("error", () => finish(buffer));
+    input.pipe(ffmpeg.stdin);
+    ffmpeg.stdin.on("error", () => {});
+  });
+}
+
+/**
+ * Re-encode any voice memo to AAC-in-MP4 with faststart for cache storage.
+ * @param {Buffer} buffer
+ * @returns {Promise<Buffer>}
+ */
+async function transcodeVoiceMemoToM4aBuffer(buffer) {
+  if (!(await isFfmpegAvailable()) || !buffer || buffer.length === 0) {
+    return buffer;
+  }
+
+  return runFfmpegBufferTransform(buffer, [
+    "-hide_banner",
+    "-loglevel",
+    "error",
+    "-i",
+    "pipe:0",
+    "-vn",
+    "-c:a",
+    "aac",
+    "-movflags",
+    "+faststart",
+    "-f",
+    "mp4",
+    "pipe:1",
+  ]);
 }
 
 /**
@@ -119,66 +284,32 @@ async function remuxVoiceMemoMp4Faststart(buffer) {
     return buffer;
   }
 
-  return new Promise((resolve) => {
-    const input = Readable.from(buffer);
-    /** @type {Buffer[]} */
-    const chunks = [];
-    const ffmpeg = spawn(
-      "ffmpeg",
-      [
-        "-hide_banner",
-        "-loglevel",
-        "error",
-        "-i",
-        "pipe:0",
-        "-c",
-        "copy",
-        "-movflags",
-        "+faststart",
-        "-f",
-        "mp4",
-        "pipe:1",
-      ],
-      { stdio: ["pipe", "pipe", "pipe"] },
-    );
-
-    const finish = (result) => {
-      input.destroy();
-      ffmpeg.kill("SIGKILL");
-      resolve(result);
-    };
-
-    ffmpeg.stdout.on("data", (chunk) => {
-      chunks.push(chunk);
-    });
-    ffmpeg.stderr.on("data", (chunk) => {
-      const message = String(chunk || "").trim();
-      if (message) {
-        console.warn("[voice-memo-transcode]", message);
-      }
-    });
-    ffmpeg.on("error", () => {
-      finish(buffer);
-    });
-    ffmpeg.on("close", (code) => {
-      if (code === 0 && chunks.length > 0) {
-        finish(Buffer.concat(chunks));
-        return;
-      }
-      finish(buffer);
-    });
-
-    input.on("error", () => finish(buffer));
-    input.pipe(ffmpeg.stdin);
-    ffmpeg.stdin.on("error", () => {});
-  });
+  return runFfmpegBufferTransform(buffer, [
+    "-hide_banner",
+    "-loglevel",
+    "error",
+    "-i",
+    "pipe:0",
+    "-c",
+    "copy",
+    "-movflags",
+    "+faststart",
+    "-f",
+    "mp4",
+    "pipe:1",
+  ]);
 }
 
 module.exports = {
   VOICE_MEMO_TRANSCODE_EXTENSIONS,
+  BROWSER_SAFE_MP4_AUDIO_CODECS,
   voiceMemoNeedsTranscodeForPlayback,
+  voiceMemoNeedsBrowserPlaybackTranscode,
+  probeVoiceMemoAudioCodecName,
+  getMp4FtypBrand,
   isFfmpegAvailable,
   isMp4FamilyBuffer,
   transcodeVoiceMemoToM4aStream,
+  transcodeVoiceMemoToM4aBuffer,
   remuxVoiceMemoMp4Faststart,
 };
