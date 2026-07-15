@@ -1063,6 +1063,42 @@ function personRowToProfile(person) {
 }
 
 /**
+ * Update people.reviewer_role immediately after a People-sheet Reviewer column write.
+ * @param {{ aesopId?: string, email?: string, reviewerRole: string|null }} params
+ * @returns {Promise<boolean>}
+ */
+async function updatePeopleReviewerRoleInDb({ aesopId, email, reviewerRole }) {
+  const db = getDb();
+  if (!db) {
+    return false;
+  }
+  const idKey = typeof aesopId === "string" ? aesopId.trim().toLowerCase() : "";
+  const emailKey = normalizeEmail(email);
+  if (!idKey && !emailKey) {
+    return false;
+  }
+  const value =
+    reviewerRole == null || String(reviewerRole).trim() === ""
+      ? null
+      : String(reviewerRole).trim();
+  const now = new Date();
+  if (idKey) {
+    const updated = await db
+      .update(people)
+      .set({ reviewerRole: value, syncedAt: now })
+      .where(sql`lower(${people.aesopId}) = ${idKey}`)
+      .returning({ id: people.id });
+    return updated.length > 0;
+  }
+  const updated = await db
+    .update(people)
+    .set({ reviewerRole: value, syncedAt: now })
+    .where(eq(people.email, emailKey))
+    .returning({ id: people.id });
+  return updated.length > 0;
+}
+
+/**
  * @param {{ syncedAt?: Date|string|null }} applicant
  * @returns {boolean}
  */
@@ -1268,7 +1304,7 @@ async function isApplicantsTableMirrorFresh() {
 }
 
 /**
- * @returns {Promise<Map<string, { age: string, essay: string, driveFileId: string }>|null>}
+ * @returns {Promise<Map<string, { age: string, essay: string, round2: string, round2Prompt: string, links: string, driveFileId: string, driveDurationSeconds: number|null }>|null>}
  */
 async function getApplicantsReviewFieldsMapFromDb() {
   const pool = getPool();
@@ -1277,12 +1313,13 @@ async function getApplicantsReviewFieldsMapFromDb() {
   }
 
   const result = await pool.query(
-    `SELECT lower(aesop_id) AS aesop_key, age, essay, drive_file_id, drive_duration_seconds
+    `SELECT lower(aesop_id) AS aesop_key, age, essay, round2, round2_prompt, applicant_links,
+            drive_file_id, drive_duration_seconds
      FROM applicants
      WHERE aesop_id IS NOT NULL AND trim(aesop_id) <> ''`,
   );
 
-  /** @type {Map<string, { age: string, essay: string, driveFileId: string, driveDurationSeconds: number|null }>} */
+  /** @type {Map<string, { age: string, essay: string, round2: string, round2Prompt: string, links: string, driveFileId: string, driveDurationSeconds: number|null }>} */
   const byId = new Map();
   for (const row of result.rows) {
     const key = String(row.aesop_key || "").trim().toLowerCase();
@@ -1293,6 +1330,9 @@ async function getApplicantsReviewFieldsMapFromDb() {
     byId.set(key, {
       age: String(row.age ?? "").trim(),
       essay: String(row.essay ?? "").trim(),
+      round2: String(row.round2 ?? "").trim(),
+      round2Prompt: String(row.round2_prompt ?? "").trim(),
+      links: String(row.applicant_links ?? "").trim(),
       driveFileId: String(row.drive_file_id ?? "").trim(),
       driveDurationSeconds: Number.isFinite(durationRaw) ? durationRaw : null,
     });
@@ -1539,6 +1579,9 @@ async function getReviewAssignmentsForReviewerFromDb(reviewerAesopId) {
        ar.b_character,
        a.age,
        a.essay,
+       a.round2,
+       a.round2_prompt,
+       a.applicant_links,
        a.drive_file_id,
        a.drive_duration_seconds
      FROM applicant_reviews ar
@@ -1556,6 +1599,7 @@ module.exports = {
   parseGradePercent,
   getPersonByEmail,
   getPersonByAesopId,
+  updatePeopleReviewerRoleInDb,
   getPortalMirrorMaxAgeMs,
   getMirrorCacheStatus,
   isClassroomMirrorFresh,

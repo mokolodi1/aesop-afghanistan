@@ -17,10 +17,13 @@ const {
   mintReviewVoiceStreamToken,
 } = require("./portalVoiceMemo");
 const { classifyVoiceMemoDuration } = require("../utils/voiceMemoDuration");
-const { getVoiceMemoDurationLimits } = require("./voiceMemoSync");
+const {
+  getVoiceMemoDurationLimits,
+} = require("./voiceMemoSync");
+const { extractDriveFileIdFromLink } = require("./googleDrive");
 
-const ENGLISH_LEVELS = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"];
-const FITNESS_SCORES = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"];
+const ENGLISH_LEVELS = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"];
+const FITNESS_SCORES = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"];
 const FITNESS_CRITERIA = ["instructionFollowing", "originalThinking", "character"];
 const SUSPECTED_AI_SHEET_VALUE = "Suspected AI";
 const LEGACY_FLAGGED_AI_LEVEL = "Flagged for AI";
@@ -41,7 +44,7 @@ function normalizeEnglishLevel(value) {
     return "";
   }
   const asNumber = Number.parseInt(trimmed, 10);
-  if (Number.isFinite(asNumber) && asNumber >= 1 && asNumber <= 10) {
+  if (Number.isFinite(asNumber) && asNumber >= 0 && asNumber <= 10) {
     return String(asNumber);
   }
   return ENGLISH_LEVELS.find((level) => level === trimmed) || "";
@@ -76,7 +79,7 @@ function normalizeFitnessScore(value) {
     return trimmed;
   }
   const asNumber = Number.parseInt(trimmed, 10);
-  if (Number.isFinite(asNumber) && asNumber >= 1 && asNumber <= 10) {
+  if (Number.isFinite(asNumber) && asNumber >= 0 && asNumber <= 10) {
     return String(asNumber);
   }
   return "";
@@ -187,7 +190,31 @@ function getApplicantsReviewConfig() {
 }
 
 /**
- * @returns {Promise<Map<string, { age: string, essay: string, driveFileId: string, driveDurationSeconds: number|null }>>}
+ * Reviewer player should appear whenever there is evidence of a voice memo,
+ * not only when applicants.drive_file_id is already cached.
+ * @param {{ driveFileId?: string|null, round2?: string|null, links?: string|null }} fields
+ * @returns {boolean}
+ */
+function applicantHasReviewVoiceMemo(fields = {}) {
+  if (String(fields.driveFileId || "").trim()) {
+    return true;
+  }
+  if (extractDriveFileIdFromLink(fields.links)) {
+    return true;
+  }
+  const submittedValue = String(
+    config.voiceMemo?.submittedValue || "Submitted",
+  )
+    .trim()
+    .toLowerCase();
+  if (String(fields.round2 || "").trim().toLowerCase() === submittedValue) {
+    return true;
+  }
+  return Boolean(String(fields.links || "").trim());
+}
+
+/**
+ * @returns {Promise<Map<string, { age: string, essay: string, round2: string, round2Prompt: string, links: string, driveFileId: string, driveDurationSeconds: number|null }>>}
  */
 async function loadApplicantsByIdMap() {
   if (isDatabaseEnabled()) {
@@ -206,7 +233,7 @@ async function loadApplicantsByIdMap() {
 
   await worksheet.loadHeaderRow(cfg.headerRowNum);
   const rows = await worksheet.getRows();
-  /** @type {Map<string, { age: string, essay: string, driveFileId: string, driveDurationSeconds: number|null }>} */
+  /** @type {Map<string, { age: string, essay: string, round2: string, round2Prompt: string, links: string, driveFileId: string, driveDurationSeconds: number|null }>} */
   const byId = new Map();
 
   for (const row of rows) {
@@ -218,6 +245,9 @@ async function loadApplicantsByIdMap() {
     byId.set(normalizeAesopIdKey(aesopId), {
       age: String(rowData[cfg.ageColumnIndex] ?? "").trim(),
       essay: String(rowData[cfg.essayColumnIndex] ?? "").trim(),
+      round2: "",
+      round2Prompt: "",
+      links: "",
       driveFileId: "",
       driveDurationSeconds: null,
     });
@@ -284,10 +314,10 @@ function classifyReviewVoiceDuration(durationSeconds) {
 /**
  * @param {Array<Record<string, unknown>>} rows
  * @param {string} reviewerKey
- * @returns {Array<{ applicantId: string, age: string, essay: string, slot: 'A'|'B', englishLevel: string, suspectedAi: boolean, instructionFollowing: string, originalThinking: string, character: string, hasVoiceMemo: boolean, durationStatus: 'valid'|'too_short'|'too_long'|'unknown' }>}
+ * @returns {Array<{ applicantId: string, age: string, essay: string, round2Prompt: string, slot: 'A'|'B', englishLevel: string, suspectedAi: boolean, instructionFollowing: string, originalThinking: string, character: string, hasVoiceMemo: boolean, durationStatus: 'valid'|'too_short'|'too_long'|'unknown' }>}
  */
 function mapReviewAssignmentsFromDbRows(rows, reviewerKey) {
-  /** @type {Array<{ applicantId: string, age: string, essay: string, slot: 'A'|'B', englishLevel: string, suspectedAi: boolean, instructionFollowing: string, originalThinking: string, character: string, hasVoiceMemo: boolean, durationStatus: 'valid'|'too_short'|'too_long'|'unknown' }>} */
+  /** @type {Array<{ applicantId: string, age: string, essay: string, round2Prompt: string, slot: 'A'|'B', englishLevel: string, suspectedAi: boolean, instructionFollowing: string, originalThinking: string, character: string, hasVoiceMemo: boolean, durationStatus: 'valid'|'too_short'|'too_long'|'unknown' }>} */
   const assignments = [];
 
   for (const row of rows) {
@@ -309,6 +339,8 @@ function mapReviewAssignmentsFromDbRows(rows, reviewerKey) {
 
     const reviewFields = readReviewFieldsFromDbRow(row, slot);
     const driveFileId = String(row.drive_file_id ?? "").trim();
+    const round2 = String(row.round2 ?? "").trim();
+    const links = String(row.applicant_links ?? "").trim();
     const durationRaw = Number(row.drive_duration_seconds);
     const durationSeconds = Number.isFinite(durationRaw) ? durationRaw : null;
 
@@ -316,9 +348,10 @@ function mapReviewAssignmentsFromDbRows(rows, reviewerKey) {
       applicantId,
       age: String(row.age ?? "").trim(),
       essay: String(row.essay ?? "").trim(),
+      round2Prompt: String(row.round2_prompt ?? "").trim(),
       slot,
       ...reviewFields,
-      hasVoiceMemo: Boolean(driveFileId),
+      hasVoiceMemo: applicantHasReviewVoiceMemo({ driveFileId, round2, links }),
       durationStatus: classifyReviewVoiceDuration(durationSeconds),
     });
   }
@@ -342,7 +375,7 @@ async function loadReviewAssignmentsForReviewerFromSheets(reviewerKey) {
   const rows = await worksheet.getRows();
   const applicantsById = await loadApplicantsByIdMap();
 
-  /** @type {Array<{ applicantId: string, age: string, essay: string, slot: 'A'|'B', englishLevel: string, suspectedAi: boolean, instructionFollowing: string, originalThinking: string, character: string, hasVoiceMemo: boolean, durationStatus: 'valid'|'too_short'|'too_long'|'unknown' }>} */
+  /** @type {Array<{ applicantId: string, age: string, essay: string, round2Prompt: string, slot: 'A'|'B', englishLevel: string, suspectedAi: boolean, instructionFollowing: string, originalThinking: string, character: string, hasVoiceMemo: boolean, durationStatus: 'valid'|'too_short'|'too_long'|'unknown' }>} */
   const assignments = [];
 
   for (const row of rows) {
@@ -366,12 +399,17 @@ async function loadReviewAssignmentsForReviewerFromSheets(reviewerKey) {
     const applicant = applicantsById.get(normalizeAesopIdKey(applicantId));
     const slotCols = getSlotColumns(reviewsCfg, slot);
     const reviewFields = readReviewFieldsFromRow(rowData, slotCols);
-    const hasVoiceMemo = Boolean(String(applicant?.driveFileId ?? "").trim());
+    const hasVoiceMemo = applicantHasReviewVoiceMemo({
+      driveFileId: applicant?.driveFileId,
+      round2: applicant?.round2,
+      links: applicant?.links,
+    });
 
     assignments.push({
       applicantId,
       age: applicant?.age || "",
       essay: applicant?.essay || "",
+      round2Prompt: applicant?.round2Prompt || "",
       slot,
       ...reviewFields,
       hasVoiceMemo,
@@ -585,22 +623,23 @@ async function saveReviewAssessment({
     character,
   });
 
-  if (!normalizedLevel && !normalizedSuspectedAi) {
+  const hasEnglishLevel = ENGLISH_LEVELS.includes(normalizedLevel);
+  if (!hasEnglishLevel && !normalizedSuspectedAi) {
     const error = new Error("English level or Suspected AI is required.");
     error.statusCode = 400;
     throw error;
   }
-  if (!normalizedScores.instructionFollowing) {
+  if (!FITNESS_SCORES.includes(normalizedScores.instructionFollowing)) {
     const error = new Error("Instruction Following score is required.");
     error.statusCode = 400;
     throw error;
   }
-  if (!normalizedScores.originalThinking) {
+  if (!FITNESS_SCORES.includes(normalizedScores.originalThinking)) {
     const error = new Error("Independent/Original Thinking score is required.");
     error.statusCode = 400;
     throw error;
   }
-  if (!normalizedScores.character) {
+  if (!FITNESS_SCORES.includes(normalizedScores.character)) {
     const error = new Error("Demonstration of Character score is required.");
     error.statusCode = 400;
     throw error;

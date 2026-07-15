@@ -482,6 +482,8 @@ async function lookupStudentForAdmin(query) {
       role: role.role,
       isTeacher: role.isTeacher,
       isApplied,
+      isReviewer: isPeopleSheetReviewerRole(primary.reviewerRole),
+      reviewerRole: primary.reviewerRole || "",
       peopleStatus,
       teacherClasses: role.teacherClasses,
       classSection,

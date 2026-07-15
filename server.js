@@ -18,10 +18,11 @@ const {
   isAppliedAesopId,
   isPeopleSheetAdminRole,
   isPeopleSheetAdminByIdentity,
+  setPeopleReviewerRole,
 } = require('./services/googleSheets');
 const { getTeacherRoster, getStudentGrades } = require('./services/classroomSync');
 const { isDatabaseEnabled, checkDatabaseHealth } = require('./db/index');
-const { getRoleByEmailFromDb, getGradesByEmailFromDb, getPersonByAesopId, getMirrorCacheStatus, personRowToProfile, recordPortalDingChangeInDb } = require('./services/classroomDb');
+const { getRoleByEmailFromDb, getGradesByEmailFromDb, getPersonByAesopId, getMirrorCacheStatus, personRowToProfile, recordPortalDingChangeInDb, updatePeopleReviewerRoleInDb } = require('./services/classroomDb');
 const {
   isPortalAdmin,
   resolvePortalReviewerAccess,
@@ -46,6 +47,7 @@ const {
 const {
   getEmailGroups,
   getAdmissionsMetadata,
+  getReviewersMetadata,
   previewEmailRecipients,
   sendAdminEmailTest,
   startAdminEmailCampaign,
@@ -1451,6 +1453,60 @@ app.post('/api/portal-admin/email/admissions-metadata', portalAdminRateLimiter, 
   } catch (error) {
     console.error('Error loading admissions metadata:', formatErrorForLog(error));
     res.status(500).json({ error: 'Could not load Admissions sheet metadata.' });
+  }
+});
+
+app.post('/api/portal-admin/email/reviewers-metadata', portalAdminRateLimiter, async (req, res) => {
+  try {
+    const profile = await requirePortalAdmin(res, req.body);
+    if (!profile) {
+      return;
+    }
+    const metadata = await getReviewersMetadata();
+    res.json({ success: true, metadata });
+  } catch (error) {
+    console.error('Error loading reviewers metadata:', formatErrorForLog(error));
+    res.status(500).json({ error: 'Could not load Reviewers metadata.' });
+  }
+});
+
+app.post('/api/portal-admin/set-reviewer', portalAdminRateLimiter, async (req, res) => {
+  try {
+    const profile = await requirePortalAdmin(res, req.body);
+    if (!profile) {
+      return;
+    }
+    const aesopId = typeof req.body.aesopId === 'string' ? req.body.aesopId.trim() : '';
+    const email = typeof req.body.email === 'string' ? req.body.email.trim() : '';
+    if (!aesopId && !email) {
+      return res.status(400).json({ error: 'Provide an AESOP ID or email.' });
+    }
+    if (typeof req.body.reviewer !== 'boolean') {
+      return res.status(400).json({ error: 'reviewer must be true or false.' });
+    }
+    const result = await setPeopleReviewerRole({
+      aesopId: aesopId || undefined,
+      email: email || undefined,
+      reviewer: req.body.reviewer,
+    });
+    if (isDatabaseEnabled()) {
+      try {
+        await updatePeopleReviewerRoleInDb({
+          aesopId: result.id,
+          email: result.email,
+          reviewerRole: result.reviewerRole || null,
+        });
+      } catch (dbError) {
+        console.warn('set-reviewer: DB mirror update failed:', dbError.message);
+      }
+    }
+    res.json({ success: true, person: result });
+  } catch (error) {
+    console.error('Error setting reviewer role:', formatErrorForLog(error));
+    const status = error.statusCode || 500;
+    res.status(status).json({
+      error: error.message || 'Could not update reviewer access.',
+    });
   }
 });
 

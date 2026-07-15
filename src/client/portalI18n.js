@@ -286,6 +286,8 @@ const TRANSLATIONS = {
     'reviews.notAvailable': 'Not listed',
     'reviews.essayLabel': 'Essay',
     'reviews.essayMissing': 'No essay on file.',
+    'reviews.promptLabel': 'Round 2 Prompt',
+    'reviews.promptMissing': 'No Round 2 prompt on file for this applicant.',
     'reviews.playVoice': 'Play voice note',
     'reviews.downloadMp4': 'Download MP4',
     'reviews.durationExceeding': 'They exceeded expectations!',
@@ -302,8 +304,8 @@ const TRANSLATIONS = {
     'reviews.suspectedAiOffHint': 'Mark if the essay may be AI-written',
     'reviews.fitnessLabel': 'Fitness for Program',
     'reviews.fitness.instruction': 'Instruction following',
-    'reviews.fitness.original': 'Original thinking',
-    'reviews.fitness.character': 'Character',
+    'reviews.fitness.original': 'Independent / original thinking',
+    'reviews.fitness.character': 'Demonstration of character',
     'reviews.rubric.moreInfo': 'Scoring guide',
     'reviews.rubric.highestLabel': 'Highest',
     'reviews.rubric.adequateLabel': 'Adequate',
@@ -317,22 +319,44 @@ const TRANSLATIONS = {
       'The student has not understood or followed the instructions, or does not discuss the prompt.',
     'reviews.rubric.originalThinking.title': 'Independent / Original Thinking',
     'reviews.rubric.originalThinking.highest':
-      'The student shows evidence of original thinking—going beyond clichés or basic facts.',
+      'The student shows evidence of original thinking—going beyond clichés or basic facts in a way that makes their essay stand out as different.',
     'reviews.rubric.originalThinking.adequate': 'The student shows some evidence of original thinking.',
     'reviews.rubric.originalThinking.low':
       "The student's ideas are very basic or clichéd. You've heard this a lot before.",
     'reviews.rubric.character.title': 'Demonstration of Character',
     'reviews.rubric.character.highest':
-      'There is clear evidence of a strong personal character that would add to the community. You want this applicant in AESOP.',
+      'You want this applicant in AESOP—there is clear evidence of a strong personal character that would add to the community.',
     'reviews.rubric.character.adequate':
       'There is some evidence of a strong personal character. They might add something to the community.',
     'reviews.rubric.character.low':
       "There is no real evidence of a strong personal character. You don't feel that this person would add anything to the AESOP community.",
+    'reviews.rubric.englishLevel.title': 'English Level',
+    'reviews.rubric.englishLevel.0': 'No English. Essay is written in Dari.',
+    'reviews.rubric.englishLevel.1':
+      'Very limited English. Essay is written in a combination of Dari and English or is extremely short, consisting of broken or very basic English sentences.',
+    'reviews.rubric.englishLevel.2':
+      'Ideas: very simple. Sentences: short but readable. Vocabulary: limited. Usage: plurals, possessives, subject–verb agreement.',
+    'reviews.rubric.englishLevel.3':
+      'Ideas: simple. Sentences: longer, but not complex. Vocabulary: limited. Usage: past, present progressive, and future tenses; can/could or other modal verbs, with some errors.',
+    'reviews.rubric.englishLevel.4':
+      'Ideas: slightly more complex. Sentences: complex, but with errors. Vocabulary: developing. Usage: comparatives and superlatives; adverbs.',
+    'reviews.rubric.englishLevel.5':
+      'Ideas: more complex. Sentences: longer and more complex. Vocabulary: limited. Usage: perfect tenses and passive verbs, with some errors.',
+    'reviews.rubric.englishLevel.6':
+      'Ideas: more complex. Sentences: longer and more complex. Vocabulary: functional and flexible. Usage: perfect tenses and passive verbs, with few or no errors.',
+    'reviews.rubric.englishLevel.7':
+      'Ideas: sophisticated. Sentences: complex but sometimes formulaic. Vocabulary: functional and flexible. Usage: conditionals; relative clauses.',
+    'reviews.rubric.englishLevel.8':
+      'Ideas: sophisticated. Sentences: complex and varied. Vocabulary: wide and varied. Usage: metaphors, similes, and idioms.',
+    'reviews.rubric.englishLevel.9':
+      'Ideas: sophisticated. Sentences: complex and varied. Vocabulary: exceptionally rich. Usage: full range of grammatical constructions, with few errors; colloquialisms.',
+    'reviews.rubric.englishLevel.10': 'Could be mistaken for a native English speaker.',
     'reviews.scalePlaceholder': 'Select score…',
     'reviews.scalePlaceholderFor': 'Select {{field}} score',
     'reviews.scale.lowest': 'Lowest',
     'reviews.scale.midpoint': 'Mid-point',
     'reviews.scale.highest': 'Highest',
+    'reviews.scale.none': 'No English',
     'reviews.scoringAria': 'Review scoring',
     'reviews.studentList': 'Applicants',
     'reviews.nextStudent': 'Next student',
@@ -627,6 +651,8 @@ const TRANSLATIONS = {
     'reviews.notAvailable': 'ثبت نشده',
     'reviews.essayLabel': 'انشا',
     'reviews.essayMissing': 'انشا موجود نیست.',
+    'reviews.promptLabel': 'سؤال مرحلهٔ دوم',
+    'reviews.promptMissing': 'سؤال مرحلهٔ دوم برای این متقاضی موجود نیست.',
     'reviews.playVoice': 'پخش یادداشت صوتی',
     'reviews.downloadMp4': 'دانلود MP4',
     'reviews.durationExceeding': 'آنها فراتر از انتظار عمل کردند!',
@@ -642,9 +668,9 @@ const TRANSLATIONS = {
     'reviews.suspectedAiFlagged': 'مشکوک به هوش مصنوعی — علامت‌گذاری شد',
     'reviews.suspectedAiOffHint': 'اگر انشا احتمالاً با هوش مصنوعی نوشته شده علامت بزنید',
     'reviews.fitnessLabel': 'تناسب با برنامه',
-    'reviews.fitness.instruction': 'دستورالعمل',
-    'reviews.fitness.original': 'اصالت',
-    'reviews.fitness.character': 'شخصیت',
+    'reviews.fitness.instruction': 'پیروی از دستورالعمل',
+    'reviews.fitness.original': 'تفکر مستقل / اصیل',
+    'reviews.fitness.character': 'نشان‌دادن شخصیت',
     'reviews.rubric.moreInfo': 'راهنمای نمره‌دهی',
     'reviews.rubric.highestLabel': 'بالاترین',
     'reviews.rubric.adequateLabel': 'متوسط',
@@ -658,22 +684,44 @@ const TRANSLATIONS = {
       'دانش‌آموز دستورالعمل‌ها را نفهمیده یا دنبال نکرده، یا درباره پرسش بحث نکرده است.',
     'reviews.rubric.originalThinking.title': 'تفکر مستقل / اصیل',
     'reviews.rubric.originalThinking.highest':
-      'دانش‌آموز نشانه‌ای از تفکر اصیل دارد — فراتر از کلیشه یا حقایق ساده.',
+      'دانش‌آموز نشانه‌ای از تفکر اصیل دارد — فراتر از کلیشه یا حقایق ساده، به‌گونه‌ای که انشایش متمایز و متفاوت به نظر برسد.',
     'reviews.rubric.originalThinking.adequate': 'دانش‌آموز تا حدی نشانه‌ای از تفکر اصیل دارد.',
     'reviews.rubric.originalThinking.low':
       'ایده‌های دانش‌آموز بسیار ساده یا کلیشه‌ای است. قبلاً زیاد دیده‌اید.',
     'reviews.rubric.character.title': 'نشان‌دادن شخصیت',
     'reviews.rubric.character.highest':
-      'نشانه روشنی از شخصیت قوی وجود دارد که به جامعه می‌افزاید. این متقاضی را در AESOP می‌خواهید.',
+      'این متقاضی را در AESOP می‌خواهید — نشانه روشنی از شخصیت قوی وجود دارد که به جامعه می‌افزاید.',
     'reviews.rubric.character.adequate':
       'تا حدی نشانه شخصیت قوی وجود دارد. شاید به جامعه چیزی اضافه کند.',
     'reviews.rubric.character.low':
       'نشانه واقعی از شخصیت قوی نیست. حس نمی‌کنید این فرد به جامعه AESOP چیزی اضافه کند.',
+    'reviews.rubric.englishLevel.title': 'سطح انگلیسی',
+    'reviews.rubric.englishLevel.0': 'بدون انگلیسی. انشا به دری نوشته شده است.',
+    'reviews.rubric.englishLevel.1':
+      'انگلیسی بسیار محدود. انشا ترکیبی از دری و انگلیسی است یا بسیار کوتاه با جملات شکسته یا خیلی ساده.',
+    'reviews.rubric.englishLevel.2':
+      'ایده‌ها: خیلی ساده. جملات: کوتاه اما خوانا. واژگان: محدود. کاربرد: جمع، ملکی، تطابق فاعل و فعل.',
+    'reviews.rubric.englishLevel.3':
+      'ایده‌ها: ساده. جملات: بلندتر اما نه پیچیده. واژگان: محدود. کاربرد: زمان‌های گذشته، حال استمراری و آینده؛ can/could یا افعال وجهی دیگر با کمی خطا.',
+    'reviews.rubric.englishLevel.4':
+      'ایده‌ها: کمی پیچیده‌تر. جملات: پیچیده اما با خطا. واژگان: در حال رشد. کاربرد: صفت تفضیلی و عالی؛ قیدها.',
+    'reviews.rubric.englishLevel.5':
+      'ایده‌ها: پیچیده‌تر. جملات: بلندتر و پیچیده‌تر. واژگان: محدود. کاربرد: زمان‌های کامل و افعال مجهول، با کمی خطا.',
+    'reviews.rubric.englishLevel.6':
+      'ایده‌ها: پیچیده‌تر. جملات: بلندتر و پیچیده‌تر. واژگان: کاربردی و انعطاف‌پذیر. کاربرد: زمان‌های کامل و افعال مجهول، با خطای کم یا بدون خطا.',
+    'reviews.rubric.englishLevel.7':
+      'ایده‌ها: پیچیده/پیشرفته. جملات: پیچیده اما گاهی قالبی. واژگان: کاربردی و انعطاف‌پذیر. کاربرد: شرطی‌ها؛ جملات موصولی.',
+    'reviews.rubric.englishLevel.8':
+      'ایده‌ها: پیچیده/پیشرفته. جملات: پیچیده و متنوع. واژگان: گسترده و متنوع. کاربرد: استعاره، تشبیه و اصطلاحات.',
+    'reviews.rubric.englishLevel.9':
+      'ایده‌ها: پیچیده/پیشرفته. جملات: پیچیده و متنوع. واژگان: بسیار غنی. کاربرد: طیف کامل ساخت‌های دستوری با خطای کم؛ زبان محاوره‌ای.',
+    'reviews.rubric.englishLevel.10': 'می‌توان آن را با نوشتهٔ یک گویشور بومی انگلیسی اشتباه گرفت.',
     'reviews.scalePlaceholder': 'نمره را انتخاب کنید…',
     'reviews.scalePlaceholderFor': 'نمره {{field}} را انتخاب کنید',
     'reviews.scale.lowest': 'پایین‌ترین',
     'reviews.scale.midpoint': 'میانه',
     'reviews.scale.highest': 'بالاترین',
+    'reviews.scale.none': 'بدون انگلیسی',
     'reviews.scoringAria': 'نمره‌دهی بررسی',
     'reviews.studentList': 'متقاضیان',
     'reviews.nextStudent': 'متقاضی بعدی',
