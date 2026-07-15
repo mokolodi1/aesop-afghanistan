@@ -12,6 +12,8 @@ import {
   filterDingPhoneInputChars,
 } from '../../utils/validation';
 import { paragraphDirection } from '../shared/emailTextDirection.js';
+import { hasNonLatinLetters, stripNonLatinLetters } from '../shared/latinText.js';
+import { voiceMemoExtensionFromFileName } from '../../utils/voiceMemoExtensions.js';
 import {
   getStoredPortalLocale,
   setStoredPortalLocale,
@@ -8533,6 +8535,51 @@ function useReviewAutoSave({ drafts, onSaveOne }) {
   return { markDirty, saveStatus, lastSavedAt };
 }
 
+function PortalReviewPrompt({ prompt, t }) {
+  const [showTranslation, setShowTranslation] = useState(false);
+  const fullText = String(prompt || '').trim();
+
+  useEffect(() => {
+    setShowTranslation(false);
+  }, [fullText]);
+
+  if (!fullText) {
+    return (
+      <>
+        <div className="portal-review-prompt-header">
+          <h4 className="portal-review-field-label portal-review-prompt-label">{t('reviews.promptLabel')}</h4>
+        </div>
+        <p className="portal-field-hint">{t('reviews.promptMissing')}</p>
+      </>
+    );
+  }
+
+  const latinText = stripNonLatinLetters(fullText);
+  const hasTranslation = hasNonLatinLetters(fullText);
+  const displayText = showTranslation || !hasTranslation ? fullText : latinText;
+
+  return (
+    <>
+      <div className="portal-review-prompt-header">
+        <h4 className="portal-review-field-label portal-review-prompt-label">{t('reviews.promptLabel')}</h4>
+        {hasTranslation ? (
+          <button
+            type="button"
+            className="portal-review-prompt-toggle"
+            onClick={() => setShowTranslation((current) => !current)}
+            aria-expanded={showTranslation}
+          >
+            {showTranslation ? t('reviews.hideTranslation') : t('reviews.showTranslation')}
+          </button>
+        ) : null}
+      </div>
+      <div className="portal-review-essay portal-review-prompt-body" dir="auto">
+        {displayText}
+      </div>
+    </>
+  );
+}
+
 function PortalReviewVoicePlayer({ assignment, t, onRefreshStream }) {
   const [audioError, setAudioError] = useState('');
   const [refreshingStream, setRefreshingStream] = useState(false);
@@ -8552,6 +8599,11 @@ function PortalReviewVoicePlayer({ assignment, t, onRefreshStream }) {
     const params = new URLSearchParams({ st: assignment.streamToken, download: '1' });
     return `/api/portal-reviews/voice-memo/stream?${params.toString()}`;
   }, [streamSrc, assignment?.streamToken]);
+
+  const canDownloadMp4 = useMemo(
+    () => voiceMemoExtensionFromFileName(assignment?.driveFileName) === 'mp4',
+    [assignment?.driveFileName],
+  );
 
   useEffect(() => {
     setAudioError('');
@@ -8618,7 +8670,7 @@ function PortalReviewVoicePlayer({ assignment, t, onRefreshStream }) {
             </span>
           </button>
         ) : null}
-        {downloadHref ? (
+        {downloadHref && canDownloadMp4 ? (
           <a className="portal-review-voice-btn" href={downloadHref} download>
             <span className="portal-review-voice-btn-label">{t('reviews.downloadMp4')}</span>
           </a>
@@ -8642,6 +8694,10 @@ function PortalReviewCard({
 
   return (
     <article className="portal-review-card" aria-labelledby={`review-${assignment.applicantId}-title`}>
+      <section className="portal-review-prompt-section" aria-label={t('reviews.promptLabel')}>
+        <PortalReviewPrompt prompt={assignment.round2Prompt} t={t} />
+      </section>
+
       <header className="portal-review-card-header">
         <h3 className="portal-review-card-title" id={`review-${assignment.applicantId}-title`}>
           <span className="portal-ltr portal-admin-mono">{assignment.applicantId}</span>
@@ -8657,17 +8713,6 @@ function PortalReviewCard({
           <div className="portal-review-essay">{assignment.essay}</div>
         ) : (
           <p className="portal-field-hint">{t('reviews.essayMissing')}</p>
-        )}
-      </section>
-
-      <section className="portal-review-prompt-section" aria-label={t('reviews.promptLabel')}>
-        {String(assignment.round2Prompt || '').trim() ? (
-          <PortalVoiceMemoPrompt prompt={assignment.round2Prompt} showLead={false} />
-        ) : (
-          <>
-            <h4 className="portal-review-field-label">{t('reviews.promptLabel')}</h4>
-            <p className="portal-field-hint">{t('reviews.promptMissing')}</p>
-          </>
         )}
       </section>
 
@@ -8778,10 +8823,8 @@ function PortalReviewStudentList({ assignments, drafts, selectedApplicantId, onS
                 <span className="portal-review-student-name portal-ltr portal-admin-mono">
                   {assignment.applicantId}
                 </span>
-                <span className="portal-review-student-idline portal-ltr">
-                  <span className="portal-review-student-level-tag">
-                    {t('reviews.age')}: {ageDisplay}
-                  </span>
+                <span className="portal-review-student-age portal-ltr">
+                  {t('reviews.age')}: {ageDisplay}
                 </span>
               </button>
             </li>
@@ -8832,6 +8875,7 @@ function PortalReviewApplicationsPage() {
           hasVoiceMemo: fresh.hasVoiceMemo,
           streamToken: fresh.streamToken,
           durationStatus: fresh.durationStatus,
+          driveFileName: fresh.driveFileName ?? assignment.driveFileName,
         };
       });
     });
@@ -8992,6 +9036,7 @@ function PortalReviewApplicationsPage() {
                 <div className="portal-review-detail" ref={reviewDetailRef}>
                   {selectedAssignment ? (
                     <PortalReviewCard
+                      key={selectedApplicantId}
                       assignment={selectedAssignment}
                       draft={selectedDraft}
                       onDraftChange={updateDraft}

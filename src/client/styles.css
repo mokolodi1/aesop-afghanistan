@@ -4693,9 +4693,10 @@ html[dir='rtl'] .portal-voice-memo-substeps {
 
 .portal-review-student-item {
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 4px;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
   width: 100%;
   padding: 10px 12px;
   border: 1px solid transparent;
@@ -4725,6 +4726,16 @@ html[dir='rtl'] .portal-voice-memo-substeps {
   font-weight: 600;
   line-height: 1.25;
   color: var(--aesop-ink, #373737);
+  min-width: 0;
+}
+
+.portal-review-student-age {
+  flex-shrink: 0;
+  font-size: 0.78rem;
+  font-weight: 500;
+  line-height: 1.25;
+  color: var(--aesop-muted, #5c5c5c);
+  white-space: nowrap;
 }
 
 .portal-review-student-idline {
@@ -4868,8 +4879,10 @@ html[dir='rtl'] .portal-voice-memo-substeps {
   font-size: 1.2rem;
   line-height: 1.25;
   display: flex;
-  flex-direction: column;
-  gap: 4px;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 12px;
 }
 
 .portal-review-card-age {
@@ -4885,11 +4898,49 @@ html[dir='rtl'] .portal-voice-memo-substeps {
   font-weight: 600;
 }
 
-.portal-review-essay-section {
+.portal-review-prompt-section {
   margin-bottom: 16px;
 }
 
-.portal-review-prompt-section {
+.portal-review-prompt-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.portal-review-prompt-label {
+  margin: 0;
+}
+
+.portal-review-prompt-toggle {
+  width: auto;
+  flex-shrink: 0;
+  align-self: center;
+  border: 1px solid var(--aesop-border, #d8dee8);
+  border-radius: 8px;
+  background: var(--aesop-surface, #fff);
+  color: var(--aesop-ink);
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 600;
+  line-height: 1.2;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+
+.portal-review-prompt-toggle:hover,
+.portal-review-prompt-toggle:focus-visible {
+  border-color: var(--aesop-accent, #2563eb);
+  color: var(--aesop-accent, #2563eb);
+}
+
+.portal-review-prompt-body {
+  margin-top: 0;
+}
+
+.portal-review-essay-section {
   margin-bottom: 16px;
 }
 
