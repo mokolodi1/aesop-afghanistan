@@ -4881,8 +4881,13 @@ html[dir='rtl'] .portal-voice-memo-substeps {
   display: flex;
   flex-direction: row;
   flex-wrap: wrap;
-  align-items: baseline;
+  align-items: center;
   gap: 12px;
+  width: 100%;
+}
+
+.portal-review-card-show-prompt {
+  margin-left: auto;
 }
 
 .portal-review-card-age {
@@ -4905,13 +4910,24 @@ html[dir='rtl'] .portal-voice-memo-substeps {
 .portal-review-prompt-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 12px;
   margin-bottom: 8px;
 }
 
-.portal-review-prompt-label {
-  margin: 0;
+.portal-review-prompt-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  align-items: stretch;
+}
+
+.portal-review-prompt-column {
+  min-width: 0;
+}
+
+.portal-review-prompt-column .portal-review-prompt-label {
+  margin-bottom: 8px;
 }
 
 .portal-review-prompt-actions {

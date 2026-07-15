@@ -13,6 +13,7 @@ import {
 } from '../../utils/validation';
 import { paragraphDirection } from '../shared/emailTextDirection.js';
 import { hasNonLatinLetters, stripNonLatinLetters } from '../shared/latinText.js';
+import { REVIEWER_ESSAY_PROMPT } from '../shared/reviewerPrompts.js';
 import { voiceMemoExtensionFromFileName } from '../../utils/voiceMemoExtensions.js';
 import {
   getStoredPortalLocale,
@@ -8535,61 +8536,83 @@ function useReviewAutoSave({ drafts, onSaveOne }) {
   return { markDirty, saveStatus, lastSavedAt };
 }
 
-function PortalReviewPrompt({ prompt, t, promptHidden, onTogglePromptHidden }) {
-  const [showTranslation, setShowTranslation] = useState(false);
-  const fullText = String(prompt || '').trim();
-
-  useEffect(() => {
-    setShowTranslation(false);
-  }, [fullText]);
-
-  const header = (
-    <div className="portal-review-prompt-header">
-      <h4 className="portal-review-field-label portal-review-prompt-label">{t('reviews.promptLabel')}</h4>
-      <div className="portal-review-prompt-actions">
-        {!promptHidden && fullText && hasNonLatinLetters(fullText) ? (
-          <button
-            type="button"
-            className="portal-review-prompt-toggle"
-            onClick={() => setShowTranslation((current) => !current)}
-            aria-expanded={showTranslation}
-          >
-            {showTranslation ? t('reviews.hideTranslation') : t('reviews.showTranslation')}
-          </button>
-        ) : null}
-        <button
-          type="button"
-          className="portal-review-prompt-toggle"
-          onClick={onTogglePromptHidden}
-          aria-expanded={!promptHidden}
-        >
-          {promptHidden ? t('reviews.showPrompt') : t('reviews.hidePrompt')}
-        </button>
-      </div>
-    </div>
-  );
-
+function getReviewPromptDisplayText(text, showTranslation) {
+  const fullText = String(text || '').trim();
   if (!fullText) {
-    return (
-      <>
-        {header}
-        {promptHidden ? null : <p className="portal-field-hint">{t('reviews.promptMissing')}</p>}
-      </>
-    );
+    return '';
   }
+  if (showTranslation || !hasNonLatinLetters(fullText)) {
+    return fullText;
+  }
+  return stripNonLatinLetters(fullText);
+}
 
-  const latinText = stripNonLatinLetters(fullText);
-  const hasTranslation = hasNonLatinLetters(fullText);
-  const displayText = showTranslation || !hasTranslation ? fullText : latinText;
+function PortalReviewPromptColumn({ label, text, showTranslation, missingHint }) {
+  const fullText = String(text || '').trim();
+  const displayText = getReviewPromptDisplayText(fullText, showTranslation);
 
   return (
-    <>
-      {header}
-      {promptHidden ? null : (
+    <div className="portal-review-prompt-column">
+      <h4 className="portal-review-field-label portal-review-prompt-label">{label}</h4>
+      {fullText ? (
         <div className="portal-review-essay portal-review-prompt-body" dir="auto">
           {displayText}
         </div>
+      ) : (
+        <p className="portal-field-hint">{missingHint}</p>
       )}
+    </div>
+  );
+}
+
+function PortalReviewPromptsSection({ voiceMemoPrompt, t, onTogglePromptHidden }) {
+  const [showTranslation, setShowTranslation] = useState(false);
+  const voicePrompt = String(voiceMemoPrompt || '').trim();
+  const essayPrompt = REVIEWER_ESSAY_PROMPT;
+  const hasTranslation =
+    hasNonLatinLetters(essayPrompt) || (voicePrompt && hasNonLatinLetters(voicePrompt));
+
+  useEffect(() => {
+    setShowTranslation(false);
+  }, [voicePrompt]);
+
+  return (
+    <>
+      <div className="portal-review-prompt-header">
+        <div className="portal-review-prompt-actions">
+          {hasTranslation ? (
+            <button
+              type="button"
+              className="portal-review-prompt-toggle"
+              onClick={() => setShowTranslation((current) => !current)}
+              aria-expanded={showTranslation}
+            >
+              {showTranslation ? t('reviews.hideTranslation') : t('reviews.showTranslation')}
+            </button>
+          ) : null}
+          <button
+            type="button"
+            className="portal-review-prompt-toggle"
+            onClick={onTogglePromptHidden}
+            aria-expanded
+          >
+            {t('reviews.hidePrompt')}
+          </button>
+        </div>
+      </div>
+      <div className="portal-review-prompt-stack">
+        <PortalReviewPromptColumn
+          label={t('reviews.essayPromptLabel')}
+          text={essayPrompt}
+          showTranslation={showTranslation}
+        />
+        <PortalReviewPromptColumn
+          label={t('reviews.voiceMemoPromptLabel')}
+          text={voicePrompt}
+          showTranslation={showTranslation}
+          missingHint={t('reviews.promptMissing')}
+        />
+      </div>
     </>
   );
 }
@@ -8710,14 +8733,15 @@ function PortalReviewCard({
 
   return (
     <article className="portal-review-card" aria-labelledby={`review-${assignment.applicantId}-title`}>
-      <section className="portal-review-prompt-section" aria-label={t('reviews.promptLabel')}>
-        <PortalReviewPrompt
-          prompt={assignment.round2Prompt}
-          t={t}
-          promptHidden={promptHidden}
-          onTogglePromptHidden={onTogglePromptHidden}
-        />
-      </section>
+      {!promptHidden ? (
+        <section className="portal-review-prompt-section" aria-label={t('reviews.promptsSectionAria')}>
+          <PortalReviewPromptsSection
+            voiceMemoPrompt={assignment.round2Prompt}
+            t={t}
+            onTogglePromptHidden={onTogglePromptHidden}
+          />
+        </section>
+      ) : null}
 
       <header className="portal-review-card-header">
         <h3 className="portal-review-card-title" id={`review-${assignment.applicantId}-title`}>
@@ -8725,6 +8749,16 @@ function PortalReviewCard({
           <span className="portal-review-card-age">
             {t('reviews.age')}: {ageDisplay}
           </span>
+          {promptHidden ? (
+            <button
+              type="button"
+              className="portal-review-prompt-toggle portal-review-card-show-prompt"
+              onClick={onTogglePromptHidden}
+              aria-expanded={false}
+            >
+              {t('reviews.showPrompt')}
+            </button>
+          ) : null}
         </h3>
       </header>
 

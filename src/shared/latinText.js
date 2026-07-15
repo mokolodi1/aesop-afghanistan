@@ -2,7 +2,27 @@
 const RTL_OR_MARK_RE =
   /[\u0590-\u05FF\u0600-\u06FF\u0700-\u074F\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF\u200C\u200D\uFEFF]|\p{M}/u;
 
-const HAS_LATIN_LETTER_RE = /\p{Script=Latin}/u;
+/**
+ * @param {string} line
+ * @returns {number}
+ */
+function countLatinLetters(line) {
+  let count = 0;
+  for (const char of String(line || '')) {
+    if (/\p{Script=Latin}/u.test(char)) {
+      count += 1;
+    }
+  }
+  return count;
+}
+
+/**
+ * @param {string} line
+ * @returns {boolean}
+ */
+function lineHasMeaningfulLatinText(line) {
+  return countLatinLetters(line) >= 2;
+}
 
 /**
  * True when a letter uses a non-Latin script (Arabic/Persian/Dari, Cyrillic, etc.).
@@ -32,7 +52,7 @@ function stripNonLatinLetters(text) {
     }
 
     line = line.replace(/[ \t]+/g, ' ').trim();
-    if (!HAS_LATIN_LETTER_RE.test(line)) {
+    if (!lineHasMeaningfulLatinText(line)) {
       continue;
     }
     keptLines.push(line);
