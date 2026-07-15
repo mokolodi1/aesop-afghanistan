@@ -22,8 +22,8 @@ const {
 } = require("./voiceMemoSync");
 const { extractDriveFileIdFromLink } = require("./googleDrive");
 
-const ENGLISH_LEVELS = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"];
-const FITNESS_SCORES = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"];
+const ENGLISH_LEVELS = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"];
+const FITNESS_SCORES = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"];
 const FITNESS_CRITERIA = ["instructionFollowing", "originalThinking", "character"];
 const SUSPECTED_AI_SHEET_VALUE = "Suspected AI";
 const LEGACY_FLAGGED_AI_LEVEL = "Flagged for AI";
@@ -44,7 +44,7 @@ function normalizeEnglishLevel(value) {
     return "";
   }
   const asNumber = Number.parseInt(trimmed, 10);
-  if (Number.isFinite(asNumber) && asNumber >= 1 && asNumber <= 10) {
+  if (Number.isFinite(asNumber) && asNumber >= 0 && asNumber <= 10) {
     return String(asNumber);
   }
   return ENGLISH_LEVELS.find((level) => level === trimmed) || "";
@@ -79,7 +79,7 @@ function normalizeFitnessScore(value) {
     return trimmed;
   }
   const asNumber = Number.parseInt(trimmed, 10);
-  if (Number.isFinite(asNumber) && asNumber >= 1 && asNumber <= 10) {
+  if (Number.isFinite(asNumber) && asNumber >= 0 && asNumber <= 10) {
     return String(asNumber);
   }
   return "";
@@ -620,22 +620,23 @@ async function saveReviewAssessment({
     character,
   });
 
-  if (!normalizedLevel && !normalizedSuspectedAi) {
+  const hasEnglishLevel = ENGLISH_LEVELS.includes(normalizedLevel);
+  if (!hasEnglishLevel && !normalizedSuspectedAi) {
     const error = new Error("English level or Suspected AI is required.");
     error.statusCode = 400;
     throw error;
   }
-  if (!normalizedScores.instructionFollowing) {
+  if (!FITNESS_SCORES.includes(normalizedScores.instructionFollowing)) {
     const error = new Error("Instruction Following score is required.");
     error.statusCode = 400;
     throw error;
   }
-  if (!normalizedScores.originalThinking) {
+  if (!FITNESS_SCORES.includes(normalizedScores.originalThinking)) {
     const error = new Error("Independent/Original Thinking score is required.");
     error.statusCode = 400;
     throw error;
   }
-  if (!normalizedScores.character) {
+  if (!FITNESS_SCORES.includes(normalizedScores.character)) {
     const error = new Error("Demonstration of Character score is required.");
     error.statusCode = 400;
     throw error;

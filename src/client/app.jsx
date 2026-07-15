@@ -8032,8 +8032,9 @@ function PortalAdminEmailsPage() {
   );
 }
 
-const SCALE_1_TO_10 = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10'];
-const SCALE_1_TO_10_DESC = [...SCALE_1_TO_10].reverse();
+const SCALE_0_TO_10 = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '10'];
+const SCALE_0_TO_10_DESC = [...SCALE_0_TO_10].reverse();
+const ENGLISH_LEVEL_SCORES = SCALE_0_TO_10;
 const FITNESS_CRITERIA = [
   {
     id: 'instructionFollowing',
@@ -8047,7 +8048,7 @@ const FITNESS_CRITERIA = [
 const REVIEW_RUBRIC_TIERS = [
   { tierKey: 'highest', score: '10', labelKey: 'reviews.rubric.highestLabel' },
   { tierKey: 'adequate', score: '5', labelKey: 'reviews.rubric.adequateLabel' },
-  { tierKey: 'low', score: '1', labelKey: 'reviews.rubric.lowLabel' },
+  { tierKey: 'low', score: '0', labelKey: 'reviews.rubric.lowLabel' },
 ];
 
 const EMPTY_REVIEW_DRAFT = {
@@ -8062,19 +8063,19 @@ function reviewDraftIsSaveable(draft) {
   if (!draft) {
     return false;
   }
-  const hasEnglish = SCALE_1_TO_10.includes(String(draft.englishLevel ?? '').trim());
+  const hasEnglish = ENGLISH_LEVEL_SCORES.includes(String(draft.englishLevel ?? '').trim());
   const hasAi = draft.suspectedAi === true;
   if (!hasEnglish && !hasAi) {
     return false;
   }
   return FITNESS_CRITERIA.every((criterion) =>
-    SCALE_1_TO_10.includes(String(draft[criterion.id] ?? '').trim()),
+    SCALE_0_TO_10.includes(String(draft[criterion.id] ?? '').trim()),
   );
 }
 
 function reviewScaleOptionLabel(score, t) {
-  if (score === '1') {
-    return `1 — ${t('reviews.scale.lowest')}`;
+  if (score === '0') {
+    return `0 — ${t('reviews.scale.lowest')}`;
   }
   if (score === '5') {
     return `5 — ${t('reviews.scale.midpoint')}`;
@@ -8085,7 +8086,15 @@ function reviewScaleOptionLabel(score, t) {
   return score;
 }
 
-function PortalReviewScaleSelect({ value, onChange, ariaLabel, fieldLabel, t, wide = false }) {
+function PortalReviewScaleSelect({
+  value,
+  onChange,
+  ariaLabel,
+  fieldLabel,
+  t,
+  wide = false,
+  scores = SCALE_0_TO_10_DESC,
+}) {
   const placeholder = fieldLabel
     ? t('reviews.scalePlaceholderFor', { field: fieldLabel })
     : t('reviews.scalePlaceholder');
@@ -8098,7 +8107,7 @@ function PortalReviewScaleSelect({ value, onChange, ariaLabel, fieldLabel, t, wi
       onChange={onChange}
     >
       <option value="">{placeholder}</option>
-      {SCALE_1_TO_10_DESC.map((score) => (
+      {scores.map((score) => (
         <option key={score} value={score}>
           {reviewScaleOptionLabel(score, t)}
         </option>
@@ -8107,7 +8116,7 @@ function PortalReviewScaleSelect({ value, onChange, ariaLabel, fieldLabel, t, wi
   );
 }
 
-function PortalReviewRubricHelp({ rubricKey, t }) {
+function PortalReviewRubricHelp({ rubricKey, t, variant = 'fitness' }) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef(null);
 
@@ -8133,18 +8142,23 @@ function PortalReviewRubricHelp({ rubricKey, t }) {
     };
   }, [open]);
 
+  const title =
+    variant === 'english'
+      ? t('reviews.rubric.englishLevel.title')
+      : t(`reviews.rubric.${rubricKey}.title`);
+
   return (
     <span
       ref={wrapRef}
       className="portal-review-rubric-help"
-      onMouseEnter={() => setOpen(true)}
-      onMouseLeave={() => setOpen(false)}
+      onMouseEnter={variant === 'english' ? undefined : () => setOpen(true)}
+      onMouseLeave={variant === 'english' ? undefined : () => setOpen(false)}
     >
       <button
         type="button"
         className="portal-review-rubric-help-btn"
         aria-expanded={open}
-        aria-label={`${t('reviews.rubric.moreInfo')}: ${t(`reviews.rubric.${rubricKey}.title`)}`}
+        aria-label={`${t('reviews.rubric.moreInfo')}: ${title}`}
         onClick={(event) => {
           event.preventDefault();
           event.stopPropagation();
@@ -8157,21 +8171,43 @@ function PortalReviewRubricHelp({ rubricKey, t }) {
         </svg>
       </button>
       {open ? (
-        <div className="portal-review-rubric-popover" role="tooltip">
-          <p className="portal-review-rubric-popover-title">{t(`reviews.rubric.${rubricKey}.title`)}</p>
-          <ul className="portal-review-rubric-list">
-            {REVIEW_RUBRIC_TIERS.map((tier) => (
-              <li key={tier.tierKey} className="portal-review-rubric-item">
-                <div className="portal-review-rubric-item-head">
-                  <span className="portal-review-rubric-tier-label">{t(tier.labelKey)}</span>
-                  <span className="portal-review-rubric-tier-score">{tier.score}</span>
-                </div>
-                <p className="portal-review-rubric-item-text">
-                  {t(`reviews.rubric.${rubricKey}.${tier.tierKey}`)}
-                </p>
-              </li>
-            ))}
-          </ul>
+        <div
+          className={`portal-review-rubric-popover${
+            variant === 'english' ? ' portal-review-rubric-popover--english' : ''
+          }`}
+          role="tooltip"
+        >
+          <p className="portal-review-rubric-popover-title">{title}</p>
+          {variant === 'english' ? (
+            <div className="portal-review-rubric-popover-scroll">
+              <ul className="portal-review-rubric-list">
+                {SCALE_0_TO_10_DESC.map((score) => (
+                  <li key={score} className="portal-review-rubric-item">
+                    <div className="portal-review-rubric-item-head">
+                      <span className="portal-review-rubric-tier-score">{score}</span>
+                    </div>
+                    <p className="portal-review-rubric-item-text">
+                      {t(`reviews.rubric.englishLevel.${score}`)}
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : (
+            <ul className="portal-review-rubric-list">
+              {REVIEW_RUBRIC_TIERS.map((tier) => (
+                <li key={tier.tierKey} className="portal-review-rubric-item">
+                  <div className="portal-review-rubric-item-head">
+                    <span className="portal-review-rubric-tier-label">{t(tier.labelKey)}</span>
+                    <span className="portal-review-rubric-tier-score">{tier.score}</span>
+                  </div>
+                  <p className="portal-review-rubric-item-text">
+                    {t(`reviews.rubric.${rubricKey}.${tier.tierKey}`)}
+                  </p>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       ) : null}
     </span>
@@ -8499,7 +8535,12 @@ function PortalReviewCard({
 
       <div className="portal-review-scoring-panel" aria-label={t('reviews.scoringAria')}>
         <section className="portal-review-scoring-section portal-review-scoring-section--english">
-          <h4 className="portal-review-scoring-section-title">{t('reviews.levelLabel')}</h4>
+          <h4 className="portal-review-scoring-section-title">
+            <span className="portal-review-scale-field-label-row">
+              <span>{t('reviews.levelLabel')}</span>
+              <PortalReviewRubricHelp variant="english" t={t} />
+            </span>
+          </h4>
           <div className="portal-review-scoring-section-row">
             <label className="portal-review-scale-field portal-review-scale-field--solo">
               <span className="portal-review-visually-hidden">{t('reviews.levelLabel')}</span>
@@ -8677,7 +8718,7 @@ function PortalReviewApplicationsPage() {
         for (const row of rows) {
           const normalizeScale = (value) => {
             const trimmed = String(value ?? '').trim();
-            return SCALE_1_TO_10.includes(trimmed) ? trimmed : '';
+            return SCALE_0_TO_10.includes(trimmed) ? trimmed : '';
           };
           const englishFromApi = String(row.englishLevel ?? row.recommendedLevel ?? '').trim();
           nextDrafts[row.applicantId] = {
