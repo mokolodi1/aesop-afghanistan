@@ -8,6 +8,8 @@ const {
   transcodeVoiceMemoToM4aStream,
 } = require("../utils/voiceMemoTranscode");
 const { recordDriveFilesList, recordDriveFilesGet } = require("./portalMetrics");
+const { mapVoiceMemoStreamError } = require("./voiceMemoStreamErrors");
+const { driveErrorStatus, isDriveThrottleError } = require("../utils/driveThrottle");
 
 const DRIVE_READONLY_SCOPE = "https://www.googleapis.com/auth/drive.readonly";
 
@@ -20,32 +22,6 @@ const DRIVE_RETRY_AFTER_CAP_MS = 15 * 60 * 1000;
 /** User-facing copy when Drive throttles on-demand portal streaming. */
 const DRIVE_TRY_AGAIN_LATER_MESSAGE =
   "Your voice note is safe and submitted. We are experiencing high traffic volume and cannot play your audio right now. You may try refreshing the stream later to try again.";
-
-/**
- * Map a Drive streaming failure to a safe portal error (no internal details).
- * @param {unknown} error
- * @returns {Error & { statusCode?: number, code?: string }}
- */
-function mapVoiceMemoStreamError(error) {
-  if (error && typeof error === "object" && error.code === "VOICE_MEMO_NOT_CACHED") {
-    return /** @type {Error & { statusCode?: number, code?: string }} */ (error);
-  }
-  if (isDriveThrottleError(error)) {
-    const mapped = new Error(DRIVE_TRY_AGAIN_LATER_MESSAGE);
-    mapped.statusCode = 503;
-    mapped.code = "DRIVE_THROTTLED";
-    return mapped;
-  }
-  if (error && typeof error === "object" && Number.isFinite(error.statusCode)) {
-    const statusCode = Number(error.statusCode);
-    if (statusCode === 403 || statusCode === 404) {
-      return /** @type {Error & { statusCode?: number }} */ (error);
-    }
-  }
-  const mapped = new Error(DRIVE_TRY_AGAIN_LATER_MESSAGE);
-  mapped.statusCode = 503;
-  return mapped;
-}
 
 /** Cap Drive traffic hard while sync scripts/jobs run (~20 req/min). */
 const DRIVE_SCRIPT_MAX_REQUESTS_PER_MINUTE = 20;
@@ -129,34 +105,6 @@ function sleep(ms) {
   return new Promise((resolve) => {
     setTimeout(resolve, delay);
   });
-}
-
-/**
- * @param {unknown} error
- * @returns {number|null}
- */
-function driveErrorStatus(error) {
-  const status = Number(error?.response?.status ?? error?.code);
-  return Number.isFinite(status) ? status : null;
-}
-
-/**
- * Google signals throttling as HTTP 429, or as HTTP 403 with a rate-limit reason.
- * @param {unknown} error
- * @returns {boolean}
- */
-function isDriveThrottleError(error) {
-  const status = driveErrorStatus(error);
-  if (status === 429) {
-    return true;
-  }
-  if (status === 403) {
-    const reasons = error?.errors || error?.response?.data?.error?.errors || [];
-    return (Array.isArray(reasons) ? reasons : []).some((entry) =>
-      String(entry?.reason || "").toLowerCase().includes("ratelimit"),
-    );
-  }
-  return false;
 }
 
 /**
@@ -1059,7 +1007,6 @@ module.exports = {
   setDriveScriptRateLimit,
   isDriveScriptRateLimitEnabled,
   isDriveThrottleError,
-  mapVoiceMemoStreamError,
   DRIVE_TRY_AGAIN_LATER_MESSAGE,
   extractDriveFileIdFromLink,
   scanVoiceMemoFolder,

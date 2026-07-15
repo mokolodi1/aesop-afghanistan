@@ -75,7 +75,11 @@ const {
   verifyVoiceStreamToken,
   verifyReviewVoiceStreamToken,
 } = require('./services/portalVoiceMemo');
-const { mapVoiceMemoStreamError } = require('./services/googleDrive');
+const {
+  resolveVoiceMemoStreamError,
+  logVoiceMemoStreamError,
+  VOICE_MEMO_ERROR_CODES,
+} = require('./services/voiceMemoStreamErrors');
 const { getPortalCalendarForApplicant } = require('./services/portalCalendar');
 const {
   sanitizeEmail,
@@ -1686,7 +1690,9 @@ app.get('/api/portal-reviews/voice-memo/stream', portalVoiceMemoStreamRateLimite
   try {
     const token = typeof req.query.st === 'string' ? req.query.st : '';
     if (!token) {
-      return res.status(400).json({ error: 'Missing stream token.' });
+      const error = new Error('Missing stream token.');
+      error.statusCode = 400;
+      return respondVoiceMemoStreamError(res, error);
     }
 
     const rangeHeader = typeof req.headers.range === 'string' ? req.headers.range : '';
@@ -1697,7 +1703,6 @@ app.get('/api/portal-reviews/voice-memo/stream', portalVoiceMemoStreamRateLimite
     const streamResult = await getReviewVoiceMemoStreamByToken({ token, rangeHeader });
     writeVoiceMemoStream(res, streamResult, { download });
   } catch (error) {
-    console.error('Error streaming review voice memo:', formatErrorForLog(error));
     respondVoiceMemoStreamError(res, error);
   }
 });
@@ -1741,13 +1746,18 @@ app.post('/api/portal-reviews/save', portalReviewsRateLimiter, async (req, res) 
 });
 
 function respondVoiceMemoStreamError(res, error) {
-  const mapped = mapVoiceMemoStreamError(error);
-  const status = mapped.statusCode || 503;
+  const resolved = resolveVoiceMemoStreamError(error);
+  if (res.headersSent && resolved.errorCode === VOICE_MEMO_ERROR_CODES.STREAM_ERROR) {
+    resolved.errorCode = VOICE_MEMO_ERROR_CODES.STREAM_PIPE;
+    resolved.code = "STREAM_PIPE";
+  }
+  logVoiceMemoStreamError(error, resolved);
+  const status = resolved.statusCode || 503;
   if (!res.headersSent) {
     res.status(status).json({
-      error:
-        mapped.message ||
-        'Your voice note is safe and submitted. We are experiencing high traffic volume and cannot play your audio right now. You may try refreshing the stream later to try again.',
+      error: resolved.message,
+      code: resolved.code,
+      errorCode: resolved.errorCode,
     });
     return;
   }
@@ -1782,7 +1792,6 @@ function writeVoiceMemoStream(res, streamResult, options = {}) {
   }
 
   stream.on('error', (streamError) => {
-    console.error('Error streaming portal voice memo:', formatErrorForLog(streamError));
     respondVoiceMemoStreamError(res, streamError);
   });
   stream.pipe(res);
@@ -1806,12 +1815,13 @@ app.get('/api/portal-voice-memo/stream', portalVoiceMemoStreamRateLimiter, async
     // so no userId/email appears in the URL, access logs, or browser history.
     const token = typeof req.query.st === 'string' ? req.query.st : '';
     if (!token) {
-      return res.status(400).json({ error: 'Missing stream token.' });
+      const error = new Error('Missing stream token.');
+      error.statusCode = 400;
+      return respondVoiceMemoStreamError(res, error);
     }
 
     await pipePortalVoiceMemoStreamByToken(req, res, token);
   } catch (error) {
-    console.error('Error streaming portal voice memo:', formatErrorForLog(error));
     respondVoiceMemoStreamError(res, error);
   }
 });
@@ -1821,18 +1831,21 @@ app.post('/api/portal-voice-memo/stream', portalVoiceMemoStreamRateLimiter, asyn
     let { userId, email } = req.body;
 
     if (!userId || typeof userId !== 'string' || !email || typeof email !== 'string') {
-      return res.status(400).json({ error: 'ID and email are required.' });
+      const error = new Error('ID and email are required.');
+      error.statusCode = 400;
+      return respondVoiceMemoStreamError(res, error);
     }
 
     userId = sanitizeIdentifier(userId);
     const emailSan = sanitizeEmail(email);
     if (!userId || !emailSan) {
-      return res.status(400).json({ error: 'Invalid ID or email.' });
+      const error = new Error('Invalid ID or email.');
+      error.statusCode = 400;
+      return respondVoiceMemoStreamError(res, error);
     }
 
     await pipePortalVoiceMemoStream(req, res, userId, emailSan);
   } catch (error) {
-    console.error('Error streaming portal voice memo:', formatErrorForLog(error));
     respondVoiceMemoStreamError(res, error);
   }
 });

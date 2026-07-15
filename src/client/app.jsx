@@ -802,6 +802,21 @@ async function loadPortalClassGradeFromApi() {
   return portalClassGradeInFlight;
 }
 
+function formatVoiceMemoStreamClientError(t, payload) {
+  const serverCode = String(payload?.code || '').trim();
+  const errorCode = String(payload?.errorCode || '').trim();
+  let message = t('voiceMemo.audioPlayError');
+  if (serverCode === 'VOICE_MEMO_NOT_CACHED' || /being prepared/i.test(String(payload?.error || ''))) {
+    message = t('voiceMemo.audioPreparing');
+  } else if (serverCode === 'STREAM_EXPIRED' || /reload|expired/i.test(String(payload?.error || ''))) {
+    message = t('voiceMemo.streamExpired');
+  }
+  if (errorCode) {
+    return `${message} ${t('voiceMemo.errorRef', { errorCode })}`;
+  }
+  return message;
+}
+
 async function resolvePortalVoiceMemoAudioError(streamSrc, t) {
   if (!streamSrc) {
     return t('voiceMemo.audioPlayError');
@@ -811,21 +826,9 @@ async function resolvePortalVoiceMemoAudioError(streamSrc, t) {
       method: 'GET',
       headers: { Range: 'bytes=0-0' },
     });
-    if (response.status === 429 || response.status === 503) {
-      const payload = await response.json().catch(() => null);
-      const serverMessage = String(payload?.error || '').trim();
-      if (/reload|expired/i.test(serverMessage)) {
-        return t('voiceMemo.streamExpired');
-      }
-      return t('voiceMemo.audioPlayError');
-    }
+    const payload = await response.json().catch(() => null);
     if (!response.ok) {
-      const payload = await response.json().catch(() => null);
-      const serverMessage = String(payload?.error || '').trim();
-      if (/reload|expired/i.test(serverMessage)) {
-        return t('voiceMemo.streamExpired');
-      }
-      return t('voiceMemo.audioPlayError');
+      return formatVoiceMemoStreamClientError(t, payload);
     }
   } catch {
     // Fall back to the generic playback message when the probe fails.

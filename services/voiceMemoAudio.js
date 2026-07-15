@@ -11,12 +11,14 @@ const {
   isFfmpegAvailable,
   transcodeVoiceMemoToM4aStream,
 } = require("../utils/voiceMemoTranscode");
+const {
+  VOICE_MEMO_ERROR_CODES,
+  VOICE_MEMO_NOT_CACHED_MESSAGE,
+  createVoiceMemoPlaybackError,
+} = require("./voiceMemoStreamErrors");
 
 /** Download/cache in chunks so cron jobs can reclaim memory between files. */
 const VOICE_MEMO_AUDIO_SYNC_CHUNK_SIZE = 10;
-
-const VOICE_MEMO_NOT_CACHED_MESSAGE =
-  "Your voice note is safe and submitted. Audio is being prepared and should be available shortly. Please try again in a few minutes.";
 
 /**
  * @param {{
@@ -323,17 +325,22 @@ async function syncVoiceMemoAudioFromScan(scan, options = {}) {
 async function streamVoiceMemoFromCache(fileId, rangeHeader = "") {
   const normalizedFileId = String(fileId || "").trim();
   if (!normalizedFileId) {
-    const error = new Error("A voice memo file id is required.");
-    error.statusCode = 404;
-    throw error;
+    throw createVoiceMemoPlaybackError(
+      "A voice memo file id is required.",
+      404,
+      "MISSING_FILE_ID",
+      VOICE_MEMO_ERROR_CODES.MISSING_FILE_ID,
+    );
   }
 
   const row = await getVoiceMemoAudioRow(normalizedFileId);
   if (!row || !row.content || row.sizeBytes <= 0) {
-    const error = new Error(VOICE_MEMO_NOT_CACHED_MESSAGE);
-    error.statusCode = 503;
-    error.code = "VOICE_MEMO_NOT_CACHED";
-    throw error;
+    throw createVoiceMemoPlaybackError(
+      VOICE_MEMO_NOT_CACHED_MESSAGE,
+      503,
+      "VOICE_MEMO_NOT_CACHED",
+      VOICE_MEMO_ERROR_CODES.NOT_CACHED,
+    );
   }
 
   const extension = voiceMemoExtensionFromFileName(row.fileName);
@@ -373,9 +380,12 @@ async function streamVoiceMemoFromCache(fileId, rangeHeader = "") {
 async function streamVoiceMemoForPlayback(fileId, rangeHeader = "") {
   const normalizedFileId = String(fileId || "").trim();
   if (!normalizedFileId) {
-    const error = new Error("A voice memo file id is required.");
-    error.statusCode = 404;
-    throw error;
+    throw createVoiceMemoPlaybackError(
+      "A voice memo file id is required.",
+      404,
+      "MISSING_FILE_ID",
+      VOICE_MEMO_ERROR_CODES.MISSING_FILE_ID,
+    );
   }
 
   const row = await getVoiceMemoAudioRow(normalizedFileId);
