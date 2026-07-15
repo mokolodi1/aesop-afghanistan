@@ -1,6 +1,7 @@
 const { google } = require("googleapis");
 const { buildServiceAccountJwt } = require("./googleAuth");
 const { parseVoiceMemoFileExtensions, DEFAULT_VOICE_MEMO_FILE_EXTENSIONS, voiceMemoExtensionFromFileName } = require("../utils/voiceMemoExtensions");
+const { resolveVoiceMemoMimeType } = require("../utils/voiceMemoContentType");
 const {
   voiceMemoNeedsTranscodeForPlayback,
   isFfmpegAvailable,
@@ -635,37 +636,8 @@ async function getVoiceMemoFileForAesopId(folderId, aesopId, options = {}) {
  * @param {string} driveMimeType
  * @returns {string}
  */
-function resolveVoiceMemoStreamMimeType(fileName, driveMimeType) {
-  const name = String(fileName || "").trim().toLowerCase();
-  if (name.endsWith(".m4a")) {
-    return "audio/mp4";
-  }
-  if (name.endsWith(".aac") || name.endsWith(".acc")) {
-    return "audio/aac";
-  }
-  if (name.endsWith(".mp3") || name.endsWith(".mpga")) {
-    return "audio/mpeg";
-  }
-  if (name.endsWith(".ogg") || name.endsWith(".oga")) {
-    return "audio/ogg";
-  }
-  if (name.endsWith(".opus")) {
-    return "audio/opus";
-  }
-  if (name.endsWith(".wav")) {
-    return "audio/wav";
-  }
-  if (name.endsWith(".mpg")) {
-    return "video/mpeg";
-  }
-  if (name.endsWith(".mp4")) {
-    return "audio/mp4";
-  }
-  const mime = String(driveMimeType || "").trim();
-  if (mime && !/^audio\/mpeg$/i.test(mime)) {
-    return mime;
-  }
-  return "audio/mp4";
+function resolveVoiceMemoStreamMimeType(fileName, driveMimeType, buffer) {
+  return resolveVoiceMemoMimeType({ fileName, driveMimeType, buffer });
 }
 
 /**
@@ -815,10 +787,15 @@ async function getVoiceMemoDurationSeconds(fileId, options = {}) {
  */
 async function parseDurationFromAudioBuffer(buffer, fileInfo) {
   const { parseBuffer } = await import("music-metadata");
+  const mimeType = resolveVoiceMemoMimeType({
+    fileName: fileInfo.fileName,
+    driveMimeType: fileInfo.driveMimeType,
+    buffer,
+  });
   const metadata = await parseBuffer(
     buffer,
     {
-      mimeType: fileInfo.mimeType,
+      mimeType,
       size: Number.isFinite(fileInfo.size) ? fileInfo.size : buffer.length,
     },
     { duration: true },
@@ -867,7 +844,7 @@ function voiceMemoMetadataContext(meta) {
  * @returns {Promise<number|null>}
  */
 async function probeVoiceMemoDurationFromMedia(drive, fileId, meta, retryOptions = {}) {
-  const { mimeType, knownSize } = voiceMemoMetadataContext(meta);
+  const { fileName, driveMimeType, knownSize } = voiceMemoMetadataContext(meta);
   if (knownSize != null && knownSize > VOICE_MEMO_FULL_DURATION_PROBE_MAX_BYTES) {
     return null;
   }
@@ -891,7 +868,8 @@ async function probeVoiceMemoDurationFromMedia(drive, fileId, meta, retryOptions
   arrayBuffer = null;
   try {
     return await parseDurationFromAudioBuffer(buffer, {
-      mimeType,
+      fileName,
+      driveMimeType,
       size: knownSize ?? buffer.length,
     });
   } finally {
