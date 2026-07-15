@@ -6,10 +6,13 @@ const {
   VOICE_MEMO_AUDIO_CACHE_MAX_BYTES,
 } = require("./googleDrive");
 const { voiceMemoExtensionFromFileName } = require("../utils/voiceMemoExtensions");
+const { resolveVoiceMemoMimeType } = require("../utils/voiceMemoContentType");
 const {
   voiceMemoNeedsTranscodeForPlayback,
   isFfmpegAvailable,
+  isMp4FamilyBuffer,
   transcodeVoiceMemoToM4aStream,
+  remuxVoiceMemoMp4Faststart,
 } = require("../utils/voiceMemoTranscode");
 const {
   VOICE_MEMO_ERROR_CODES,
@@ -285,12 +288,18 @@ async function syncVoiceMemoAudioFromScan(scan, options = {}) {
         continue;
       }
 
+      const prepared = await prepareVoiceMemoAudioCacheEntry(
+        download.content,
+        download.fileName || fileNameById.get(fileId) || "voice-memo.m4a",
+        download.mimeType,
+      );
+
       await upsertVoiceMemoAudio({
         driveFileId: download.fileId,
-        fileName: download.fileName || fileNameById.get(fileId) || "voice-memo.m4a",
-        mimeType: download.mimeType,
-        sizeBytes: download.sizeBytes,
-        content: download.content,
+        fileName: prepared.fileName,
+        mimeType: prepared.mimeType,
+        sizeBytes: prepared.sizeBytes,
+        content: prepared.content,
       });
       downloaded += 1;
       download.content = null;
@@ -318,6 +327,28 @@ async function syncVoiceMemoAudioFromScan(scan, options = {}) {
 }
 
 /**
+ * @param {Buffer} content
+ * @param {string} fileName
+ * @param {string} mimeType
+ * @returns {Promise<{ content: Buffer, fileName: string, mimeType: string, sizeBytes: number }>}
+ */
+async function prepareVoiceMemoAudioCacheEntry(content, fileName, mimeType) {
+  let prepared = content;
+  prepared = await remuxVoiceMemoMp4Faststart(prepared);
+  const resolvedMimeType = resolveVoiceMemoMimeType({
+    fileName,
+    driveMimeType: mimeType,
+    buffer: prepared,
+  });
+  return {
+    content: prepared,
+    fileName,
+    mimeType: resolvedMimeType,
+    sizeBytes: prepared.length,
+  };
+}
+
+/**
  * @param {string} fileId
  * @param {string} [rangeHeader]
  * @returns {Promise<{ stream: import('stream').Readable, mimeType: string, fileName: string, size: number|null, status: number, contentRange: string|null, contentLength: string|null }>}
@@ -334,7 +365,7 @@ async function streamVoiceMemoFromCache(fileId, rangeHeader = "") {
   }
 
   const row = await getVoiceMemoAudioRow(normalizedFileId);
-  if (!row || !row.content || row.sizeBytes <= 0) {
+  if (!row || !row.content) {
     throw createVoiceMemoPlaybackError(
       VOICE_MEMO_NOT_CACHED_MESSAGE,
       503,
@@ -343,12 +374,40 @@ async function streamVoiceMemoFromCache(fileId, rangeHeader = "") {
     );
   }
 
+  let content = Buffer.isBuffer(row.content) ? row.content : Buffer.from(row.content);
+  if (content.length <= 0) {
+    throw createVoiceMemoPlaybackError(
+      VOICE_MEMO_NOT_CACHED_MESSAGE,
+      503,
+      "VOICE_MEMO_NOT_CACHED",
+      VOICE_MEMO_ERROR_CODES.NOT_CACHED,
+    );
+  }
+
+  if (isMp4FamilyBuffer(content)) {
+    content = await remuxVoiceMemoMp4Faststart(content);
+  }
+
+  const actualSize = content.length;
+  if (row.sizeBytes !== actualSize) {
+    console.warn(
+      `[voice-memo-audio] size mismatch driveFileId=${normalizedFileId} ` +
+        `db=${row.sizeBytes} actual=${actualSize}`,
+    );
+  }
+
+  const mimeType = resolveVoiceMemoMimeType({
+    fileName: row.fileName,
+    driveMimeType: row.mimeType,
+    buffer: content,
+  });
+
   const extension = voiceMemoExtensionFromFileName(row.fileName);
   const shouldTranscode =
     extension != null && voiceMemoNeedsTranscodeForPlayback(extension) && (await isFfmpegAvailable());
 
   if (shouldTranscode) {
-    const { stream } = transcodeVoiceMemoToM4aStream(Readable.from(row.content));
+    const { stream } = transcodeVoiceMemoToM4aStream(Readable.from(content));
     return {
       stream,
       mimeType: "audio/mp4",
@@ -360,12 +419,12 @@ async function streamVoiceMemoFromCache(fileId, rangeHeader = "") {
     };
   }
 
-  const range = parseVoiceMemoByteRange(rangeHeader, row.sizeBytes);
+  const range = parseVoiceMemoByteRange(rangeHeader, actualSize);
   return {
-    stream: sliceBufferToStream(row.content, range.start, range.end),
-    mimeType: row.mimeType,
+    stream: sliceBufferToStream(content, range.start, range.end),
+    mimeType,
     fileName: row.fileName,
-    size: row.sizeBytes,
+    size: actualSize,
     status: range.status,
     contentRange: range.contentRange,
     contentLength: range.contentLength,
@@ -389,7 +448,11 @@ async function streamVoiceMemoForPlayback(fileId, rangeHeader = "") {
   }
 
   const row = await getVoiceMemoAudioRow(normalizedFileId);
-  if (row?.content && row.sizeBytes > 0) {
+  const cachedBytes =
+    row?.content != null
+      ? (Buffer.isBuffer(row.content) ? row.content.length : Buffer.byteLength(row.content))
+      : 0;
+  if (cachedBytes > 0) {
     return streamVoiceMemoFromCache(normalizedFileId, rangeHeader);
   }
 

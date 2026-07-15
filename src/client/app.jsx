@@ -24,6 +24,10 @@ import {
   translateVoiceMemoDurationWarning,
   applyPortalDocumentLocale,
 } from './portalI18n.js';
+import {
+  VOICE_MEMO_CLIENT_ERROR_CODES,
+  logVoiceMemoClientPlaybackError,
+} from './voiceMemoPlaybackErrors.js';
 import { getPortalApplicationCalendarEntries } from './portalApplicationCalendar.js';
 import {
   classifyVoiceMemoDuration,
@@ -817,23 +821,51 @@ function formatVoiceMemoStreamClientError(t, payload) {
   return message;
 }
 
-async function resolvePortalVoiceMemoAudioError(streamSrc, t) {
+function formatVoiceMemoClientPlaybackError(t, errorCode) {
+  let message = t('voiceMemo.audioPlayError');
+  if (errorCode === VOICE_MEMO_CLIENT_ERROR_CODES.MEDIA_DECODE) {
+    message = t('voiceMemo.audioDecodeError');
+  } else if (errorCode === VOICE_MEMO_CLIENT_ERROR_CODES.MEDIA_NETWORK) {
+    message = t('voiceMemo.audioNetworkPlaybackError');
+  } else if (errorCode === VOICE_MEMO_CLIENT_ERROR_CODES.MEDIA_UNSUPPORTED) {
+    message = t('voiceMemo.audioUnsupported');
+  }
+  return `${message} ${t('voiceMemo.errorRef', { errorCode })}`;
+}
+
+async function resolvePortalVoiceMemoAudioError(streamSrc, t, audioElement) {
+  const mediaErrorCode = audioElement?.error?.code ?? 0;
   if (!streamSrc) {
-    return t('voiceMemo.audioPlayError');
+    const errorCode = logVoiceMemoClientPlaybackError(mediaErrorCode, { streamStatus: 'missing-src' });
+    return formatVoiceMemoClientPlaybackError(t, errorCode);
   }
   try {
     const response = await fetch(streamSrc, {
       method: 'GET',
       headers: { Range: 'bytes=0-0' },
     });
-    const payload = await response.json().catch(() => null);
+    const contentType = response.headers.get('content-type') || '';
     if (!response.ok) {
-      return formatVoiceMemoStreamClientError(t, payload);
+      const payload = await response.json().catch(() => null);
+      if (payload?.errorCode) {
+        return formatVoiceMemoStreamClientError(t, payload);
+      }
+      const errorCode = logVoiceMemoClientPlaybackError(mediaErrorCode, {
+        streamStatus: response.status,
+        contentType,
+      });
+      return formatVoiceMemoClientPlaybackError(t, errorCode);
     }
+
+    const errorCode = logVoiceMemoClientPlaybackError(mediaErrorCode, {
+      streamStatus: response.status,
+      contentType,
+    });
+    return formatVoiceMemoClientPlaybackError(t, errorCode);
   } catch {
-    // Fall back to the generic playback message when the probe fails.
+    logVoiceMemoClientPlaybackError(2, { streamStatus: 'fetch-failed' });
+    return formatVoiceMemoClientPlaybackError(t, VOICE_MEMO_CLIENT_ERROR_CODES.MEDIA_NETWORK);
   }
-  return t('voiceMemo.audioPlayError');
 }
 
 async function loadPortalVoiceMemoStatusFromApi({ userId, email }) {
@@ -3335,12 +3367,14 @@ function PortalVoiceMemoSection({ studentUserId, studentEmail, enabled }) {
                       }
                       setVoiceMemoPlayerLoading(false);
                     }}
-                    onError={() => {
+                    onError={(event) => {
                       setVoiceMemoPlayerLoading(false);
                       setVoiceMemoPlayerRequested(false);
-                      resolvePortalVoiceMemoAudioError(voiceMemoStreamSrc, t).then((message) => {
-                        setVoiceMemoAudioError(message);
-                      });
+                      resolvePortalVoiceMemoAudioError(voiceMemoStreamSrc, t, event.currentTarget).then(
+                        (message) => {
+                          setVoiceMemoAudioError(message);
+                        },
+                      );
                     }}
                   >
                     {t('voiceMemo.audioUnsupported')}
@@ -8686,8 +8720,8 @@ function PortalReviewVoicePlayer({ assignment, t, onRefreshStream }) {
           preload="none"
           className="portal-review-voice-audio"
           src={streamSrc}
-          onError={() => {
-            resolvePortalVoiceMemoAudioError(streamSrc, t).then((message) => {
+          onError={(event) => {
+            resolvePortalVoiceMemoAudioError(streamSrc, t, event.currentTarget).then((message) => {
               setAudioError(message);
             });
           }}

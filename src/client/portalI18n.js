@@ -155,6 +155,10 @@ const TRANSLATIONS = {
       'Your voice note is safe and submitted. We are experiencing high traffic volume and cannot play your audio right now. You may try refreshing the stream later to try again.',
     'voiceMemo.audioPreparing':
       'Your voice note is safe and submitted. Audio is being prepared and should be available shortly. Please try again in a few minutes.',
+    'voiceMemo.audioDecodeError':
+      'Your voice note is safe and submitted, but your browser could not decode the audio file. Please try refreshing the stream.',
+    'voiceMemo.audioNetworkPlaybackError':
+      'Your voice note is safe and submitted, but playback was interrupted by a network error. Please try again.',
     'voiceMemo.errorRef': 'Reference: {{errorCode}}',
     'voiceMemo.streamExpired':
       'This playback link has expired. Refresh the stream to continue.',
@@ -536,6 +540,10 @@ const TRANSLATIONS = {
       'یادداشت صوتی شما محفوظ و ثبت شده است. ما با حجم بالای ترافیک روبه‌رو هستیم و فعلاً نمی‌توانیم فایل صوتی شما را پخش کنیم. می‌توانید بعداً جریان را تازه کنید و دوباره تلاش کنید.',
     'voiceMemo.audioPreparing':
       'یادداشت صوتی شما محفوظ و ثبت شده است. فایل صوتی در حال آماده‌سازی است و به‌زودی در دسترس خواهد بود. لطفاً چند دقیقه دیگر دوباره تلاش کنید.',
+    'voiceMemo.audioDecodeError':
+      'یادداشت صوتی شما محفوظ و ثبت شده است، اما مرورگر شما نتوانست فایل صوتی را پخش کند. لطفاً جریان را تازه کنید و دوباره تلاش کنید.',
+    'voiceMemo.audioNetworkPlaybackError':
+      'یادداشت صوتی شما محفوظ و ثبت شده است، اما پخش به‌خاطر خطای شبکه قطع شد. لطفاً دوباره تلاش کنید.',
     'voiceMemo.errorRef': 'شناسه: {{errorCode}}',
     'voiceMemo.streamExpired':
       'این پیوند پخش منقضی شده است. برای ادامه، جریان را تازه کنید.',
