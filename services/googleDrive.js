@@ -729,6 +729,8 @@ async function streamVoiceMemoFile(fileId, rangeHeader) {
 
 /** Voice notes are small; reading the whole file avoids wrong lengths from partial m4a/ogg probes. */
 const VOICE_MEMO_FULL_DURATION_PROBE_MAX_BYTES = 8 * 1024 * 1024;
+/** Postgres audio cache limit; larger files stream from Drive on playback. */
+const VOICE_MEMO_AUDIO_CACHE_MAX_BYTES = 20 * 1024 * 1024;
 
 /**
  * @param {string} fileName
@@ -1015,10 +1017,10 @@ async function downloadVoiceMemoFile(fileId, options = {}) {
   }
 
   const { fileName, driveMimeType, knownSize } = voiceMemoMetadataContext(meta);
-  if (knownSize != null && knownSize > VOICE_MEMO_FULL_DURATION_PROBE_MAX_BYTES) {
+  if (knownSize != null && knownSize > VOICE_MEMO_AUDIO_CACHE_MAX_BYTES) {
     console.warn(
       `[voice-memo-audio] skipping ${fileName || normalizedFileId}: ` +
-        `file exceeds ${VOICE_MEMO_FULL_DURATION_PROBE_MAX_BYTES} byte cache limit`,
+        `file exceeds ${VOICE_MEMO_AUDIO_CACHE_MAX_BYTES} byte cache limit`,
     );
     return null;
   }
@@ -1050,6 +1052,7 @@ async function downloadVoiceMemoFile(fileId, options = {}) {
 
 module.exports = {
   DRIVE_READONLY_SCOPE,
+  VOICE_MEMO_AUDIO_CACHE_MAX_BYTES,
   normalizeVoiceMemoScanOptions,
   buildVoiceMemoFilenamePattern,
   withDriveRetry,

@@ -13,6 +13,7 @@ import {
 } from '../../utils/validation';
 import { paragraphDirection } from '../shared/emailTextDirection.js';
 import { hasNonLatinLetters, stripNonLatinLetters } from '../shared/latinText.js';
+import { countWords } from '../shared/countWords.js';
 import { REVIEWER_ESSAY_PROMPT } from '../shared/reviewerPrompts.js';
 import { voiceMemoExtensionFromFileName } from '../../utils/voiceMemoExtensions.js';
 import {
@@ -8717,6 +8718,69 @@ function PortalReviewVoicePlayer({ assignment, t, onRefreshStream }) {
   );
 }
 
+function PortalReviewEssayWordCount({ essay, t }) {
+  const [hintOpen, setHintOpen] = useState(false);
+  const wrapRef = useRef(null);
+  const wordCount = useMemo(() => countWords(essay), [essay]);
+  const countLabel =
+    wordCount === 1 ? t('reviews.essayWordCountOne') : t('reviews.essayWordCount', { count: wordCount });
+
+  useEffect(() => {
+    if (!hintOpen) {
+      return undefined;
+    }
+    const onDocumentPointerDown = (event) => {
+      if (!wrapRef.current?.contains(event.target)) {
+        setHintOpen(false);
+      }
+    };
+    const onEscape = (event) => {
+      if (event.key === 'Escape') {
+        setHintOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', onDocumentPointerDown);
+    document.addEventListener('keydown', onEscape);
+    return () => {
+      document.removeEventListener('mousedown', onDocumentPointerDown);
+      document.removeEventListener('keydown', onEscape);
+    };
+  }, [hintOpen]);
+
+  return (
+    <div className="portal-review-essay-word-count">
+      <span className="portal-review-essay-word-count-value">{countLabel}</span>
+      <span className="portal-review-essay-word-count-sep" aria-hidden="true">
+        ·
+      </span>
+      <span className="portal-review-essay-word-count-hint-text">{t('reviews.essayWordCountShortHint')}</span>
+      <span ref={wrapRef} className="portal-review-rubric-help portal-review-essay-word-count-help">
+        <button
+          type="button"
+          className="portal-review-rubric-help-btn"
+          aria-expanded={hintOpen}
+          aria-label={t('reviews.essayWordCountHintAria')}
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            setHintOpen((current) => !current);
+          }}
+        >
+          <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false">
+            <circle cx="8" cy="8" r="7" fill="none" stroke="currentColor" strokeWidth="1.5" />
+            <path fill="currentColor" d="M7.1 6.8h1.4V5.4H7.1v1.4zm0 3.8h1.4V7.8H7.1v2.8z" />
+          </svg>
+        </button>
+        {hintOpen ? (
+          <div className="portal-review-rubric-popover portal-review-essay-word-count-popover" role="tooltip">
+            <p className="portal-review-essay-word-count-popover-text">{t('reviews.essayWordCountHint')}</p>
+          </div>
+        ) : null}
+      </span>
+    </div>
+  );
+}
+
 function PortalReviewCard({
   assignment,
   draft,
@@ -8763,7 +8827,10 @@ function PortalReviewCard({
       </header>
 
       <section className="portal-review-essay-section" aria-label={t('reviews.essayLabel')}>
-        <h4 className="portal-review-field-label">{t('reviews.essayLabel')}</h4>
+        <div className="portal-review-essay-header">
+          <h4 className="portal-review-field-label">{t('reviews.essayLabel')}</h4>
+          <PortalReviewEssayWordCount essay={assignment.essay} t={t} />
+        </div>
         {assignment.essay.trim() ? (
           <div className="portal-review-essay">{assignment.essay}</div>
         ) : (

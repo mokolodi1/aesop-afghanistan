@@ -31,6 +31,18 @@ async function truncateMirrorStagingTables(runner) {
 }
 
 /**
+ * Clear one mirror staging table (e.g. after a failed sub-step so promote skips it).
+ * @param {import("pg").Pool | import("pg").PoolClient} runner
+ * @param {string} tableName
+ */
+async function truncateMirrorStagingTable(runner, tableName) {
+  if (!STAGING_TABLES.includes(tableName)) {
+    throw new Error(`Unknown mirror staging table: ${tableName}`);
+  }
+  await runner.query(`TRUNCATE TABLE ${tableName}`);
+}
+
+/**
  * @param {number|null|undefined} jobRunId
  * @returns {Promise<number>}
  */
@@ -449,6 +461,7 @@ async function promoteStagingMirror(mirrorSyncRunId, applicantIdSet) {
 module.exports = {
   useMirrorStaging,
   truncateMirrorStagingTables,
+  truncateMirrorStagingTable,
   createMirrorSyncRun,
   finalizeMirrorSyncRun,
   getLastSuccessfulMirrorSyncRun,

@@ -9,7 +9,7 @@ const {
   isTrustedVoiceMemoCachedDurationSeconds,
 } = require("../utils/voiceMemoDuration");
 const { extractDriveFileIdFromLink } = require("./googleDrive");
-const { streamVoiceMemoFromCache } = require("./voiceMemoAudio");
+const { streamVoiceMemoForPlayback } = require("./voiceMemoAudio");
 const { updateApplicantDriveDurationSeconds, getPersonByAesopId, personRowToProfile } = require("./classroomDb");
 const {
   getApplicantRowByAesopId,
@@ -485,7 +485,7 @@ async function streamVoiceMemoForUserId(userId, rangeHeader = "") {
     throw error;
   }
 
-  return streamVoiceMemoFromCache(driveFile.fileId, rangeHeader);
+  return streamVoiceMemoForPlayback(driveFile.fileId, rangeHeader);
 }
 
 async function getPortalVoiceMemoStream({ userId, email, rangeHeader = "" }) {
@@ -533,7 +533,7 @@ async function getReviewVoiceMemoStreamByToken({ token, rangeHeader = "" }) {
     throw error;
   }
 
-  return streamVoiceMemoFromCache(driveFile.fileId, rangeHeader);
+  return streamVoiceMemoForPlayback(driveFile.fileId, rangeHeader);
 }
 
 /**

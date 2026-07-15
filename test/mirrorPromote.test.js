@@ -10,6 +10,7 @@ const { getPool, isDatabaseEnabled, closeDatabase } = require("../db/index");
 const { runMigrations } = require("../db/migrate");
 const {
   truncateMirrorStagingTables,
+  truncateMirrorStagingTable,
   promoteStagingMirror,
   createMirrorSyncRun,
   finalizeMirrorSyncRun,
@@ -167,6 +168,56 @@ test("promote skips ding insert when number unchanged", async (t) => {
   assert.equal(afterDing.rows[0].count, beforeDing.rows[0].count);
 
   await pool.query(`DELETE FROM people WHERE id = $1`, [personId]);
+});
+
+test("cleared applicants_staging leaves production applicants unchanged", async (t) => {
+  if (!(await requireDatabase(t))) {
+    return;
+  }
+  await runMigrations();
+  const pool = getPool();
+
+  const aesopId = `id:test-applicant-soft-${Date.now()}`;
+  await pool.query(
+    `INSERT INTO applicants (aesop_id, name, round1, synced_at)
+     VALUES ($1, $2, $3, NOW())
+     ON CONFLICT (aesop_id) DO UPDATE SET name = EXCLUDED.name`,
+    [aesopId, "Before Promote", "Accepted"],
+  );
+  const before = await pool.query(`SELECT name FROM applicants WHERE aesop_id = $1`, [aesopId]);
+
+  await truncateMirrorStagingTables(pool);
+  const identityKey = personSheetIdentityKey({
+    id: "id:test-people-anchor",
+    email: "anchor-soft-fail@example.com",
+    name: "Anchor",
+  });
+  await pool.query(
+    `INSERT INTO people_staging (
+       identity_key, aesop_id, email, name, portal_role, sheet_row
+     ) VALUES ($1, $2, $3, $4, $5, $6::jsonb)`,
+    [identityKey, "id:test-people-anchor", "anchor-soft-fail@example.com", "Anchor", "Student", "{}"],
+  );
+  await pool.query(
+    `INSERT INTO applicants_staging (aesop_id, name, round1)
+     VALUES ($1, $2, $3)`,
+    [aesopId, "Partial Staging", "Accepted"],
+  );
+  await truncateMirrorStagingTable(pool, "applicants_staging");
+
+  const mirrorSyncRunId = await createMirrorSyncRun(null);
+  const result = await promoteStagingMirror(mirrorSyncRunId, new Set());
+  await finalizeMirrorSyncRun(mirrorSyncRunId, "succeeded", {
+    peopleCount: result.people,
+    applicantsCount: result.applicants,
+  });
+
+  assert.equal(result.applicants, 0);
+  const after = await pool.query(`SELECT name FROM applicants WHERE aesop_id = $1`, [aesopId]);
+  assert.equal(after.rows[0].name, before.rows[0].name);
+
+  await pool.query(`DELETE FROM applicants WHERE aesop_id = $1`, [aesopId]);
+  await pool.query(`DELETE FROM people WHERE aesop_id = $1`, ["id:test-people-anchor"]);
 });
 
 test.after(async () => {

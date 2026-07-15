@@ -5,6 +5,7 @@ const assert = require("node:assert/strict");
 const {
   collectDriveFileIdsFromScan,
   parseVoiceMemoByteRange,
+  VOICE_MEMO_AUDIO_CACHE_MAX_BYTES,
 } = require("../services/voiceMemoAudio");
 
 test("collectDriveFileIdsFromScan returns unique file ids from parsed files", () => {
@@ -53,4 +54,8 @@ test("parseVoiceMemoByteRange rejects invalid ranges", () => {
     () => parseVoiceMemoByteRange("bytes=2000-3000", 1200),
     (error) => error.statusCode === 416,
   );
+});
+
+test("VOICE_MEMO_AUDIO_CACHE_MAX_BYTES is 20 MB", () => {
+  assert.equal(VOICE_MEMO_AUDIO_CACHE_MAX_BYTES, 20 * 1024 * 1024);
 });

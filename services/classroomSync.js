@@ -360,11 +360,6 @@ async function runClassroomSync() {
     process.env.CLASSROOM_SHEET_DUAL_WRITE == null ||
     String(process.env.CLASSROOM_SHEET_DUAL_WRITE).trim().toLowerCase() !== "false";
 
-  if (dualWriteSheets) {
-    await replaceTabData(cr.rolesSheetName || "Classroom Roles", rolesHeader, rolesRows);
-    await replaceTabData(cr.gradesSheetName || "Classroom Grades", gradesHeader, gradesRows);
-  }
-
   const summary = {
     courses: courses.length,
     teachers: teacherClasses.size,
@@ -373,91 +368,92 @@ async function runClassroomSync() {
   };
 
   if (isDatabaseEnabled()) {
-    try {
-      const peopleMirrorFresh = await isPeopleMirrorFresh();
-      if (!peopleMirrorFresh) {
-        console.warn(
-          "[classroom-sync] People mirror is stale or empty; run npm run sync:hourly-cache first so Classroom rows link to People sheet emails.",
-        );
-      }
+    const peopleMirrorFresh = await isPeopleMirrorFresh();
+    if (!peopleMirrorFresh) {
+      console.warn(
+        "[classroom-sync] People mirror is stale or empty; run npm run sync:hourly-cache first so Classroom rows link to People sheet emails.",
+      );
+    }
 
-      const profileMap = await loadEmailToPeopleProfileMap();
-      const applicantIdSet = await loadApplicantAesopIdSetFromSheets();
-      const peopleEmails = new Set([...teacherClasses.keys(), ...studentSections.keys()]);
-      for (const row of dbEnrollments) {
-        peopleEmails.add(row.email);
-      }
-      for (const row of dbAssignmentGrades) {
-        peopleEmails.add(row.email);
-      }
-      for (const acc of studentGrades.values()) {
-        peopleEmails.add(acc.email);
-      }
-      const dbPeople = [];
-      for (const email of peopleEmails) {
-        const profile = profileMap.get(email);
-        const isTeacher = teacherClasses.has(email);
-        const portalRole = resolvePortalRoleFromPeopleSheet(profile, applicantIdSet);
-        dbPeople.push({
-          email,
-          aesopId: profile?.id || "",
-          name: emailToName.get(email) || profile?.name || "",
-          phone: profile?.phone || "",
-          portalRole,
-          teacherClasses: isTeacher
-            ? Array.from(teacherClasses.get(email)).sort().join(CLASS_LIST_DELIMITER)
-            : "",
-        });
-      }
-
-      const dbCourseGrades = [];
-      for (const acc of studentGrades.values()) {
-        const courseEntry = dbCourses.find((entry) => entry.label === acc.label);
-        if (!courseEntry) {
-          continue;
-        }
-        dbCourseGrades.push({
-          email: acc.email,
-          classroomCourseId: courseEntry.classroomCourseId,
-          calculatedPercent:
-            acc.possible > 0 ? `${((acc.earned / acc.possible) * 100).toFixed(1)}%` : "",
-          earned: acc.earned,
-          possible: acc.possible,
-        });
-      }
-
-      const { syncRunId, peopleLinkStats } = await persistClassroomSync({
-        courses: dbCourses,
-        people: dbPeople,
-        enrollments: dbEnrollments,
-        courseGrades: dbCourseGrades,
-        assignments: dbAssignments,
-        assignmentGrades: dbAssignmentGrades,
-        summary,
+    const profileMap = await loadEmailToPeopleProfileMap();
+    const applicantIdSet = await loadApplicantAesopIdSetFromSheets();
+    const peopleEmails = new Set([...teacherClasses.keys(), ...studentSections.keys()]);
+    for (const row of dbEnrollments) {
+      peopleEmails.add(row.email);
+    }
+    for (const row of dbAssignmentGrades) {
+      peopleEmails.add(row.email);
+    }
+    for (const acc of studentGrades.values()) {
+      peopleEmails.add(acc.email);
+    }
+    const dbPeople = [];
+    for (const email of peopleEmails) {
+      const profile = profileMap.get(email);
+      const isTeacher = teacherClasses.has(email);
+      const portalRole = resolvePortalRoleFromPeopleSheet(profile, applicantIdSet);
+      dbPeople.push({
+        email,
+        aesopId: profile?.id || "",
+        name: emailToName.get(email) || profile?.name || "",
+        phone: profile?.phone || "",
+        portalRole,
+        teacherClasses: isTeacher
+          ? Array.from(teacherClasses.get(email)).sort().join(CLASS_LIST_DELIMITER)
+          : "",
       });
-      if (peopleLinkStats) {
-        console.log(
-          `[classroom-sync] people link: linked=${peopleLinkStats.linked}, ` +
-            `skippedNotOnPeopleSheet=${peopleLinkStats.missing}, ` +
-            `teacherClassesUpdated=${peopleLinkStats.teacherClassesUpdated}`,
-        );
-      }
+    }
 
-      try {
-        const backupResult = await exportSyncBackup(syncRunId);
-        if (backupResult.manifestKey) {
-          await updateSyncRunBackupKey(syncRunId, backupResult.manifestKey);
-        }
-        console.log("[classroom-sync] backup export:", JSON.stringify(backupResult));
-      } catch (backupErr) {
-        console.warn("[classroom-sync] backup export failed:", backupErr.message);
+    const dbCourseGrades = [];
+    for (const acc of studentGrades.values()) {
+      const courseEntry = dbCourses.find((entry) => entry.label === acc.label);
+      if (!courseEntry) {
+        continue;
       }
-    } catch (dbErr) {
-      console.error("[classroom-sync] database persist failed:", formatErrorForLog(dbErr));
-      if (!dualWriteSheets) {
-        throw dbErr;
+      dbCourseGrades.push({
+        email: acc.email,
+        classroomCourseId: courseEntry.classroomCourseId,
+        calculatedPercent:
+          acc.possible > 0 ? `${((acc.earned / acc.possible) * 100).toFixed(1)}%` : "",
+        earned: acc.earned,
+        possible: acc.possible,
+      });
+    }
+
+    const { syncRunId, peopleLinkStats } = await persistClassroomSync({
+      courses: dbCourses,
+      people: dbPeople,
+      enrollments: dbEnrollments,
+      courseGrades: dbCourseGrades,
+      assignments: dbAssignments,
+      assignmentGrades: dbAssignmentGrades,
+      summary,
+    });
+    if (peopleLinkStats) {
+      console.log(
+        `[classroom-sync] people link: linked=${peopleLinkStats.linked}, ` +
+          `skippedNotOnPeopleSheet=${peopleLinkStats.missing}, ` +
+          `teacherClassesUpdated=${peopleLinkStats.teacherClassesUpdated}`,
+      );
+    }
+
+    try {
+      const backupResult = await exportSyncBackup(syncRunId);
+      if (backupResult.manifestKey) {
+        await updateSyncRunBackupKey(syncRunId, backupResult.manifestKey);
       }
-      console.warn("[classroom-sync] continuing because sheet dual-write succeeded");
+      console.log("[classroom-sync] backup export:", JSON.stringify(backupResult));
+    } catch (backupErr) {
+      console.warn("[classroom-sync] backup export failed:", backupErr.message);
+    }
+  }
+
+  if (dualWriteSheets) {
+    try {
+      await replaceTabData(cr.rolesSheetName || "Classroom Roles", rolesHeader, rolesRows);
+      await replaceTabData(cr.gradesSheetName || "Classroom Grades", gradesHeader, gradesRows);
+    } catch (sheetErr) {
+      console.warn("[classroom-sync] sheet dual-write failed:", sheetErr.message);
     }
   }
 

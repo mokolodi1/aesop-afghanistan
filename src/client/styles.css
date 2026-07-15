@@ -4969,6 +4969,65 @@ html[dir='rtl'] .portal-voice-memo-substeps {
   margin-bottom: 16px;
 }
 
+.portal-review-essay-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.portal-review-essay-header .portal-review-field-label {
+  margin: 0;
+}
+
+.portal-review-essay-word-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--aesop-muted);
+}
+
+.portal-review-essay-word-count-value {
+  font-variant-numeric: tabular-nums;
+}
+
+.portal-review-essay-word-count-sep {
+  opacity: 0.65;
+}
+
+.portal-review-essay-word-count-hint-text {
+  white-space: nowrap;
+}
+
+.portal-review-essay-word-count-help {
+  position: relative;
+}
+
+.portal-review-essay-word-count-popover {
+  left: auto;
+  right: 0;
+  transform: none;
+  width: min(280px, 70vw);
+}
+
+.portal-review-essay-word-count-popover::after {
+  left: auto;
+  right: 12px;
+  transform: rotate(45deg);
+}
+
+.portal-review-essay-word-count-popover-text {
+  margin: 0;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  font-weight: 400;
+  color: var(--aesop-ink, #373737);
+}
+
 .portal-review-prompt-section .portal-voice-memo-prompt {
   margin: 0;
 }

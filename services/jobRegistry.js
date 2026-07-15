@@ -97,6 +97,11 @@ const JOB_DEFINITIONS = {
       const result = await refreshPortalCaches({ includeClassroom, jobRunId: payload.jobRunId ?? null });
       if (result.mirror) {
         console.log("[hourly-cache] mirror result:", result.mirror);
+        if (Array.isArray(result.mirror.partialFailures) && result.mirror.partialFailures.length > 0) {
+          console.warn(
+            `[hourly-cache] mirror left unchanged in Postgres: ${result.mirror.partialFailures.join(", ")}`,
+          );
+        }
       }
       if (result.classroom) {
         const s = result.classroom;

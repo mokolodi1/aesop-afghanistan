@@ -1,6 +1,10 @@
 const { Readable } = require("stream");
 const { getPool, isDatabaseEnabled } = require("../db/index");
-const { downloadVoiceMemoFile } = require("./googleDrive");
+const {
+  downloadVoiceMemoFile,
+  streamVoiceMemoFile,
+  VOICE_MEMO_AUDIO_CACHE_MAX_BYTES,
+} = require("./googleDrive");
 const { voiceMemoExtensionFromFileName } = require("../utils/voiceMemoExtensions");
 const {
   voiceMemoNeedsTranscodeForPlayback,
@@ -8,8 +12,6 @@ const {
   transcodeVoiceMemoToM4aStream,
 } = require("../utils/voiceMemoTranscode");
 
-/** Match duration probing: voice notes are small; skip oversized Drive files. */
-const VOICE_MEMO_AUDIO_CACHE_MAX_BYTES = 8 * 1024 * 1024;
 /** Download/cache in chunks so cron jobs can reclaim memory between files. */
 const VOICE_MEMO_AUDIO_SYNC_CHUNK_SIZE = 10;
 
@@ -314,7 +316,6 @@ async function syncVoiceMemoAudioFromScan(scan, options = {}) {
 }
 
 /**
- * Stream a cached voice memo from Postgres (primary playback path).
  * @param {string} fileId
  * @param {string} [rangeHeader]
  * @returns {Promise<{ stream: import('stream').Readable, mimeType: string, fileName: string, size: number|null, status: number, contentRange: string|null, contentLength: string|null }>}
@@ -364,12 +365,35 @@ async function streamVoiceMemoFromCache(fileId, rangeHeader = "") {
   };
 }
 
+/**
+ * Stream a voice memo: Postgres cache first, then Drive on cache miss.
+ * @param {string} fileId
+ * @param {string} [rangeHeader]
+ */
+async function streamVoiceMemoForPlayback(fileId, rangeHeader = "") {
+  const normalizedFileId = String(fileId || "").trim();
+  if (!normalizedFileId) {
+    const error = new Error("A voice memo file id is required.");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const row = await getVoiceMemoAudioRow(normalizedFileId);
+  if (row?.content && row.sizeBytes > 0) {
+    return streamVoiceMemoFromCache(normalizedFileId, rangeHeader);
+  }
+
+  return streamVoiceMemoFile(normalizedFileId, rangeHeader);
+}
+
 module.exports = {
+  VOICE_MEMO_AUDIO_CACHE_MAX_BYTES,
   VOICE_MEMO_NOT_CACHED_MESSAGE,
   collectDriveFileIdsFromScan,
   parseVoiceMemoByteRange,
   syncVoiceMemoAudioFromScan,
   streamVoiceMemoFromCache,
+  streamVoiceMemoForPlayback,
   getVoiceMemoAudioRow,
   listCachedVoiceMemoFileIds,
   pruneVoiceMemoAudioNotInDrive,

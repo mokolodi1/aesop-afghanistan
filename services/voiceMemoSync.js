@@ -987,7 +987,6 @@ async function runVoiceMemoRound2Sync(options = {}) {
     );
   } catch (error) {
     console.warn("[sync-voice-memos] voice memo audio cache failed:", error.message || error);
-    throw error;
   }
 
   // One values.get is much lighter than worksheet.getRows() on large Applicants tabs.

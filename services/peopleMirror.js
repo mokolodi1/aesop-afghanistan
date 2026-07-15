@@ -524,7 +524,6 @@ async function mirrorApplicantsAndDriveFromSheets() {
       );
     } catch (error) {
       console.warn("[mirror] voice memo audio cache failed:", error.message || error);
-      throw error;
     }
   }
 

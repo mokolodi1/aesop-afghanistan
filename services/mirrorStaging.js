@@ -35,6 +35,7 @@ const {
 } = require("./peopleMirror");
 const {
   truncateMirrorStagingTables,
+  truncateMirrorStagingTable,
   createMirrorSyncRun,
   finalizeMirrorSyncRun,
   promoteStagingMirror,
@@ -224,7 +225,6 @@ async function mirrorApplicantsAndDriveToStaging() {
       );
     } catch (error) {
       console.warn("[mirror] voice memo audio cache failed:", error.message || error);
-      throw error;
     }
   }
 
@@ -483,27 +483,40 @@ async function mirrorPeopleAndDingViaStaging(options = {}) {
 
   try {
     const applicantIdSet = await loadApplicantAesopIdSetFromSheets();
-    const peopleResult = await mirrorAllPeopleToStaging();
-    const dingResult = await mirrorDingNumbersToStaging(applicantIdSet);
+    await mirrorAllPeopleToStaging();
+
+    let dingResult = { mirrored: 0 };
+    let dingStagingFailed = false;
+    try {
+      dingResult = await mirrorDingNumbersToStaging(applicantIdSet);
+    } catch (error) {
+      dingStagingFailed = true;
+      console.warn("[people-mirror] Ding numbers staging failed:", error.message);
+      await truncateMirrorStagingTable(pool, "ding_numbers_staging");
+    }
 
     let applicantsResult = { mirrored: 0, driveFiles: 0 };
+    let applicantsStagingFailed = false;
     try {
       applicantsResult = await mirrorApplicantsAndDriveToStaging();
       console.log(
         `[people-mirror] Applicants/Drive staging: mirrored=${applicantsResult.mirrored}, driveFiles=${applicantsResult.driveFiles}`,
       );
     } catch (error) {
+      applicantsStagingFailed = true;
       console.warn("[people-mirror] Applicants/Drive staging failed:", error.message);
-      throw error;
+      await truncateMirrorStagingTable(pool, "applicants_staging");
     }
 
     let reviewsResult = { mirrored: 0 };
+    let reviewsStagingFailed = false;
     try {
       reviewsResult = await mirrorApplicantReviewsToStaging();
       console.log(`[people-mirror] ApplicantReviews staging: mirrored=${reviewsResult.mirrored}`);
     } catch (error) {
+      reviewsStagingFailed = true;
       console.warn("[people-mirror] ApplicantReviews staging failed:", error.message);
-      throw error;
+      await truncateMirrorStagingTable(pool, "applicant_reviews_staging");
     }
 
     const promoteResult = await promoteStagingMirror(mirrorSyncRunId, applicantIdSet);
@@ -515,6 +528,22 @@ async function mirrorPeopleAndDingViaStaging(options = {}) {
       applicantReviewsCount: promoteResult.applicantReviews,
     });
 
+    const partialFailures = [];
+    if (dingStagingFailed) {
+      partialFailures.push("ding_numbers");
+    }
+    if (applicantsStagingFailed) {
+      partialFailures.push("applicants");
+    }
+    if (reviewsStagingFailed) {
+      partialFailures.push("applicant_reviews");
+    }
+    if (partialFailures.length > 0) {
+      console.warn(
+        `[people-mirror] promoted people cache; left unchanged in Postgres: ${partialFailures.join(", ")}`,
+      );
+    }
+
     return {
       people: promoteResult.people,
       peoplePruned: promoteResult.peoplePruned,
@@ -524,6 +553,7 @@ async function mirrorPeopleAndDingViaStaging(options = {}) {
       driveFiles: applicantsResult.driveFiles,
       applicantReviews: promoteResult.applicantReviews,
       mirrorSyncRunId,
+      partialFailures,
     };
   } catch (error) {
     await finalizeMirrorSyncRun(mirrorSyncRunId, "failed", { error: error.message });
