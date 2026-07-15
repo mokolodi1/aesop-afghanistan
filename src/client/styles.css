@@ -4914,6 +4914,15 @@ html[dir='rtl'] .portal-voice-memo-substeps {
   margin: 0;
 }
 
+.portal-review-prompt-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
 .portal-review-prompt-toggle {
   width: auto;
   flex-shrink: 0;

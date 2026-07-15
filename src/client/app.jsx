@@ -8535,7 +8535,7 @@ function useReviewAutoSave({ drafts, onSaveOne }) {
   return { markDirty, saveStatus, lastSavedAt };
 }
 
-function PortalReviewPrompt({ prompt, t }) {
+function PortalReviewPrompt({ prompt, t, promptHidden, onTogglePromptHidden }) {
   const [showTranslation, setShowTranslation] = useState(false);
   const fullText = String(prompt || '').trim();
 
@@ -8543,13 +8543,37 @@ function PortalReviewPrompt({ prompt, t }) {
     setShowTranslation(false);
   }, [fullText]);
 
+  const header = (
+    <div className="portal-review-prompt-header">
+      <h4 className="portal-review-field-label portal-review-prompt-label">{t('reviews.promptLabel')}</h4>
+      <div className="portal-review-prompt-actions">
+        {!promptHidden && fullText && hasNonLatinLetters(fullText) ? (
+          <button
+            type="button"
+            className="portal-review-prompt-toggle"
+            onClick={() => setShowTranslation((current) => !current)}
+            aria-expanded={showTranslation}
+          >
+            {showTranslation ? t('reviews.hideTranslation') : t('reviews.showTranslation')}
+          </button>
+        ) : null}
+        <button
+          type="button"
+          className="portal-review-prompt-toggle"
+          onClick={onTogglePromptHidden}
+          aria-expanded={!promptHidden}
+        >
+          {promptHidden ? t('reviews.showPrompt') : t('reviews.hidePrompt')}
+        </button>
+      </div>
+    </div>
+  );
+
   if (!fullText) {
     return (
       <>
-        <div className="portal-review-prompt-header">
-          <h4 className="portal-review-field-label portal-review-prompt-label">{t('reviews.promptLabel')}</h4>
-        </div>
-        <p className="portal-field-hint">{t('reviews.promptMissing')}</p>
+        {header}
+        {promptHidden ? null : <p className="portal-field-hint">{t('reviews.promptMissing')}</p>}
       </>
     );
   }
@@ -8560,22 +8584,12 @@ function PortalReviewPrompt({ prompt, t }) {
 
   return (
     <>
-      <div className="portal-review-prompt-header">
-        <h4 className="portal-review-field-label portal-review-prompt-label">{t('reviews.promptLabel')}</h4>
-        {hasTranslation ? (
-          <button
-            type="button"
-            className="portal-review-prompt-toggle"
-            onClick={() => setShowTranslation((current) => !current)}
-            aria-expanded={showTranslation}
-          >
-            {showTranslation ? t('reviews.hideTranslation') : t('reviews.showTranslation')}
-          </button>
-        ) : null}
-      </div>
-      <div className="portal-review-essay portal-review-prompt-body" dir="auto">
-        {displayText}
-      </div>
+      {header}
+      {promptHidden ? null : (
+        <div className="portal-review-essay portal-review-prompt-body" dir="auto">
+          {displayText}
+        </div>
+      )}
     </>
   );
 }
@@ -8688,6 +8702,8 @@ function PortalReviewCard({
   onNextStudent,
   showNextStudent,
   onRefreshStream,
+  promptHidden,
+  onTogglePromptHidden,
   t,
 }) {
   const ageDisplay = assignment.age?.trim() || t('reviews.notAvailable');
@@ -8695,7 +8711,12 @@ function PortalReviewCard({
   return (
     <article className="portal-review-card" aria-labelledby={`review-${assignment.applicantId}-title`}>
       <section className="portal-review-prompt-section" aria-label={t('reviews.promptLabel')}>
-        <PortalReviewPrompt prompt={assignment.round2Prompt} t={t} />
+        <PortalReviewPrompt
+          prompt={assignment.round2Prompt}
+          t={t}
+          promptHidden={promptHidden}
+          onTogglePromptHidden={onTogglePromptHidden}
+        />
       </section>
 
       <header className="portal-review-card-header">
@@ -8845,7 +8866,12 @@ function PortalReviewApplicationsPage() {
   const [assignments, setAssignments] = useState([]);
   const [drafts, setDrafts] = useState({});
   const [selectedApplicantId, setSelectedApplicantId] = useState('');
+  const [promptHidden, setPromptHidden] = useState(false);
   const reviewDetailRef = useRef(null);
+
+  const togglePromptHidden = useCallback(() => {
+    setPromptHidden((current) => !current);
+  }, []);
 
   const saveOne = useCallback(async (applicantId, draft) => {
     await portalApiPost('/api/portal-reviews/save', {
@@ -9044,6 +9070,8 @@ function PortalReviewApplicationsPage() {
                       onNextStudent={goToNextStudent}
                       showNextStudent={showNextStudent}
                       onRefreshStream={refreshStreamTokens}
+                      promptHidden={promptHidden}
+                      onTogglePromptHidden={togglePromptHidden}
                       t={t}
                     />
                   ) : null}
