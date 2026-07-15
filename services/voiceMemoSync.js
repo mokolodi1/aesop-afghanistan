@@ -1305,10 +1305,11 @@ async function runVoiceMemoRound2Sync(options = {}) {
 }
 
 /**
+ * @param {{ deadlineAt?: number }} [options]
  * @returns {Promise<Set<string>>} normalized lowercase AESOP IDs from the Applicants sheet
  */
-async function loadApplicantAesopIdSetFromSheets() {
-  const { dataRows, cfg } = await loadApplicantsDataForStats();
+async function loadApplicantAesopIdSetFromSheets(options = {}) {
+  const { dataRows, cfg } = await loadApplicantsDataForStats(options);
   const ids = new Set();
   for (const rowData of dataRows) {
     const id = String(rowData[cfg.idColumnIndex] ?? "").trim().toLowerCase();

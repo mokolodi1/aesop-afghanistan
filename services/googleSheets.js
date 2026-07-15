@@ -893,13 +893,21 @@ function readPeoplePortalRoleFromRow(row, rowData, roleColumnIndex) {
 const peopleHeaderLoaded = new Set();
 
 /** @param {import("google-spreadsheet").GoogleSpreadsheetWorksheet} worksheet */
-async function preparePeopleWorksheet(worksheet) {
+async function preparePeopleWorksheet(worksheet, options = {}) {
   const key = worksheet.title || "People";
   if (peopleHeaderLoaded.has(key)) {
     return;
   }
   try {
-    await worksheet.loadHeaderRow(1);
+    if (Number.isFinite(options.deadlineAt)) {
+      await sheetsApiCall(
+        "loadHeaderRow(people)",
+        () => worksheet.loadHeaderRow(1),
+        { deadlineAt: options.deadlineAt },
+      );
+    } else {
+      await worksheet.loadHeaderRow(1);
+    }
   } catch (error) {
     const msg = error?.message ? String(error.message) : String(error);
     if (msg.includes("Duplicate header")) {
@@ -2349,7 +2357,7 @@ async function getUserData(email) {
  *   sheetRow: Record<string, string>,
  * }>>}
  */
-async function loadAllPeopleRowsFromSheets() {
+async function loadAllPeopleRowsFromSheets(options = {}) {
   const rows = [];
   try {
     const sheet = await initGoogleSheets();
@@ -2359,9 +2367,13 @@ async function loadAllPeopleRowsFromSheets() {
       return rows;
     }
 
-    await preparePeopleWorksheet(worksheet);
+    await preparePeopleWorksheet(worksheet, options);
     const headerValues = Array.isArray(worksheet.headerValues) ? worksheet.headerValues : [];
-    const sheetRows = await worksheet.getRows();
+    const sheetRows = Number.isFinite(options.deadlineAt)
+      ? await sheetsApiCall("getRows(people)", () => worksheet.getRows(), {
+          deadlineAt: options.deadlineAt,
+        })
+      : await worksheet.getRows();
     const idColumnIndex = resolveColumnIndex(config.googleSheets.idColumn || "B");
     const nameColumnIndex = resolveColumnIndex(config.googleSheets.nameColumn || "C");
     const emailColumnIndex = resolveColumnIndex(config.googleSheets.emailColumn || "D");
@@ -2412,9 +2424,9 @@ async function loadAllPeopleRowsFromSheets() {
  * Build a lookup map from normalized People-tab email to profile fields.
  * @returns {Promise<Map<string, object>>}
  */
-async function loadEmailToPeopleProfileMap() {
+async function loadEmailToPeopleProfileMap(options = {}) {
   const map = new Map();
-  const rows = await loadAllPeopleRowsFromSheets();
+  const rows = await loadAllPeopleRowsFromSheets(options);
   for (const profile of rows) {
     map.set(profile.email, profile);
   }
@@ -2425,7 +2437,7 @@ async function loadEmailToPeopleProfileMap() {
  * Latest Ding number per AESOP ID from the Ding changes tab (one sheet pass).
  * @returns {Promise<Map<string, string>>} normalized userId -> ding number
  */
-async function buildLatestDingNumberByUserIdMap() {
+async function buildLatestDingNumberByUserIdMap(options = {}) {
   const map = new Map();
   try {
     const sheet = await initGoogleSheets();
@@ -2435,7 +2447,11 @@ async function buildLatestDingNumberByUserIdMap() {
       return map;
     }
 
-    const rows = await worksheet.getRows();
+    const rows = Number.isFinite(options.deadlineAt)
+      ? await sheetsApiCall("getRows(ding changes)", () => worksheet.getRows(), {
+          deadlineAt: options.deadlineAt,
+        })
+      : await worksheet.getRows();
     const idColumnIndex = resolveColumnIndex(config.googleSheets.dingIdColumn || "A");
     const tsColumnIndex = resolveColumnIndex(config.googleSheets.dingTimestampColumn || "B");
     const dingColumnIndex = resolveColumnIndex(config.googleSheets.dingNumberColumn || "C");

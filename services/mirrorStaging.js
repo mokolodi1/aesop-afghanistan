@@ -11,6 +11,7 @@ const {
   initGoogleSheets,
   getWorksheetByTitle,
   resolveColumnIndex,
+  sheetsApiCall,
 } = require("./googleSheets");
 const { getApplicantReviewsConfig } = require("./applicantReviews");
 const {
@@ -42,8 +43,8 @@ const {
 } = require("./mirrorPromote");
 const { syncVoiceMemoAudioFromScan } = require("./voiceMemoAudio");
 
-/** Drive throttling can stretch the mirror; retry 429s for up to ~45 minutes. */
-const MIRROR_DRIVE_TIME_BUDGET_MS = 45 * 60 * 1000;
+/** Sheets/Drive throttling can stretch the mirror; retry 429s for up to ~45 minutes. */
+const MIRROR_SYNC_TIME_BUDGET_MS = 45 * 60 * 1000;
 
 /**
  * @param {object} profile
@@ -120,22 +121,24 @@ async function upsertPersonStagingRow(runner, profile, applicantIdSet) {
   return result.rows[0] || null;
 }
 
-async function mirrorAllPeopleToStaging() {
-  const [rawRows, applicantIdSet, classroomRoles] = await Promise.all([
-    loadAllPeopleRowsFromSheets(),
-    loadApplicantAesopIdSetFromSheets(),
+async function mirrorAllPeopleToStaging(deadlineAt, applicantIdSet = null) {
+  const sheetOpts = { deadlineAt };
+  const [rawRows, resolvedApplicantIds, classroomRoles] = await Promise.all([
+    loadAllPeopleRowsFromSheets(sheetOpts),
+    applicantIdSet ? Promise.resolve(applicantIdSet) : loadApplicantAesopIdSetFromSheets(sheetOpts),
     loadClassroomRoleEmailSetsFromSheets().catch((error) => {
       console.warn("[people-mirror] Classroom role sets unavailable:", error.message);
       return { teacherEmails: new Set(), studentEmails: new Set() };
     }),
   ]);
+  const ids = applicantIdSet || resolvedApplicantIds;
   const prepared = preparePeopleRowsForMirror(rawRows);
   logPeopleMirrorDedupeStats(prepared);
   const { rows } = prepared;
   applyDerivedPeopleStatusToRows(rows, {
     teacherEmails: classroomRoles.teacherEmails,
     studentEmails: classroomRoles.studentEmails,
-    applicantIdSet,
+    applicantIdSet: ids,
   });
 
   const pool = getPool();
@@ -145,7 +148,7 @@ async function mirrorAllPeopleToStaging() {
 
   let mirrored = 0;
   for (const profile of rows) {
-    const row = await upsertPersonStagingRow(pool, profile, applicantIdSet);
+    const row = await upsertPersonStagingRow(pool, profile, ids);
     if (row) {
       mirrored += 1;
     }
@@ -157,16 +160,17 @@ async function mirrorAllPeopleToStaging() {
   };
 }
 
-async function mirrorDingNumbersToStaging(applicantIdSet) {
+async function mirrorDingNumbersToStaging(applicantIdSet, deadlineAt) {
   const pool = getPool();
   if (!pool) {
     return { mirrored: 0 };
   }
 
-  const ids = applicantIdSet || (await loadApplicantAesopIdSetFromSheets());
+  const sheetOpts = { deadlineAt };
+  const ids = applicantIdSet || (await loadApplicantAesopIdSetFromSheets(sheetOpts));
   const [profileMap, dingByUserId] = await Promise.all([
-    loadEmailToPeopleProfileMap(),
-    buildLatestDingNumberByUserIdMap(),
+    loadEmailToPeopleProfileMap(sheetOpts),
+    buildLatestDingNumberByUserIdMap(sheetOpts),
   ]);
 
   let mirrored = 0;
@@ -197,14 +201,13 @@ async function mirrorDingNumbersToStaging(applicantIdSet) {
   return { mirrored };
 }
 
-async function mirrorApplicantsAndDriveToStaging() {
+async function mirrorApplicantsAndDriveToStaging(deadlineAt) {
   const pool = getPool();
   if (!pool) {
     return { mirrored: 0, driveFiles: 0 };
   }
 
-  const deadlineAt = Date.now() + MIRROR_DRIVE_TIME_BUDGET_MS;
-  const { dataRows, columns, cfg } = await loadApplicantsDataForStats();
+  const { dataRows, columns, cfg } = await loadApplicantsDataForStats({ deadlineAt });
   const durationLimits = getVoiceMemoDurationLimits(cfg.voiceMemo);
 
   const folderId = String(cfg.voiceMemo?.driveFolderId || "").trim();
@@ -384,7 +387,7 @@ async function mirrorApplicantsAndDriveToStaging() {
   return { mirrored, driveFiles: memoById.size };
 }
 
-async function mirrorApplicantReviewsToStaging() {
+async function mirrorApplicantReviewsToStaging(deadlineAt) {
   const pool = getPool();
   if (!pool) {
     return { mirrored: 0 };
@@ -397,8 +400,16 @@ async function mirrorApplicantReviewsToStaging() {
     throw new Error(`Sheet "${reviewsCfg.sheetName}" was not found.`);
   }
 
-  await worksheet.loadHeaderRow(reviewsCfg.headerRowNum);
-  const rows = await worksheet.getRows();
+  await sheetsApiCall(
+    "loadHeaderRow(applicant reviews)",
+    () => worksheet.loadHeaderRow(reviewsCfg.headerRowNum),
+    { deadlineAt },
+  );
+  const rows = await sheetsApiCall(
+    "getRows(applicant reviews)",
+    () => worksheet.getRows(),
+    { deadlineAt },
+  );
   let mirrored = 0;
 
   for (const row of rows) {
@@ -480,15 +491,16 @@ async function mirrorPeopleAndDingViaStaging(options = {}) {
 
   const mirrorSyncRunId = await createMirrorSyncRun(options.jobRunId ?? null);
   await truncateMirrorStagingTables(pool);
+  const deadlineAt = Date.now() + MIRROR_SYNC_TIME_BUDGET_MS;
 
   try {
-    const applicantIdSet = await loadApplicantAesopIdSetFromSheets();
-    await mirrorAllPeopleToStaging();
+    const applicantIdSet = await loadApplicantAesopIdSetFromSheets({ deadlineAt });
+    await mirrorAllPeopleToStaging(deadlineAt, applicantIdSet);
 
     let dingResult = { mirrored: 0 };
     let dingStagingFailed = false;
     try {
-      dingResult = await mirrorDingNumbersToStaging(applicantIdSet);
+      dingResult = await mirrorDingNumbersToStaging(applicantIdSet, deadlineAt);
     } catch (error) {
       dingStagingFailed = true;
       console.warn("[people-mirror] Ding numbers staging failed:", error.message);
@@ -498,7 +510,7 @@ async function mirrorPeopleAndDingViaStaging(options = {}) {
     let applicantsResult = { mirrored: 0, driveFiles: 0 };
     let applicantsStagingFailed = false;
     try {
-      applicantsResult = await mirrorApplicantsAndDriveToStaging();
+      applicantsResult = await mirrorApplicantsAndDriveToStaging(deadlineAt);
       console.log(
         `[people-mirror] Applicants/Drive staging: mirrored=${applicantsResult.mirrored}, driveFiles=${applicantsResult.driveFiles}`,
       );
@@ -511,7 +523,7 @@ async function mirrorPeopleAndDingViaStaging(options = {}) {
     let reviewsResult = { mirrored: 0 };
     let reviewsStagingFailed = false;
     try {
-      reviewsResult = await mirrorApplicantReviewsToStaging();
+      reviewsResult = await mirrorApplicantReviewsToStaging(deadlineAt);
       console.log(`[people-mirror] ApplicantReviews staging: mirrored=${reviewsResult.mirrored}`);
     } catch (error) {
       reviewsStagingFailed = true;

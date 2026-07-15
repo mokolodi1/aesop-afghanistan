@@ -18,6 +18,7 @@ const {
   initGoogleSheets,
   getWorksheetByTitle,
   resolveColumnIndex,
+  sheetsApiCall,
 } = require("./googleSheets");
 const { getApplicantReviewsConfig } = require("./applicantReviews");
 const {
@@ -505,7 +506,7 @@ async function mirrorApplicantsAndDriveFromSheets() {
 
   const syncedAt = new Date();
   const deadlineAt = Date.now() + MIRROR_DRIVE_TIME_BUDGET_MS;
-  const { dataRows, columns, cfg } = await loadApplicantsDataForStats();
+  const { dataRows, columns, cfg } = await loadApplicantsDataForStats({ deadlineAt });
   const durationLimits = getVoiceMemoDurationLimits(cfg.voiceMemo);
 
   const folderId = String(cfg.voiceMemo?.driveFolderId || "").trim();
@@ -650,7 +651,7 @@ async function mirrorApplicantsAndDriveFromSheets() {
   return { mirrored, driveFiles: memoById.size };
 }
 
-async function mirrorApplicantReviewsFromSheets() {
+async function mirrorApplicantReviewsFromSheets(deadlineAt = Date.now() + MIRROR_DRIVE_TIME_BUDGET_MS) {
   if (!isDatabaseEnabled()) {
     return { mirrored: 0 };
   }
@@ -662,8 +663,16 @@ async function mirrorApplicantReviewsFromSheets() {
     throw new Error(`Sheet "${reviewsCfg.sheetName}" was not found.`);
   }
 
-  await worksheet.loadHeaderRow(reviewsCfg.headerRowNum);
-  const rows = await worksheet.getRows();
+  await sheetsApiCall(
+    "loadHeaderRow(applicant reviews)",
+    () => worksheet.loadHeaderRow(reviewsCfg.headerRowNum),
+    { deadlineAt },
+  );
+  const rows = await sheetsApiCall(
+    "getRows(applicant reviews)",
+    () => worksheet.getRows(),
+    { deadlineAt },
+  );
   const syncedAt = new Date();
   let mirrored = 0;
 
@@ -709,14 +718,16 @@ async function mirrorPeopleAndDingFromSheets(options = {}) {
     const { mirrorPeopleAndDingViaStaging } = require("./mirrorStaging");
     const stagingResult = await mirrorPeopleAndDingViaStaging(options);
     if (options.includeDingHistory === true) {
-      const applicantIdSet = await loadApplicantAesopIdSetFromSheets();
+      const deadlineAt = Date.now() + MIRROR_DRIVE_TIME_BUDGET_MS;
+      const applicantIdSet = await loadApplicantAesopIdSetFromSheets({ deadlineAt });
       const historyResult = await mirrorDingHistoryFromSheets({}, applicantIdSet);
       return { ...stagingResult, dingHistory: historyResult.mirrored };
     }
     return stagingResult;
   }
 
-  const applicantIdSet = await loadApplicantAesopIdSetFromSheets();
+  const deadlineAt = Date.now() + MIRROR_DRIVE_TIME_BUDGET_MS;
+  const applicantIdSet = await loadApplicantAesopIdSetFromSheets({ deadlineAt });
   const peopleResult = await mirrorAllPeopleFromSheets();
   const dingResult = await mirrorDingNumbersFromSheets(applicantIdSet);
   let historyResult = { mirrored: 0 };
@@ -734,7 +745,7 @@ async function mirrorPeopleAndDingFromSheets(options = {}) {
   }
   let reviewsResult = { mirrored: 0 };
   try {
-    reviewsResult = await mirrorApplicantReviewsFromSheets();
+    reviewsResult = await mirrorApplicantReviewsFromSheets(deadlineAt);
     console.log(`[people-mirror] ApplicantReviews: mirrored=${reviewsResult.mirrored}`);
   } catch (error) {
     console.warn("[people-mirror] ApplicantReviews mirror failed:", error.message);
