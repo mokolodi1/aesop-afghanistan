@@ -8,7 +8,12 @@ const {
   sheetVoiceMemoLengthSeconds,
 } = require("../utils/voiceMemoDuration");
 const { findProfileById } = require("./googleSheets");
-const { streamVoiceMemoFile, getVoiceMemoFileForAesopId, getVoiceMemoDurationSeconds } = require("./googleDrive");
+const {
+  streamVoiceMemoFile,
+  getVoiceMemoFileForAesopId,
+  getVoiceMemoDurationSeconds,
+  extractDriveFileIdFromLink,
+} = require("./googleDrive");
 const { updateApplicantDriveDurationSeconds } = require("./classroomDb");
 const {
   getApplicantRowByAesopId,
@@ -233,6 +238,7 @@ async function verifyPortalVoiceMemoSession({ userId, email }) {
  * @returns {Promise<{ fileId: string, fileName: string|null, submittedAt: Date|null }|null>}
  */
 async function resolveDriveFileForApplicant(applicant, cfg) {
+  const aesopId = applicant?.aesopId ? String(applicant.aesopId).trim() : "";
   const cachedFileId = applicant?.driveFileId ? String(applicant.driveFileId).trim() : "";
   if (cachedFileId) {
     return {
@@ -242,16 +248,36 @@ async function resolveDriveFileForApplicant(applicant, cfg) {
     };
   }
 
+  // Prefer the sheet/DB voice-note link before scanning the whole Drive folder.
+  const linkFileId = extractDriveFileIdFromLink(applicant?.links);
+  if (linkFileId) {
+    if (aesopId) {
+      updateApplicantDriveDurationSeconds(aesopId, {
+        driveFileId: linkFileId,
+      }).catch(() => {});
+    }
+    return {
+      fileId: linkFileId,
+      fileName: null,
+      submittedAt: null,
+    };
+  }
+
   const folderId = String(cfg.voiceMemo.driveFolderId || "").trim();
-  if (!folderId || !applicant?.aesopId) {
+  if (!folderId || !aesopId) {
     return null;
   }
 
   const scanOptions = getVoiceMemoDriveScanOptions(cfg.voiceMemo);
-  const driveFile = await getVoiceMemoFileForAesopId(folderId, applicant.aesopId, scanOptions);
+  const driveFile = await getVoiceMemoFileForAesopId(folderId, aesopId, scanOptions);
   if (!driveFile) {
     return null;
   }
+
+  updateApplicantDriveDurationSeconds(aesopId, {
+    driveFileId: driveFile.fileId,
+    driveFileName: driveFile.fileName,
+  }).catch(() => {});
 
   return {
     fileId: driveFile.fileId,

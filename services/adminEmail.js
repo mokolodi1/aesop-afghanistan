@@ -13,6 +13,7 @@ const {
   getAdmissionsFilterOptions,
   analyzeDuplicateApplicantEmails,
   withApplicantRecipientEmails,
+  loadReviewerEmailRecipients,
 } = require("./googleSheets");
 const { sendPostmarkEmail, sendPostmarkBatch, getPostmarkMessageStream, getPostmarkBroadcastMessageStream } = require("./postmark");
 const { formatEmailBodyHtml, wrapAesopEmail } = require("./emailBranding");
@@ -445,9 +446,57 @@ async function resolveAdmissionsRecipients(filter) {
   return { sheetData, recipients, recipientStats };
 }
 
+async function resolveReviewersRecipients(filter) {
+  let recipients = await loadReviewerEmailRecipients();
+  const normalizedFilter = normalizeFilter(filter);
+  if (normalizedFilter && Array.isArray(normalizedFilter.aesopIds)) {
+    const idSet = new Set(
+      normalizedFilter.aesopIds.map((id) => String(id).trim().toLowerCase()).filter(Boolean),
+    );
+    recipients = recipients.filter((row) => idSet.has(String(row.id || "").trim().toLowerCase()));
+  }
+  const recipientStats = {
+    rowsWithEmail: recipients.length,
+    rowsAfterFilter: recipients.length,
+    recipientCount: recipients.length,
+    filter: normalizedFilter,
+    rowsSkippedNoEmail: 0,
+    skippedFromSend: [],
+    excludedFromSend: [],
+    duplicateEmailGroupCount: 0,
+    duplicateEmailSkips: [],
+    duplicateEmailGroups: [],
+    transactionalRecipientCount: 0,
+    broadcastRecipientCount: recipients.length,
+  };
+  if (normalizedFilter?.aesopIds) {
+    console.info(
+      `[reviewers-email] filter aesopIds (${normalizedFilter.aesopIds.length} id(s)): ${recipients.length} recipient(s)`,
+    );
+  } else {
+    console.info(
+      `[reviewers-email] all reviewers: ${recipients.length} recipient(s) with email (Associated Email else Current Email)`,
+    );
+  }
+  return { recipients, recipientStats };
+}
+
+async function resolveGroupRecipients(group, filter) {
+  if (group === "admissions") {
+    return resolveAdmissionsRecipients(filter);
+  }
+  if (group === "reviewers") {
+    return resolveReviewersRecipients(filter);
+  }
+  const error = new Error("Only the Admissions and Reviewers groups are available right now.");
+  error.statusCode = 400;
+  throw error;
+}
+
 function getEmailGroups() {
   return [
     { id: "admissions", label: "Admissions", enabled: true },
+    { id: "reviewers", label: "Reviewers", enabled: true },
     { id: "students", label: "Students", enabled: false },
   ];
 }
@@ -463,11 +512,27 @@ async function getAdmissionsMetadata() {
   };
 }
 
+async function getReviewersMetadata() {
+  const recipients = await loadReviewerEmailRecipients();
+  return {
+    sheetName: config.googleSheets?.sheetName || "People",
+    totalRows: recipients.length,
+    reviewerColumn: config.googleSheets?.peopleReviewerColumn || "W",
+    associatedEmailColumn: config.googleSheets?.peopleAssociatedEmailColumn || "Y",
+    emailColumn: config.googleSheets?.emailColumn || "D",
+    filterColumns: [],
+    variableColumns: ["AESOP ID", "Name", "Email", "Current Email", "Associated Email", "Reviewer"],
+    columns: [],
+    valuesByColumn: {},
+    headers: [],
+  };
+}
+
 async function previewEmailRecipients({ group, filter }) {
-  if (group !== "admissions") {
+  if (group !== "admissions" && group !== "reviewers") {
     return { recipients: [], count: 0, filter: normalizeFilter(filter), stats: null, recipientStats: null };
   }
-  const { recipients, sheetData, recipientStats } = await resolveAdmissionsRecipients(filter);
+  const { recipients, sheetData, recipientStats } = await resolveGroupRecipients(group, filter);
   return {
     recipients: recipients.map((row) => ({
       id: row.id,
@@ -477,7 +542,7 @@ async function previewEmailRecipients({ group, filter }) {
     })),
     count: recipients.length,
     filter: normalizeFilter(filter),
-    stats: sheetData.stats || null,
+    stats: sheetData?.stats || null,
     recipientStats,
   };
 }
@@ -487,10 +552,14 @@ function validateComposePayload(payload) {
   const subject = typeof payload.subject === "string" ? payload.subject.trim() : "";
   const body = typeof payload.body === "string" ? payload.body.trim() : "";
   const globalVars = normalizeGlobalVars(payload.globalVars);
-  const filter = normalizeFilter(payload.filter);
+  // Reviewers: allow aesopIds subset filter; ignore Admissions-style column filters.
+  let filter = normalizeFilter(payload.filter);
+  if (group === "reviewers" && filter && !Array.isArray(filter.aesopIds)) {
+    filter = null;
+  }
 
-  if (group !== "admissions") {
-    const error = new Error("Only the Admissions group is available right now.");
+  if (group !== "admissions" && group !== "reviewers") {
+    const error = new Error("Only the Admissions and Reviewers groups are available right now.");
     error.statusCode = 400;
     throw error;
   }
@@ -532,7 +601,7 @@ async function recordAdminEmailTest(adminEmail, contentHash) {
 async function sendAdminEmailTest(adminEmail, payload) {
   assertDatabaseForCampaigns();
   const { group, subject, body, globalVars, filter } = validateComposePayload(payload);
-  const { recipients } = await resolveAdmissionsRecipients(filter);
+  const { recipients } = await resolveGroupRecipients(group, filter);
   if (recipients.length === 0) {
     const error = new Error("No recipients match the current filter.");
     error.statusCode = 400;
@@ -602,7 +671,7 @@ async function startAdminEmailCampaign(adminEmail, payload) {
     throw error;
   }
 
-  const { recipients } = await resolveAdmissionsRecipients(filter);
+  const { recipients } = await resolveGroupRecipients(group, filter);
   if (recipients.length === 0) {
     const error = new Error("No recipients match the current filter.");
     error.statusCode = 400;
@@ -1093,6 +1162,7 @@ module.exports = {
   computeContentHash,
   getEmailGroups,
   getAdmissionsMetadata,
+  getReviewersMetadata,
   previewEmailRecipients,
   sendAdminEmailTest,
   startAdminEmailCampaign,

@@ -64,7 +64,10 @@ async function acquireSheetsRequestSlots(count = 1) {
   if (!sheetsScriptRateLimitEnabled || count <= 0) {
     return;
   }
-  const want = Math.max(1, Math.floor(count));
+  const want = Math.min(
+    SHEETS_SCRIPT_MAX_REQUESTS_PER_MINUTE,
+    Math.max(1, Math.floor(count)),
+  );
   for (;;) {
     const now = Date.now();
     sheetsScriptRequestTimestamps = sheetsScriptRequestTimestamps.filter(
@@ -512,6 +515,65 @@ function resolvePeopleReviewerColumnIndex() {
   } catch {
     return null;
   }
+}
+
+function resolvePeopleAssociatedEmailColumnIndex() {
+  const columnRef = config.googleSheets.peopleAssociatedEmailColumn;
+  if (columnRef == null || String(columnRef).trim() === "" || String(columnRef).trim().toUpperCase() === "OFF") {
+    return null;
+  }
+  try {
+    return resolveColumnIndex(String(columnRef).trim());
+  } catch {
+    return null;
+  }
+}
+
+function peopleAssociatedEmailHeaderCandidates() {
+  const configured = config.googleSheets.peopleAssociatedEmailHeader;
+  const fromConfig =
+    configured != null && String(configured).trim() !== "" ? [String(configured).trim()] : [];
+  return [...fromConfig, "Associated Email", "Associated email", "AssociatedEmail"];
+}
+
+/**
+ * Read associated email from a People row (header-first, then column index).
+ * @param {import("google-spreadsheet").GoogleSpreadsheetRow | null | undefined} row
+ * @param {string[]} rowData
+ * @param {number | null} associatedEmailColumnIndex
+ * @returns {string}
+ */
+function readPeopleAssociatedEmailFromRow(row, rowData, associatedEmailColumnIndex) {
+  if (row && typeof row.get === "function") {
+    for (const header of peopleAssociatedEmailHeaderCandidates()) {
+      try {
+        const value = row.get(header);
+        if (value != null && String(value).trim() !== "") {
+          return String(value).trim();
+        }
+      } catch {
+        // Header not registered on this worksheet.
+      }
+    }
+  }
+  if (associatedEmailColumnIndex === null) {
+    return "";
+  }
+  return String(rowData[associatedEmailColumnIndex] ?? "").trim();
+}
+
+/**
+ * Prefer Associated Email (Y); fall back to Current Email (D).
+ * @param {string} associatedEmail
+ * @param {string} currentEmail
+ * @returns {string}
+ */
+function resolvePeopleRecipientEmail(associatedEmail, currentEmail) {
+  const associated = String(associatedEmail || "").trim();
+  if (associated) {
+    return associated;
+  }
+  return String(currentEmail || "").trim();
 }
 
 function readPeoplePortalRole(rowData, roleColumnIndex) {
@@ -2466,11 +2528,13 @@ async function searchPeopleProfiles(query, limit = 25) {
       return [];
     }
 
+    await preparePeopleWorksheet(worksheet);
     const rows = await worksheet.getRows();
     const idColumnIndex = resolveColumnIndex(config.googleSheets.idColumn || "B");
     const nameColumnIndex = resolveColumnIndex(config.googleSheets.nameColumn || "C");
     const emailColumnIndex = resolveColumnIndex(config.googleSheets.emailColumn || "D");
     const phoneColumnIndex = resolvePeoplePhoneColumnIndex();
+    const reviewerColumnIndex = resolvePeopleReviewerColumnIndex();
 
     const matches = [];
     for (const row of rows) {
@@ -2489,6 +2553,7 @@ async function searchPeopleProfiles(query, limit = 25) {
         name,
         email,
         phone,
+        reviewerRole: readPeopleReviewerRoleFromRow(row, rowData, reviewerColumnIndex),
         // Status comes from Classroom/Applicants at admin lookup time, not People Status column.
         peopleStatus: resolvePeopleStatus(id, ""),
       });
@@ -2501,6 +2566,156 @@ async function searchPeopleProfiles(query, limit = 25) {
     console.warn("searchPeopleProfiles:", formatGoogleSheetsOperationError(error));
     return [];
   }
+}
+
+/**
+ * People rows marked Reviewer=Yes, with email from Associated Email (Y) else Current Email (D).
+ * Same recipient shape as Admissions bulk email (`id`, `name`, `email`, `fields`).
+ * @returns {Promise<Array<{ id: string, name: string, email: string, fields: Record<string, string> }>>}
+ */
+async function loadReviewerEmailRecipients() {
+  const recipients = [];
+  try {
+    const sheet = await initGoogleSheets();
+    const sheetName = config.googleSheets.sheetName || "People";
+    const worksheet = sheet.sheetsByTitle[sheetName];
+    if (!worksheet) {
+      return recipients;
+    }
+
+    await preparePeopleWorksheet(worksheet);
+    const rows = await worksheet.getRows();
+    const idColumnIndex = resolveColumnIndex(config.googleSheets.idColumn || "B");
+    const nameColumnIndex = resolveColumnIndex(config.googleSheets.nameColumn || "C");
+    const emailColumnIndex = resolveColumnIndex(config.googleSheets.emailColumn || "D");
+    const reviewerColumnIndex = resolvePeopleReviewerColumnIndex();
+    const associatedEmailColumnIndex = resolvePeopleAssociatedEmailColumnIndex();
+
+    for (const row of rows) {
+      const rowData = Array.isArray(row._rawData) ? row._rawData : [];
+      const reviewerRole = readPeopleReviewerRoleFromRow(row, rowData, reviewerColumnIndex);
+      if (!isPeopleSheetReviewerRole(reviewerRole)) {
+        continue;
+      }
+      const id = normalizeSheetAesopId(rowData[idColumnIndex]);
+      const name = String(rowData[nameColumnIndex] ?? "").trim();
+      const currentEmail = String(rowData[emailColumnIndex] ?? "").trim();
+      const associatedEmail = readPeopleAssociatedEmailFromRow(
+        row,
+        rowData,
+        associatedEmailColumnIndex,
+      );
+      const email = resolvePeopleRecipientEmail(associatedEmail, currentEmail);
+      if (!email) {
+        continue;
+      }
+      recipients.push({
+        id,
+        name,
+        email,
+        fields: {
+          "AESOP ID": id,
+          Name: name,
+          Email: email,
+          "Current Email": currentEmail,
+          "Associated Email": associatedEmail,
+          Reviewer: reviewerRole,
+        },
+      });
+    }
+  } catch (error) {
+    console.warn("loadReviewerEmailRecipients:", formatGoogleSheetsOperationError(error));
+  }
+  return recipients;
+}
+
+/**
+ * Set or clear People Column W (Reviewer) for one person looked up by AESOP ID or Current Email.
+ * @param {{ aesopId?: string, email?: string, reviewer: boolean }} params
+ * @returns {Promise<{ id: string, name: string, email: string, reviewerRole: string, reviewer: boolean }>}
+ */
+async function setPeopleReviewerRole({ aesopId, email, reviewer }) {
+  const reviewerColumnIndex = resolvePeopleReviewerColumnIndex();
+  if (reviewerColumnIndex === null) {
+    const error = new Error("People Reviewer column is not configured.");
+    error.statusCode = 503;
+    throw error;
+  }
+
+  const idKey = typeof aesopId === "string" ? aesopId.trim() : "";
+  const emailKey = typeof email === "string" ? email.trim().toLowerCase() : "";
+  if (!idKey && !emailKey) {
+    const error = new Error("Provide an AESOP ID or email.");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const doc = await initGoogleSheets();
+  const peopleName = config.googleSheets.sheetName || "People";
+  const peopleSheet = doc.sheetsByTitle[peopleName];
+  if (!peopleSheet) {
+    throw new Error(`Sheet "${peopleName}" not found.`);
+  }
+
+  await preparePeopleWorksheet(peopleSheet);
+  const idColIdx = resolveColumnIndex(config.googleSheets.idColumn || "B");
+  const nameColIdx = resolveColumnIndex(config.googleSheets.nameColumn || "C");
+  const emailColIdx = resolveColumnIndex(config.googleSheets.emailColumn || "D");
+  const rows = await peopleSheet.getRows();
+
+  let targetRow = null;
+  for (const row of rows) {
+    const rowData = Array.isArray(row._rawData) ? row._rawData : [];
+    if (idKey) {
+      const rowId = normalizeSheetAesopId(rowData[idColIdx]).toLowerCase();
+      if (rowId === idKey.toLowerCase()) {
+        targetRow = row;
+        break;
+      }
+      continue;
+    }
+    const rowEmail = String(rowData[emailColIdx] ?? "")
+      .trim()
+      .toLowerCase();
+    if (rowEmail && rowEmail === emailKey) {
+      targetRow = row;
+      break;
+    }
+  }
+
+  if (!targetRow) {
+    const error = new Error(
+      idKey ? `No People row found for AESOP ID ${idKey}.` : `No People row found for email ${emailKey}.`,
+    );
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const rowData = Array.isArray(targetRow._rawData) ? targetRow._rawData : [];
+  const cellValue = reviewer === true ? "Yes" : "";
+  const gridRowIdx = targetRow.rowNumber - 1;
+  await peopleSheet.loadCells({
+    startRowIndex: gridRowIdx,
+    endRowIndex: gridRowIdx + 1,
+    startColumnIndex: reviewerColumnIndex,
+    endColumnIndex: reviewerColumnIndex + 1,
+  });
+  const cell = peopleSheet.getCell(gridRowIdx, reviewerColumnIndex);
+  cell.value = cellValue;
+  await peopleSheet.saveUpdatedCells();
+
+  const resolvedId = normalizeSheetAesopId(rowData[idColIdx]);
+  const resolvedName = String(rowData[nameColIdx] ?? "").trim();
+  const resolvedEmail = String(rowData[emailColIdx] ?? "").trim();
+  const reviewerRole = cellValue;
+
+  return {
+    id: resolvedId,
+    name: resolvedName,
+    email: resolvedEmail,
+    reviewerRole,
+    reviewer: isPeopleSheetReviewerRole(reviewerRole),
+  };
 }
 
 /**
@@ -2946,6 +3161,9 @@ module.exports = {
   listAllClassroomGradeRows,
   listAllClassroomRoleRows,
   searchPeopleProfiles,
+  loadReviewerEmailRecipients,
+  setPeopleReviewerRole,
+  resolvePeopleRecipientEmail,
   getPortalDingChangeHistory,
   getPortalClassGradeByStudentName,
   getPortalTeacherByUserId,

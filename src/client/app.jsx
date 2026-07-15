@@ -4417,6 +4417,9 @@ function PortalAdminPage() {
   const [lookupLoading, setLookupLoading] = useState(false);
   const [lookupError, setLookupError] = useState('');
   const [lookupResult, setLookupResult] = useState(null);
+  const [reviewerActionLoading, setReviewerActionLoading] = useState(false);
+  const [reviewerActionError, setReviewerActionError] = useState('');
+  const [reviewerActionSuccess, setReviewerActionSuccess] = useState('');
 
   const [highGrades, setHighGrades] = useState([]);
   const [highGradesThreshold, setHighGradesThreshold] = useState(null);
@@ -4554,6 +4557,8 @@ function PortalAdminPage() {
     setLookupLoading(true);
     setLookupError('');
     setLookupResult(null);
+    setReviewerActionError('');
+    setReviewerActionSuccess('');
     try {
       const data = await adminApiPost('/api/portal-admin/lookup', { query });
       setLookupResult(data);
@@ -4561,6 +4566,44 @@ function PortalAdminPage() {
       setLookupError(err.message || 'Lookup failed.');
     } finally {
       setLookupLoading(false);
+    }
+  };
+
+  const setReviewerAccess = async (reviewer) => {
+    const detail = lookupResult?.detail;
+    if (!detail?.id && !detail?.email) {
+      return;
+    }
+    setReviewerActionLoading(true);
+    setReviewerActionError('');
+    setReviewerActionSuccess('');
+    try {
+      const data = await adminApiPost('/api/portal-admin/set-reviewer', {
+        aesopId: detail.id || undefined,
+        email: detail.id ? undefined : detail.email || undefined,
+        reviewer,
+      });
+      const person = data.person || {};
+      setLookupResult((prev) => {
+        if (!prev?.detail) {
+          return prev;
+        }
+        return {
+          ...prev,
+          detail: {
+            ...prev.detail,
+            reviewerRole: person.reviewerRole ?? (reviewer ? 'Yes' : ''),
+            isReviewer: person.reviewer === true || (reviewer && person.reviewer !== false),
+          },
+        };
+      });
+      setReviewerActionSuccess(
+        reviewer ? 'Reviewer access granted.' : 'Reviewer access removed.',
+      );
+    } catch (err) {
+      setReviewerActionError(err.message || 'Could not update reviewer access.');
+    } finally {
+      setReviewerActionLoading(false);
     }
   };
 
@@ -4633,7 +4676,7 @@ function PortalAdminPage() {
           <PortalRoleBadge isAdmin className="portal-welcome-role" />
         </h2>
         <p className="portal-admin-lead">
-          Live Classroom rosters, student lookup, high-grade rewards, and DingConnect+ bulk top-up export.{' '}
+          Live Classroom rosters, user lookup, high-grade rewards, and DingConnect+ bulk top-up export.{' '}
           <a href="/admin/emails">Bulk email →</a>
         </p>
 
@@ -4644,7 +4687,7 @@ function PortalAdminPage() {
             { id: 'overview', label: 'Overview' },
             { id: 'jobs', label: 'Jobs' },
             { id: 'all-classes', label: 'All classes' },
-            { id: 'lookup', label: 'Student lookup' },
+            { id: 'lookup', label: 'User Lookup' },
             { id: 'high-grades', label: `Grades above ${thresholdLabel}%` },
             { id: 'dingconnect', label: 'DingConnect+ CSV' },
           ].map((tab) => (
@@ -4851,7 +4894,7 @@ function PortalAdminPage() {
         ) : null}
 
         {activeTab === 'lookup' ? (
-          <section className="portal-admin-panel" aria-label="Student lookup">
+          <section className="portal-admin-panel" aria-label="User Lookup">
             <div className="portal-admin-lookup-form">
               <label htmlFor="portal-admin-lookup" className="portal-admin-lookup-label">
                 Search by name, AESOP ID, or email
@@ -4913,7 +4956,44 @@ function PortalAdminPage() {
                     <dt>Role</dt>
                     <dd>{lookupResult.detail.role || '—'}</dd>
                   </div>
+                  <div className="portal-admin-stat-row">
+                    <dt>Reviewer</dt>
+                    <dd>{lookupResult.detail.isReviewer ? 'Yes' : 'No'}</dd>
+                  </div>
                 </dl>
+                <div className="portal-admin-lookup-section">
+                  <div className="portal-admin-lookup-row">
+                    {lookupResult.detail.isReviewer ? (
+                      <button
+                        type="button"
+                        className="portal-admin-action portal-btn--secondary"
+                        onClick={() => setReviewerAccess(false)}
+                        disabled={reviewerActionLoading}
+                      >
+                        {reviewerActionLoading ? 'Updating…' : 'Remove reviewer access'}
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        className="portal-admin-action"
+                        onClick={() => setReviewerAccess(true)}
+                        disabled={reviewerActionLoading}
+                      >
+                        {reviewerActionLoading ? 'Updating…' : 'Grant reviewer access'}
+                      </button>
+                    )}
+                  </div>
+                  {reviewerActionError ? (
+                    <p className="portal-admin-status portal-admin-status--error" role="alert">
+                      {reviewerActionError}
+                    </p>
+                  ) : null}
+                  {reviewerActionSuccess ? (
+                    <p className="portal-admin-status" role="status">
+                      {reviewerActionSuccess}
+                    </p>
+                  ) : null}
+                </div>
                 {lookupResult.detail.classGrades?.length > 0 ? (
                   <div className="portal-admin-lookup-section">
                     <h4 className="portal-admin-subheading-sm">Grades by course</h4>
@@ -7037,7 +7117,7 @@ function PortalAdminEmailsPage() {
   const signedIn = isPortalSessionCompleteSync();
   const adminEmail = readSessionField('studentPortalEmail').trim();
 
-  const [group] = useState('admissions');
+  const [group, setGroup] = useState('admissions');
   const [metadata, setMetadata] = useState(null);
   const [metadataError, setMetadataError] = useState('');
   const [metadataLoading, setMetadataLoading] = useState(false);
@@ -7047,6 +7127,7 @@ function PortalAdminEmailsPage() {
   const [filterValue, setFilterValue] = useState('');
   const [aesopIdsFilter, setAesopIdsFilter] = useState(null);
   const [recipientListLabel, setRecipientListLabel] = useState('');
+  const [selectedReviewerIds, setSelectedReviewerIds] = useState([]);
 
   const [subject, setSubject] = useState('');
   const [body, setBody] = useState('');
@@ -7069,10 +7150,30 @@ function PortalAdminEmailsPage() {
   const [campaignId, setCampaignId] = useState(null);
   const [campaignStatus, setCampaignStatus] = useState(null);
 
-  const filterPayload = buildEmailFilterPayload(filterAll, filterColumn, filterValue, aesopIdsFilter);
+  const admissionsFilterPayload = buildEmailFilterPayload(
+    filterAll,
+    filterColumn,
+    filterValue,
+    aesopIdsFilter,
+  );
+  // Preview always loads the full reviewers list; selection is applied only on test/send.
+  const previewFilterPayload = group === 'reviewers' ? null : admissionsFilterPayload;
+  const reviewersFilterPayload =
+    selectedReviewerIds.length > 0 ? { aesopIds: selectedReviewerIds } : null;
+  const filterPayload = group === 'reviewers' ? reviewersFilterPayload : admissionsFilterPayload;
   const filterColumnLabels = metadata?.filterColumns || metadata?.columns || [];
   const variableColumnLabels = metadata?.variableColumns || [];
   const globalPlaceholders = detectGlobalEmailPlaceholders(subject, body, variableColumnLabels);
+  const selectedReviewerIdSet = new Set(
+    selectedReviewerIds.map((id) => String(id).trim().toLowerCase()).filter(Boolean),
+  );
+  const selectedReviewerCount = selectedReviewerIds.length;
+  const effectiveRecipientCount = group === 'reviewers' ? selectedReviewerCount : recipientCount;
+  const allReviewersSelected =
+    group === 'reviewers' &&
+    recipients.length > 0 &&
+    selectedReviewerCount > 0 &&
+    recipients.every((row) => selectedReviewerIdSet.has(String(row.id || '').trim().toLowerCase()));
   const composePayload = {
     group,
     subject,
@@ -7086,10 +7187,23 @@ function PortalAdminEmailsPage() {
     setTestSuccess('');
     setTestPreviewRecipient(null);
     setTestError('');
-  }, [subject, body, JSON.stringify(globalVars), filterAll, filterColumn, filterValue, JSON.stringify(aesopIdsFilter)]);
+  }, [
+    subject,
+    body,
+    JSON.stringify(globalVars),
+    filterAll,
+    filterColumn,
+    filterValue,
+    JSON.stringify(aesopIdsFilter),
+    JSON.stringify(selectedReviewerIds),
+    group,
+  ]);
 
   useEffect(() => {
     if (!signedIn || !isAdmin) {
+      return undefined;
+    }
+    if (group !== 'admissions') {
       return undefined;
     }
     const pendingList = readAdminEmailRecipientList();
@@ -7102,7 +7216,7 @@ function PortalAdminEmailsPage() {
     setAesopIdsFilter(pendingList.aesopIds);
     setRecipientListLabel(pendingList.label);
     return undefined;
-  }, [signedIn, isAdmin]);
+  }, [signedIn, isAdmin, group]);
 
   useEffect(() => {
     if (!signedIn || !isAdmin) {
@@ -7111,7 +7225,12 @@ function PortalAdminEmailsPage() {
     let cancelled = false;
     setMetadataLoading(true);
     setMetadataError('');
-    adminApiPost('/api/portal-admin/email/admissions-metadata')
+    setMetadata(null);
+    const metadataPath =
+      group === 'reviewers'
+        ? '/api/portal-admin/email/reviewers-metadata'
+        : '/api/portal-admin/email/admissions-metadata';
+    adminApiPost(metadataPath)
       .then((data) => {
         if (!cancelled) {
           setMetadata(data.metadata || null);
@@ -7119,7 +7238,12 @@ function PortalAdminEmailsPage() {
       })
       .catch((err) => {
         if (!cancelled) {
-          setMetadataError(err.message || 'Could not load Applicants sheet.');
+          setMetadataError(
+            err.message ||
+              (group === 'reviewers'
+                ? 'Could not load Reviewers metadata.'
+                : 'Could not load Applicants sheet.'),
+          );
           setMetadata(null);
         }
       })
@@ -7131,13 +7255,14 @@ function PortalAdminEmailsPage() {
     return () => {
       cancelled = true;
     };
-  }, [signedIn, isAdmin]);
+  }, [signedIn, isAdmin, group]);
 
   useEffect(() => {
-    if (!signedIn || !isAdmin || group !== 'admissions') {
+    if (!signedIn || !isAdmin || (group !== 'admissions' && group !== 'reviewers')) {
       return undefined;
     }
     if (
+      group === 'admissions' &&
       !filterAll &&
       (!filterColumn || !filterValue) &&
       !(Array.isArray(aesopIdsFilter) && aesopIdsFilter.length > 0)
@@ -7152,13 +7277,19 @@ function PortalAdminEmailsPage() {
     setPreviewError('');
     adminApiPost('/api/portal-admin/email/preview', {
       group,
-      filter: filterPayload,
+      filter: previewFilterPayload,
     })
       .then((data) => {
         if (!cancelled) {
-          setRecipients(Array.isArray(data.recipients) ? data.recipients : []);
+          const nextRecipients = Array.isArray(data.recipients) ? data.recipients : [];
+          setRecipients(nextRecipients);
           setRecipientCount(typeof data.count === 'number' ? data.count : 0);
           setRecipientStats(data.recipientStats || null);
+          if (group === 'reviewers') {
+            setSelectedReviewerIds(
+              nextRecipients.map((row) => String(row.id || '').trim()).filter(Boolean),
+            );
+          }
         }
       })
       .catch((err) => {
@@ -7167,6 +7298,9 @@ function PortalAdminEmailsPage() {
           setRecipients([]);
           setRecipientCount(0);
           setRecipientStats(null);
+          if (group === 'reviewers') {
+            setSelectedReviewerIds([]);
+          }
         }
       })
       .finally(() => {
@@ -7234,10 +7368,33 @@ function PortalAdminEmailsPage() {
   const canSendTest =
     subject.trim().length > 0 &&
     body.trim().length > 0 &&
-    recipientCount > 0 &&
+    effectiveRecipientCount > 0 &&
     globalPlaceholders.every((name) => String(globalVars[name] ?? '').trim().length > 0);
 
   const canSendBulk = canSendTest && lastTestHash.length > 0 && !sendLoading;
+
+  function toggleReviewerSelected(aesopId, checked) {
+    const id = String(aesopId || '').trim();
+    if (!id) {
+      return;
+    }
+    setSelectedReviewerIds((prev) => {
+      const key = id.toLowerCase();
+      const without = prev.filter((existing) => String(existing).trim().toLowerCase() !== key);
+      if (!checked) {
+        return without;
+      }
+      return [...without, id];
+    });
+  }
+
+  function selectAllReviewers() {
+    setSelectedReviewerIds(recipients.map((row) => String(row.id || '').trim()).filter(Boolean));
+  }
+
+  function clearReviewerSelection() {
+    setSelectedReviewerIds([]);
+  }
 
   async function handleSendTest() {
     setTestLoading(true);
@@ -7256,12 +7413,12 @@ function PortalAdminEmailsPage() {
   }
 
   async function handleSendBulk() {
-    const estimate = estimateBulkEmailDuration(recipientCount);
+    const estimate = estimateBulkEmailDuration(effectiveRecipientCount);
     const durationNote = estimate
       ? `\n\nEstimated send time: about ${formatDurationMinutes(estimate.totalMinutes)} (${estimate.batches} batch${estimate.batches === 1 ? '' : 'es'}).`
       : '';
     const confirmed = window.confirm(
-      `Send this message to ${recipientCount} recipient${recipientCount === 1 ? '' : 's'}?${durationNote}`,
+      `Send this message to ${effectiveRecipientCount} recipient${effectiveRecipientCount === 1 ? '' : 's'}?${durationNote}`,
     );
     if (!confirmed) {
       return;
@@ -7319,9 +7476,13 @@ function PortalAdminEmailsPage() {
   const batchSize = campaignStatus?.batchSize ?? EMAIL_BATCH_SIZE;
   const batchIntervalMinutes =
     campaignStatus?.batchIntervalMinutes ?? EMAIL_BATCH_INTERVAL_MINUTES;
-  const sendEstimate = estimateBulkEmailDuration(recipientCount, batchSize, batchIntervalMinutes);
+  const sendEstimate = estimateBulkEmailDuration(
+    effectiveRecipientCount,
+    batchSize,
+    batchIntervalMinutes,
+  );
   const batchScheduleNote = formatBulkEmailBatchSchedule(
-    recipientCount,
+    effectiveRecipientCount,
     batchSize,
     batchIntervalMinutes,
   );
@@ -7343,16 +7504,54 @@ function PortalAdminEmailsPage() {
           <PortalRoleBadge isAdmin className="portal-welcome-role" />
         </h2>
         <p className="portal-admin-lead">
-          Compose templated messages for Applicants sheet recipients. Send a test to yourself before
-          every bulk send.
+          Compose templated messages for Admissions applicants or People-sheet reviewers. Send a test
+          to yourself before every bulk send.
         </p>
 
         <section className="portal-admin-panel portal-admin-emails-section" aria-label="Recipient group">
           <h3 className="portal-admin-emails-heading">Group</h3>
           <div className="portal-admin-emails-group-list">
             <label className="portal-admin-emails-radio">
-              <input type="radio" name="email-group" value="admissions" checked readOnly />
+              <input
+                type="radio"
+                name="email-group"
+                value="admissions"
+                checked={group === 'admissions'}
+                onChange={() => {
+                  setGroup('admissions');
+                  setFilterAll(true);
+                  setFilterColumn('');
+                  setFilterValue('');
+                  setAesopIdsFilter(null);
+                  setRecipientListLabel('');
+                  setSelectedReviewerIds([]);
+                  setRecipients([]);
+                  setRecipientCount(0);
+                  setRecipientStats(null);
+                }}
+              />
               Admissions
+            </label>
+            <label className="portal-admin-emails-radio">
+              <input
+                type="radio"
+                name="email-group"
+                value="reviewers"
+                checked={group === 'reviewers'}
+                onChange={() => {
+                  setGroup('reviewers');
+                  setFilterAll(true);
+                  setFilterColumn('');
+                  setFilterValue('');
+                  setAesopIdsFilter(null);
+                  setRecipientListLabel('');
+                  setSelectedReviewerIds([]);
+                  setRecipients([]);
+                  setRecipientCount(0);
+                  setRecipientStats(null);
+                }}
+              />
+              Reviewers
             </label>
             <label className="portal-admin-emails-radio portal-admin-emails-radio--disabled">
               <input type="radio" name="email-group" value="students" disabled />
@@ -7363,12 +7562,29 @@ function PortalAdminEmailsPage() {
 
         <section className="portal-admin-panel portal-admin-emails-section" aria-label="Recipient filter">
           <h3 className="portal-admin-emails-heading">Filter recipients</h3>
-          {metadataLoading ? <p className="portal-admin-status">Loading Applicants filters…</p> : null}
+          {metadataLoading ? (
+            <p className="portal-admin-status">
+              {group === 'reviewers' ? 'Loading reviewers…' : 'Loading Applicants filters…'}
+            </p>
+          ) : null}
           {metadataError ? (
             <p className="portal-admin-status portal-admin-status--error" role="alert">
               {metadataError}
             </p>
           ) : null}
+          {group === 'reviewers' ? (
+            <>
+              <p className="portal-admin-status">
+                People Reviewer = Yes
+                {typeof metadata?.totalRows === 'number' ? ` — ${metadata.totalRows} with email` : ''}
+              </p>
+              <p className="portal-admin-hint">
+                Use the checkboxes in the recipient table to choose who gets this send. Sends to
+                Associated Email when set, otherwise Current Email.
+              </p>
+            </>
+          ) : (
+            <>
           <label className="portal-admin-emails-checkbox">
             <input
               type="checkbox"
@@ -7448,7 +7664,9 @@ function PortalAdminEmailsPage() {
               </label>
             </div>
           ) : null}
-          {!metadataLoading && !metadataError ? (
+            </>
+          )}
+          {!metadataLoading && !metadataError && group === 'admissions' ? (
             <ApplicantsSheetDebugPanel
               stats={metadata?.stats}
               recipientStats={recipientStats}
@@ -7456,6 +7674,11 @@ function PortalAdminEmailsPage() {
               previewLoading={previewLoading}
               previewError={previewError}
             />
+          ) : null}
+          {!metadataLoading && !metadataError && group === 'reviewers' && previewError ? (
+            <p className="portal-admin-status portal-admin-status--error" role="alert">
+              {previewError}
+            </p>
           ) : null}
         </section>
 
@@ -7497,9 +7720,11 @@ function PortalAdminEmailsPage() {
                 ))}
               </>
             ) : null}
-            . Filter by Level, Round 1, or Round 2 above — those values are still available in each
-            row if you need them in the message. Paste from Google Docs to keep links — they appear
-            blue in the editor and stay clickable in the sent email.
+            {group === 'admissions'
+              ? '. Filter by Level, Round 1, or Round 2 above — those values are still available in each row if you need them in the message. '
+              : '. '}
+            Paste from Google Docs to keep links — they appear blue in the editor and stay clickable
+            in the sent email.
           </p>
         </section>
 
@@ -7538,8 +7763,35 @@ function PortalAdminEmailsPage() {
           {!previewLoading && !previewError ? (
             <>
               <p className="portal-admin-emails-count">
-                <strong>{recipientCount}</strong> email{recipientCount === 1 ? '' : 's'} will be sent
+                <strong>{effectiveRecipientCount}</strong> email
+                {effectiveRecipientCount === 1 ? '' : 's'} will be sent
+                {group === 'reviewers' && recipientCount > 0 ? (
+                  <>
+                    {' '}
+                    ({selectedReviewerCount} of {recipientCount} reviewers selected)
+                  </>
+                ) : null}
               </p>
+              {group === 'reviewers' && recipientCount > 0 ? (
+                <div className="portal-admin-lookup-row">
+                  <button
+                    type="button"
+                    className="portal-btn portal-btn--secondary"
+                    onClick={selectAllReviewers}
+                    disabled={allReviewersSelected}
+                  >
+                    Select all
+                  </button>
+                  <button
+                    type="button"
+                    className="portal-btn portal-btn--secondary"
+                    onClick={clearReviewerSelection}
+                    disabled={selectedReviewerCount === 0}
+                  >
+                    Clear selection
+                  </button>
+                </div>
+              ) : null}
               {batchScheduleNote ? (
                 <p className="portal-admin-hint">{batchScheduleNote}</p>
               ) : null}
@@ -7550,7 +7802,11 @@ function PortalAdminEmailsPage() {
                   {sendEstimate.batches} batch{sendEstimate.batches === 1 ? '' : 'es'}).
                 </p>
               ) : null}
-              {Array.isArray(aesopIdsFilter) && aesopIdsFilter.length > 0 ? (
+              {group === 'reviewers' ? (
+                <p className="portal-admin-hint">
+                  Check the reviewers who should receive this message.
+                </p>
+              ) : Array.isArray(aesopIdsFilter) && aesopIdsFilter.length > 0 ? (
                 <p className="portal-admin-hint">
                   Recipient list: {recipientListLabel || 'Selected applicants'} (
                   {aesopIdsFilter.length} AESOP ID{aesopIdsFilter.length === 1 ? '' : 's'})
@@ -7562,32 +7818,68 @@ function PortalAdminEmailsPage() {
               ) : null}
               {recipientCount === 0 ? (
                 <p className="portal-admin-status">No recipients match the current filter.</p>
-              ) : (
+              ) : group === 'reviewers' && selectedReviewerCount === 0 ? (
+                <p className="portal-admin-status">Select at least one reviewer to send.</p>
+              ) : null}
+              {recipientCount > 0 ? (
                 <div className="portal-admin-table-wrap portal-admin-emails-recipient-wrap">
                   <table className="portal-admin-table portal-admin-emails-recipient-table">
                     <thead>
                       <tr>
+                        {group === 'reviewers' ? (
+                          <th scope="col">
+                            <input
+                              type="checkbox"
+                              checked={allReviewersSelected}
+                              aria-label="Select all reviewers"
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  selectAllReviewers();
+                                } else {
+                                  clearReviewerSelection();
+                                }
+                              }}
+                            />
+                          </th>
+                        ) : null}
                         <th scope="col">AESOP ID</th>
                         <th scope="col">Name</th>
                         <th scope="col">Email</th>
-                        {!filterAll && filterColumn ? <th scope="col">{filterColumn}</th> : null}
+                        {group === 'admissions' && !filterAll && filterColumn ? (
+                          <th scope="col">{filterColumn}</th>
+                        ) : null}
                       </tr>
                     </thead>
                     <tbody>
-                      {recipients.map((row) => (
-                        <tr key={`${row.id}-${row.email}`}>
-                          <td className="portal-admin-mono">{row.id || '—'}</td>
-                          <td>{row.name || '—'}</td>
-                          <td>{row.email}</td>
-                          {!filterAll && filterColumn ? (
-                            <td>{row.fields?.[filterColumn] || '—'}</td>
-                          ) : null}
-                        </tr>
-                      ))}
+                      {recipients.map((row) => {
+                        const rowId = String(row.id || '').trim();
+                        const rowSelected = selectedReviewerIdSet.has(rowId.toLowerCase());
+                        return (
+                          <tr key={`${row.id}-${row.email}`}>
+                            {group === 'reviewers' ? (
+                              <td>
+                                <input
+                                  type="checkbox"
+                                  checked={rowSelected}
+                                  disabled={!rowId}
+                                  aria-label={`Select ${row.name || rowId || row.email}`}
+                                  onChange={(e) => toggleReviewerSelected(rowId, e.target.checked)}
+                                />
+                              </td>
+                            ) : null}
+                            <td className="portal-admin-mono">{row.id || '—'}</td>
+                            <td>{row.name || '—'}</td>
+                            <td>{row.email}</td>
+                            {group === 'admissions' && !filterAll && filterColumn ? (
+                              <td>{row.fields?.[filterColumn] || '—'}</td>
+                            ) : null}
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
-              )}
+              ) : null}
             </>
           ) : null}
         </section>
@@ -7608,7 +7900,9 @@ function PortalAdminEmailsPage() {
               onClick={handleSendBulk}
               disabled={!canSendBulk}
             >
-              {sendLoading ? 'Starting send…' : `Send to ${recipientCount} recipient${recipientCount === 1 ? '' : 's'}`}
+              {sendLoading
+                ? 'Starting send…'
+                : `Send to ${effectiveRecipientCount} recipient${effectiveRecipientCount === 1 ? '' : 's'}`}
             </button>
           </div>
           {!lastTestHash ? (

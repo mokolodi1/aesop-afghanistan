@@ -81,13 +81,18 @@ function maybeEnableDriveScriptRateLimit(deadlineAt) {
 
 /**
  * Wait until the rolling minute window has room for `count` more Drive calls.
+ * Caps `count` at the per-minute max so a batch can never deadlock waiting for
+ * more slots than the limiter will ever grant.
  * @param {number} [count]
  */
 async function acquireDriveRequestSlots(count = 1) {
   if (!driveScriptRateLimitEnabled || count <= 0) {
     return;
   }
-  const want = Math.max(1, Math.floor(count));
+  const want = Math.min(
+    DRIVE_SCRIPT_MAX_REQUESTS_PER_MINUTE,
+    Math.max(1, Math.floor(count)),
+  );
   for (;;) {
     const now = Date.now();
     driveScriptRequestTimestamps = driveScriptRequestTimestamps.filter(
@@ -101,8 +106,9 @@ async function acquireDriveRequestSlots(count = 1) {
       }
       return;
     }
-    const oldest = driveScriptRequestTimestamps[0];
-    const waitMs = Math.max(DRIVE_SCRIPT_RATE_WINDOW_MS - (now - oldest) + 50, 250);
+    // Empty window + missing oldest used to yield NaN waitMs and a tight log spin.
+    const oldest = driveScriptRequestTimestamps[0] || now;
+    const waitMs = Math.max(1000, DRIVE_SCRIPT_RATE_WINDOW_MS - (now - oldest) + 50);
     console.warn(
       `[drive] pacing script traffic (${driveScriptRequestTimestamps.length}/${DRIVE_SCRIPT_MAX_REQUESTS_PER_MINUTE} req/min); waiting ${Math.ceil(waitMs / 1000)}s`,
     );
@@ -111,8 +117,9 @@ async function acquireDriveRequestSlots(count = 1) {
 }
 
 function sleep(ms) {
+  const delay = Number.isFinite(ms) ? Math.max(0, ms) : 1000;
   return new Promise((resolve) => {
-    setTimeout(resolve, ms);
+    setTimeout(resolve, delay);
   });
 }
 

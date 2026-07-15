@@ -76,6 +76,18 @@ function buildGoogleSheetsConfig(fileSection) {
       "peopleReviewerHeader",
       "Reviewer",
     ),
+    /** People sheet column for associated/alternate email (bulk email to reviewers). Blank or OFF disables. */
+    peopleAssociatedEmailColumn: envOr(
+      "GOOGLE_PEOPLE_ASSOCIATED_EMAIL_COLUMN",
+      "peopleAssociatedEmailColumn",
+      "Y",
+    ),
+    /** Header label on People sheet for associated email. */
+    peopleAssociatedEmailHeader: envOr(
+      "GOOGLE_PEOPLE_ASSOCIATED_EMAIL_COLUMN_HEADER",
+      "peopleAssociatedEmailHeader",
+      "Associated Email",
+    ),
     /** Applicant review assignments tab (AESOP ID, reviewers, levels, scores). */
     applicantReviewsSheetName: envOr(
       "GOOGLE_APPLICANT_REVIEWS_SHEET_NAME",
