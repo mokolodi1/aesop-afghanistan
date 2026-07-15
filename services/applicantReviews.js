@@ -214,7 +214,7 @@ function applicantHasReviewVoiceMemo(fields = {}) {
 }
 
 /**
- * @returns {Promise<Map<string, { age: string, essay: string, round2: string, links: string, driveFileId: string, driveDurationSeconds: number|null }>>}
+ * @returns {Promise<Map<string, { age: string, essay: string, round2: string, round2Prompt: string, links: string, driveFileId: string, driveDurationSeconds: number|null }>>}
  */
 async function loadApplicantsByIdMap() {
   if (isDatabaseEnabled()) {
@@ -233,7 +233,7 @@ async function loadApplicantsByIdMap() {
 
   await worksheet.loadHeaderRow(cfg.headerRowNum);
   const rows = await worksheet.getRows();
-  /** @type {Map<string, { age: string, essay: string, round2: string, links: string, driveFileId: string, driveDurationSeconds: number|null }>} */
+  /** @type {Map<string, { age: string, essay: string, round2: string, round2Prompt: string, links: string, driveFileId: string, driveDurationSeconds: number|null }>} */
   const byId = new Map();
 
   for (const row of rows) {
@@ -246,6 +246,7 @@ async function loadApplicantsByIdMap() {
       age: String(rowData[cfg.ageColumnIndex] ?? "").trim(),
       essay: String(rowData[cfg.essayColumnIndex] ?? "").trim(),
       round2: "",
+      round2Prompt: "",
       links: "",
       driveFileId: "",
       driveDurationSeconds: null,
@@ -313,10 +314,10 @@ function classifyReviewVoiceDuration(durationSeconds) {
 /**
  * @param {Array<Record<string, unknown>>} rows
  * @param {string} reviewerKey
- * @returns {Array<{ applicantId: string, age: string, essay: string, slot: 'A'|'B', englishLevel: string, suspectedAi: boolean, instructionFollowing: string, originalThinking: string, character: string, hasVoiceMemo: boolean, durationStatus: 'valid'|'too_short'|'too_long'|'unknown' }>}
+ * @returns {Array<{ applicantId: string, age: string, essay: string, round2Prompt: string, slot: 'A'|'B', englishLevel: string, suspectedAi: boolean, instructionFollowing: string, originalThinking: string, character: string, hasVoiceMemo: boolean, durationStatus: 'valid'|'too_short'|'too_long'|'unknown' }>}
  */
 function mapReviewAssignmentsFromDbRows(rows, reviewerKey) {
-  /** @type {Array<{ applicantId: string, age: string, essay: string, slot: 'A'|'B', englishLevel: string, suspectedAi: boolean, instructionFollowing: string, originalThinking: string, character: string, hasVoiceMemo: boolean, durationStatus: 'valid'|'too_short'|'too_long'|'unknown' }>} */
+  /** @type {Array<{ applicantId: string, age: string, essay: string, round2Prompt: string, slot: 'A'|'B', englishLevel: string, suspectedAi: boolean, instructionFollowing: string, originalThinking: string, character: string, hasVoiceMemo: boolean, durationStatus: 'valid'|'too_short'|'too_long'|'unknown' }>} */
   const assignments = [];
 
   for (const row of rows) {
@@ -347,6 +348,7 @@ function mapReviewAssignmentsFromDbRows(rows, reviewerKey) {
       applicantId,
       age: String(row.age ?? "").trim(),
       essay: String(row.essay ?? "").trim(),
+      round2Prompt: String(row.round2_prompt ?? "").trim(),
       slot,
       ...reviewFields,
       hasVoiceMemo: applicantHasReviewVoiceMemo({ driveFileId, round2, links }),
@@ -373,7 +375,7 @@ async function loadReviewAssignmentsForReviewerFromSheets(reviewerKey) {
   const rows = await worksheet.getRows();
   const applicantsById = await loadApplicantsByIdMap();
 
-  /** @type {Array<{ applicantId: string, age: string, essay: string, slot: 'A'|'B', englishLevel: string, suspectedAi: boolean, instructionFollowing: string, originalThinking: string, character: string, hasVoiceMemo: boolean, durationStatus: 'valid'|'too_short'|'too_long'|'unknown' }>} */
+  /** @type {Array<{ applicantId: string, age: string, essay: string, round2Prompt: string, slot: 'A'|'B', englishLevel: string, suspectedAi: boolean, instructionFollowing: string, originalThinking: string, character: string, hasVoiceMemo: boolean, durationStatus: 'valid'|'too_short'|'too_long'|'unknown' }>} */
   const assignments = [];
 
   for (const row of rows) {
@@ -407,6 +409,7 @@ async function loadReviewAssignmentsForReviewerFromSheets(reviewerKey) {
       applicantId,
       age: applicant?.age || "",
       essay: applicant?.essay || "",
+      round2Prompt: applicant?.round2Prompt || "",
       slot,
       ...reviewFields,
       hasVoiceMemo,

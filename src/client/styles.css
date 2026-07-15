@@ -4889,6 +4889,14 @@ html[dir='rtl'] .portal-voice-memo-substeps {
   margin-bottom: 16px;
 }
 
+.portal-review-prompt-section {
+  margin-bottom: 16px;
+}
+
+.portal-review-prompt-section .portal-voice-memo-prompt {
+  margin: 0;
+}
+
 .portal-review-essay {
   max-height: 280px;
   overflow: auto;

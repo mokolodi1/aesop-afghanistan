@@ -2860,7 +2860,7 @@ function PortalVoiceMemoSubmissionSection({ aesopId, collapsible = false }) {
   );
 }
 
-function PortalVoiceMemoPrompt({ prompt }) {
+function PortalVoiceMemoPrompt({ prompt, showLead = true }) {
   const { t } = usePortalI18n();
   const text = String(prompt || '').trim();
   if (!text) {
@@ -2872,7 +2872,9 @@ function PortalVoiceMemoPrompt({ prompt }) {
       <p className="portal-voice-memo-prompt-body" dir="auto">
         {text}
       </p>
-      <p className="portal-voice-memo-prompt-lead">{t('voiceMemo.promptLead')}</p>
+      {showLead ? (
+        <p className="portal-voice-memo-prompt-lead">{t('voiceMemo.promptLead')}</p>
+      ) : null}
     </div>
   );
 }
@@ -8655,6 +8657,17 @@ function PortalReviewCard({
           <div className="portal-review-essay">{assignment.essay}</div>
         ) : (
           <p className="portal-field-hint">{t('reviews.essayMissing')}</p>
+        )}
+      </section>
+
+      <section className="portal-review-prompt-section" aria-label={t('reviews.promptLabel')}>
+        {String(assignment.round2Prompt || '').trim() ? (
+          <PortalVoiceMemoPrompt prompt={assignment.round2Prompt} showLead={false} />
+        ) : (
+          <>
+            <h4 className="portal-review-field-label">{t('reviews.promptLabel')}</h4>
+            <p className="portal-field-hint">{t('reviews.promptMissing')}</p>
+          </>
         )}
       </section>
 

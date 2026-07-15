@@ -1304,7 +1304,7 @@ async function isApplicantsTableMirrorFresh() {
 }
 
 /**
- * @returns {Promise<Map<string, { age: string, essay: string, round2: string, links: string, driveFileId: string, driveDurationSeconds: number|null }>|null>}
+ * @returns {Promise<Map<string, { age: string, essay: string, round2: string, round2Prompt: string, links: string, driveFileId: string, driveDurationSeconds: number|null }>|null>}
  */
 async function getApplicantsReviewFieldsMapFromDb() {
   const pool = getPool();
@@ -1313,13 +1313,13 @@ async function getApplicantsReviewFieldsMapFromDb() {
   }
 
   const result = await pool.query(
-    `SELECT lower(aesop_id) AS aesop_key, age, essay, round2, applicant_links,
+    `SELECT lower(aesop_id) AS aesop_key, age, essay, round2, round2_prompt, applicant_links,
             drive_file_id, drive_duration_seconds
      FROM applicants
      WHERE aesop_id IS NOT NULL AND trim(aesop_id) <> ''`,
   );
 
-  /** @type {Map<string, { age: string, essay: string, round2: string, links: string, driveFileId: string, driveDurationSeconds: number|null }>} */
+  /** @type {Map<string, { age: string, essay: string, round2: string, round2Prompt: string, links: string, driveFileId: string, driveDurationSeconds: number|null }>} */
   const byId = new Map();
   for (const row of result.rows) {
     const key = String(row.aesop_key || "").trim().toLowerCase();
@@ -1331,6 +1331,7 @@ async function getApplicantsReviewFieldsMapFromDb() {
       age: String(row.age ?? "").trim(),
       essay: String(row.essay ?? "").trim(),
       round2: String(row.round2 ?? "").trim(),
+      round2Prompt: String(row.round2_prompt ?? "").trim(),
       links: String(row.applicant_links ?? "").trim(),
       driveFileId: String(row.drive_file_id ?? "").trim(),
       driveDurationSeconds: Number.isFinite(durationRaw) ? durationRaw : null,
@@ -1579,6 +1580,7 @@ async function getReviewAssignmentsForReviewerFromDb(reviewerAesopId) {
        a.age,
        a.essay,
        a.round2,
+       a.round2_prompt,
        a.applicant_links,
        a.drive_file_id,
        a.drive_duration_seconds
