@@ -830,4 +830,5 @@ module.exports = {
   deleteVoiceMemoAudioRow,
   recacheSingleVoiceMemoFromDrive,
   probeVoiceMemoPlaybackStream,
+  prepareVoiceMemoAudioCacheEntry,
 };

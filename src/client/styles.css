@@ -5740,3 +5740,60 @@ html[dir='rtl'] .portal-voice-memo-substeps {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+
+.portal-admin-voice-memo-playback-test-player {
+  margin-top: 16px;
+}
+
+.portal-admin-voice-memo-playback-test-player audio {
+  display: block;
+  width: 100%;
+  max-width: 480px;
+  margin-top: 8px;
+}
+
+.portal-admin-playback-test-steps-table th[scope='row'] {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.portal-admin-playback-test-step-detail {
+  min-width: 240px;
+  line-height: 1.45;
+}
+
+.portal-playback-test-step-badge {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  line-height: 1.35;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+
+.portal-playback-test-step-badge--succeeded {
+  color: #166534;
+  background: #dcfce7;
+  border-color: #86efac;
+}
+
+.portal-playback-test-step-badge--failed {
+  color: #991b1b;
+  background: #fee2e2;
+  border-color: #fca5a5;
+}
+
+.portal-playback-test-step-badge--skipped {
+  color: #57534e;
+  background: #f5f5f4;
+  border-color: #d6d3d1;
+}
+
+.portal-playback-test-step-badge--pending,
+.portal-playback-test-step-badge--running {
+  color: #1d4ed8;
+  background: #dbeafe;
+  border-color: #93c5fd;
+}

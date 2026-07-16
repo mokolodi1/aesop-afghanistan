@@ -29,6 +29,22 @@ function voiceMemoNeedsTranscodeForPlayback(extension) {
 }
 
 /**
+ * ffmpeg/ffprobe close stdin early when input is invalid; swallow broken-pipe noise.
+ * @param {import('stream').Writable|null|undefined} stream
+ */
+function ignoreBrokenPipeErrors(stream) {
+  if (!stream || typeof stream.on !== "function") {
+    return;
+  }
+  stream.on("error", (error) => {
+    const code = error && typeof error === "object" ? error.code : "";
+    if (code === "EPIPE" || code === "ECONNRESET") {
+      return;
+    }
+  });
+}
+
+/**
  * @returns {Promise<boolean>}
  */
 async function isFfmpegAvailable() {
@@ -44,6 +60,20 @@ async function isFfmpegAvailable() {
 }
 
 /**
+ * @returns {Promise<{ ffmpeg: boolean, ffprobe: boolean }>}
+ */
+async function getFfmpegToolingStatus() {
+  const check = (command) =>
+    new Promise((resolve) => {
+      const child = spawn(command, ["-version"], { stdio: "ignore" });
+      child.on("error", () => resolve(false));
+      child.on("close", (code) => resolve(code === 0));
+    });
+  const [ffmpeg, ffprobe] = await Promise.all([check("ffmpeg"), check("ffprobe")]);
+  return { ffmpeg, ffprobe };
+}
+
+/**
  * @param {Buffer} buffer
  * @returns {string|null}
  */
@@ -56,6 +86,40 @@ function getMp4FtypBrand(buffer) {
 
 /**
  * @param {Buffer} buffer
+ * @param {string[]} ffprobeArgs
+ * @returns {Promise<string|null>}
+ */
+function runFfprobeBufferQuery(buffer, ffprobeArgs) {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (value) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      resolve(value);
+    };
+
+    const child = spawn("ffprobe", ffprobeArgs, { stdio: ["pipe", "pipe", "ignore"] });
+    let output = "";
+    child.stdout.on("data", (chunk) => {
+      output += String(chunk || "");
+    });
+    ignoreBrokenPipeErrors(child.stdin);
+    child.on("error", () => finish(null));
+    child.on("close", () => {
+      finish(String(output).trim() || null);
+    });
+    try {
+      child.stdin.end(buffer);
+    } catch {
+      finish(null);
+    }
+  });
+}
+
+/**
+ * @param {Buffer} buffer
  * @returns {Promise<string|null>}
  */
 async function probeVoiceMemoAudioCodecName(buffer) {
@@ -63,33 +127,43 @@ async function probeVoiceMemoAudioCodecName(buffer) {
     return null;
   }
 
-  return new Promise((resolve) => {
-    const child = spawn(
-      "ffprobe",
-      [
-        "-v",
-        "error",
-        "-select_streams",
-        "a:0",
-        "-show_entries",
-        "stream=codec_name",
-        "-of",
-        "csv=p=0",
-        "-i",
-        "pipe:0",
-      ],
-      { stdio: ["pipe", "pipe", "ignore"] },
-    );
-    let output = "";
-    child.stdout.on("data", (chunk) => {
-      output += String(chunk || "");
-    });
-    child.on("error", () => resolve(null));
-    child.on("close", () => {
-      resolve(String(output).trim().toLowerCase() || null);
-    });
-    child.stdin.end(buffer);
-  });
+  const output = await runFfprobeBufferQuery(buffer, [
+    "-v",
+    "error",
+    "-select_streams",
+    "a:0",
+    "-show_entries",
+    "stream=codec_name",
+    "-of",
+    "csv=p=0",
+    "-i",
+    "pipe:0",
+  ]);
+  return output ? output.toLowerCase() : null;
+}
+
+/**
+ * @param {Buffer} buffer
+ * @returns {Promise<boolean>}
+ */
+async function probeVoiceMemoHasVideoStream(buffer) {
+  if (!(await isFfmpegAvailable()) || !buffer || buffer.length === 0) {
+    return false;
+  }
+
+  const output = await runFfprobeBufferQuery(buffer, [
+    "-v",
+    "error",
+    "-select_streams",
+    "v:0",
+    "-show_entries",
+    "stream=codec_type",
+    "-of",
+    "csv=p=0",
+    "-i",
+    "pipe:0",
+  ]);
+  return String(output || "").trim().toLowerCase() === "video";
 }
 
 /**
@@ -121,6 +195,13 @@ async function voiceMemoNeedsBrowserPlaybackTranscode(buffer, fileName = "") {
 
   const brand = getMp4FtypBrand(buffer);
   if (brand && /^3gp/i.test(brand)) {
+    return true;
+  }
+
+  if (await probeVoiceMemoHasVideoStream(buffer)) {
+    console.warn(
+      `[voice-memo-transcode] video track in ${fileName || "voice memo"} needs audio-only remux`,
+    );
     return true;
   }
 
@@ -158,14 +239,21 @@ function voiceMemoFfmpegInputFlags() {
 function runFfmpegBufferTransform(buffer, ffmpegArgs, options = {}) {
   const fallbackToInput = options.fallbackToInput !== false;
   return new Promise((resolve) => {
-    const input = Readable.from(buffer);
+    let settled = false;
     /** @type {Buffer[]} */
     const chunks = [];
     const ffmpeg = spawn("ffmpeg", ffmpegArgs, { stdio: ["pipe", "pipe", "pipe"] });
 
     const finish = (result) => {
-      input.destroy();
-      ffmpeg.kill("SIGKILL");
+      if (settled) {
+        return;
+      }
+      settled = true;
+      try {
+        ffmpeg.kill("SIGKILL");
+      } catch {
+        // ignore
+      }
       resolve(result);
     };
 
@@ -178,6 +266,7 @@ function runFfmpegBufferTransform(buffer, ffmpegArgs, options = {}) {
         console.warn("[voice-memo-transcode]", message);
       }
     });
+    ignoreBrokenPipeErrors(ffmpeg.stdin);
     ffmpeg.on("error", () => finish(fallbackToInput ? buffer : null));
     ffmpeg.on("close", (code) => {
       if (code === 0 && chunks.length > 0) {
@@ -186,10 +275,73 @@ function runFfmpegBufferTransform(buffer, ffmpegArgs, options = {}) {
       }
       finish(fallbackToInput ? buffer : null);
     });
-    input.on("error", () => finish(fallbackToInput ? buffer : null));
-    input.pipe(ffmpeg.stdin);
-    ffmpeg.stdin.on("error", () => {});
+    try {
+      ffmpeg.stdin.end(buffer);
+    } catch {
+      finish(fallbackToInput ? buffer : null);
+    }
   });
+}
+
+/**
+ * @param {Buffer} buffer
+ * @param {{ audioOnly?: boolean }} [options]
+ * @returns {Promise<Buffer|null>}
+ */
+async function remuxVoiceMemoMp4FaststartViaTempFiles(buffer, options = {}) {
+  const audioOnly = options.audioOnly === true;
+  const tempRoot = await mkdtemp(join(tmpdir(), "voice-memo-remux-"));
+  const inputPath = join(tempRoot, `input-${randomBytes(6).toString("hex")}`);
+  const outputPath = join(tempRoot, `output-${randomBytes(6).toString("hex")}.m4a`);
+  try {
+    await writeFile(inputPath, buffer);
+    const result = await new Promise((resolve) => {
+      const ffmpegArgs = [
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        ...voiceMemoFfmpegInputFlags(),
+        "-i",
+        inputPath,
+      ];
+      if (audioOnly) {
+        ffmpegArgs.push("-vn");
+      }
+      ffmpegArgs.push(
+        "-c",
+        "copy",
+        "-movflags",
+        "+faststart",
+        "-f",
+        "mp4",
+        outputPath,
+      );
+
+      const ffmpeg = spawn("ffmpeg", ffmpegArgs, { stdio: ["ignore", "ignore", "pipe"] });
+      ffmpeg.stderr.on("data", (chunk) => {
+        const message = String(chunk || "").trim();
+        if (message) {
+          console.warn("[voice-memo-transcode]", message);
+        }
+      });
+      ffmpeg.on("error", () => resolve(null));
+      ffmpeg.on("close", async (code) => {
+        if (code !== 0) {
+          resolve(null);
+          return;
+        }
+        try {
+          const output = await readFile(outputPath);
+          resolve(isValidVoiceMemoPlaybackM4a(output) ? output : null);
+        } catch {
+          resolve(null);
+        }
+      });
+    });
+    return result;
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true }).catch(() => {});
+  }
 }
 
 /**
@@ -259,6 +411,16 @@ async function transcodeVoiceMemoToM4aBuffer(buffer) {
     return null;
   }
 
+  if (await probeVoiceMemoHasVideoStream(buffer)) {
+    const codecName = await probeVoiceMemoAudioCodecName(buffer);
+    if (codecName && BROWSER_SAFE_MP4_AUDIO_CODECS.has(codecName)) {
+      const remuxed = await remuxVoiceMemoMp4FaststartViaTempFiles(buffer, { audioOnly: true });
+      if (isValidVoiceMemoPlaybackM4a(remuxed)) {
+        return remuxed;
+      }
+    }
+  }
+
   const pipeResult = await runFfmpegBufferTransform(
     buffer,
     [
@@ -326,7 +488,8 @@ function transcodeVoiceMemoToM4aStream(inputStream) {
     output.destroy(error);
     kill();
   });
-  ffmpeg.stdin.on("error", () => {});
+  ignoreBrokenPipeErrors(ffmpeg.stdin);
+  ignoreBrokenPipeErrors(inputStream);
   ffmpeg.stdout.on("error", (error) => {
     output.destroy(error);
     kill();
@@ -373,25 +536,8 @@ async function remuxVoiceMemoMp4Faststart(buffer, options = {}) {
     return fallbackToInput ? buffer : null;
   }
 
-  const result = await runFfmpegBufferTransform(
-    buffer,
-    [
-      "-hide_banner",
-      "-loglevel",
-      "error",
-      ...voiceMemoFfmpegInputFlags(),
-      "-i",
-      "pipe:0",
-      "-c",
-      "copy",
-      "-movflags",
-      "+faststart",
-      "-f",
-      "mp4",
-      "pipe:1",
-    ],
-    { fallbackToInput },
-  );
+  const audioOnly = await probeVoiceMemoHasVideoStream(buffer);
+  const result = await remuxVoiceMemoMp4FaststartViaTempFiles(buffer, { audioOnly });
 
   if (isValidVoiceMemoPlaybackM4a(result)) {
     return result;
@@ -405,8 +551,10 @@ module.exports = {
   voiceMemoNeedsTranscodeForPlayback,
   voiceMemoNeedsBrowserPlaybackTranscode,
   probeVoiceMemoAudioCodecName,
+  probeVoiceMemoHasVideoStream,
   getMp4FtypBrand,
   isFfmpegAvailable,
+  getFfmpegToolingStatus,
   isMp4FamilyBuffer,
   isValidVoiceMemoPlaybackM4a,
   transcodeVoiceMemoToM4aStream,

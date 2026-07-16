@@ -561,4 +561,5 @@ module.exports = {
   mintReviewVoiceStreamToken,
   verifyVoiceStreamToken,
   verifyReviewVoiceStreamToken,
+  resolveDriveFileFromApplicantCache,
 };

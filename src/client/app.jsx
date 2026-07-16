@@ -634,10 +634,18 @@ async function adminApiPost(path, body = {}) {
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new Error((data && data.error) || `Request failed (HTTP ${response.status}).`);
+    const err = new Error((data && data.error) || `Request failed (HTTP ${response.status}).`);
+    if (data && data.errorCode) {
+      err.errorCode = data.errorCode;
+    }
+    throw err;
   }
   if (data.success !== true) {
-    throw new Error((data && data.error) || 'Request failed.');
+    const err = new Error((data && data.error) || 'Request failed.');
+    if (data && data.errorCode) {
+      err.errorCode = data.errorCode;
+    }
+    throw err;
   }
   return data;
 }
@@ -4247,6 +4255,297 @@ function PortalAdminJobLogPanel({ jobName, logRun, logError, onClose }) {
   );
 }
 
+function PortalAdminPlaybackTestStepBadge({ status }) {
+  const labels = {
+    pending: 'Pending',
+    running: 'Running',
+    succeeded: 'OK',
+    failed: 'Failed',
+    skipped: 'Skipped',
+  };
+  return (
+    <span className={`portal-playback-test-step-badge portal-playback-test-step-badge--${status}`}>
+      {labels[status] || status}
+    </span>
+  );
+}
+
+function formatPlaybackTestStepDetail(detail) {
+  if (detail == null) {
+    return '—';
+  }
+  if (typeof detail === 'string') {
+    return detail;
+  }
+  if (typeof detail !== 'object') {
+    return String(detail);
+  }
+
+  const parts = [];
+  if (detail.aesopId) {
+    parts.push(`AESOP ${detail.aesopId}`);
+  }
+  if (detail.driveFileId) {
+    parts.push(`Drive ${detail.driveFileId}`);
+  }
+  if (detail.fileName) {
+    parts.push(detail.fileName);
+  }
+  if (detail.source) {
+    parts.push(`via ${detail.source}`);
+  }
+  if (detail.hadCache != null) {
+    parts.push(detail.hadCache ? 'had cache row' : 'cache was empty');
+  }
+  if (detail.deleted != null) {
+    parts.push(detail.deleted ? 'row deleted' : 'no row deleted');
+  }
+  if (detail.previousBytes != null && detail.previousBytes > 0) {
+    parts.push(`was ${detail.previousBytes} B`);
+  }
+  if (detail.bytes != null) {
+    parts.push(`${detail.bytes} B`);
+  }
+  if (detail.driveBytes != null) {
+    parts.push(`from Drive ${detail.driveBytes} B`);
+  }
+  if (detail.cachedBytes != null) {
+    parts.push(`cached ${detail.cachedBytes} B`);
+  }
+  if (detail.mimeType) {
+    parts.push(detail.mimeType);
+  }
+  if (detail.cachedMimeType) {
+    parts.push(detail.cachedMimeType);
+  }
+  if (detail.driveMimeType) {
+    parts.push(detail.driveMimeType);
+  }
+  if (detail.needsTranscode === true) {
+    parts.push('transcoded to AAC');
+  } else if (detail.needsTranscode === false) {
+    parts.push('no transcode needed');
+  }
+  if (detail.replacedExisting != null) {
+    parts.push(detail.replacedExisting ? 'replaced existing row' : 'new cache row');
+  }
+  if (detail.status != null) {
+    parts.push(`HTTP ${detail.status}`);
+  }
+  if (detail.contentRange) {
+    parts.push(detail.contentRange);
+  }
+  if (detail.playableHeader === true) {
+    parts.push('header ok');
+  } else if (detail.playableHeader === false) {
+    parts.push('header check failed');
+  }
+  if (detail.streamPath) {
+    parts.push(detail.streamPath);
+  }
+
+  return parts.length > 0 ? parts.join(' · ') : '—';
+}
+
+function PortalAdminVoiceMemoPlaybackTestPanel() {
+  const [aesopId, setAesopId] = useState('');
+  const [driveFileId, setDriveFileId] = useState('');
+  const [running, setRunning] = useState(false);
+  const [error, setError] = useState('');
+  const [errorCode, setErrorCode] = useState('');
+  const [result, setResult] = useState(null);
+  const [audioError, setAudioError] = useState('');
+
+  const streamSrc = result?.streamPath || '';
+
+  const runTest = async () => {
+    const normalizedAesopId = aesopId.trim();
+    const normalizedDriveFileId = driveFileId.trim();
+    if (!normalizedAesopId && !normalizedDriveFileId) {
+      setError('Enter an AESOP ID or Drive file ID.');
+      setErrorCode('');
+      return;
+    }
+
+    setRunning(true);
+    setError('');
+    setErrorCode('');
+    setResult(null);
+    setAudioError('');
+    try {
+      const data = await adminApiPost('/api/portal-admin/jobs/voice-memo-playback-test', {
+        aesopId: normalizedAesopId,
+        driveFileId: normalizedDriveFileId,
+      });
+      setResult(data.result || null);
+      if (data.result && data.result.ok === false) {
+        setError(data.result.error || 'Playback test failed.');
+        setErrorCode(data.result.errorCode || '');
+      }
+    } catch (err) {
+      setError(err.message || 'Playback test failed.');
+      setErrorCode(err.errorCode || '');
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  const succeededSteps = (result?.steps || []).filter((step) => step.status === 'succeeded').length;
+  const totalSteps = (result?.steps || []).length;
+
+  return (
+    <section className="portal-admin-panel portal-admin-voice-memo-playback-test" aria-label="Voice memo playback test">
+      <h3 className="portal-admin-subheading">Voice memo playback test</h3>
+      <p className="portal-admin-hint">
+        Clears the Postgres cache for one memo, downloads it from Drive, stores a
+        browser-playable copy, then probes the same stream path applicants use. Use an
+        AESOP ID from Voice memo issues (or a Drive file ID directly).
+      </p>
+      <div className="portal-admin-lookup-form">
+        <label htmlFor="portal-admin-voice-memo-test-aesop-id" className="portal-admin-lookup-label">
+          AESOP ID
+        </label>
+        <div className="portal-admin-lookup-row">
+          <input
+            id="portal-admin-voice-memo-test-aesop-id"
+            type="text"
+            className="portal-admin-lookup-input"
+            value={aesopId}
+            onChange={(event) => setAesopId(event.target.value)}
+            placeholder="e.g. 2629657847"
+            autoComplete="off"
+            spellCheck={false}
+          />
+        </div>
+        <label htmlFor="portal-admin-voice-memo-test-drive-id" className="portal-admin-lookup-label">
+          Drive file ID (optional override)
+        </label>
+        <div className="portal-admin-lookup-row">
+          <input
+            id="portal-admin-voice-memo-test-drive-id"
+            type="text"
+            className="portal-admin-lookup-input"
+            value={driveFileId}
+            onChange={(event) => setDriveFileId(event.target.value)}
+            placeholder="Google Drive file id"
+            autoComplete="off"
+            spellCheck={false}
+          />
+          <button
+            type="button"
+            className="portal-btn portal-btn--secondary"
+            disabled={running}
+            onClick={runTest}
+          >
+            {running ? 'Testing…' : 'Clear cache & test'}
+          </button>
+        </div>
+      </div>
+      {error ? (
+        <p className="portal-admin-status portal-admin-status--error" role="alert">
+          {error}
+          {errorCode ? <> Reference: {errorCode}</> : null}
+        </p>
+      ) : null}
+      {result ? (
+        <>
+          <dl className="portal-admin-stats portal-admin-stats--compact">
+            <div className="portal-admin-stat-row">
+              <dt>Overall</dt>
+              <dd>
+                {result.ok ? (
+                  <>
+                    <PortalAdminPlaybackTestStepBadge status="succeeded" /> {succeededSteps}/{totalSteps}{' '}
+                    steps passed
+                  </>
+                ) : (
+                  <>
+                    <PortalAdminPlaybackTestStepBadge status="failed" /> Failed at step{' '}
+                    {(result.steps || []).find((step) => step.status === 'failed')?.label || 'unknown'}
+                  </>
+                )}
+              </dd>
+            </div>
+            {result.driveFileId ? (
+              <div className="portal-admin-stat-row">
+                <dt>Drive file</dt>
+                <dd className="portal-admin-mono">{result.driveFileId}</dd>
+              </div>
+            ) : null}
+            {result.fileName ? (
+              <div className="portal-admin-stat-row">
+                <dt>File name</dt>
+                <dd>{result.fileName}</dd>
+              </div>
+            ) : null}
+            <div className="portal-admin-stat-row">
+              <dt>Elapsed</dt>
+              <dd>{formatJobDuration(result.durationMs)}</dd>
+            </div>
+          </dl>
+
+          <div className="portal-admin-table-wrap portal-admin-table-wrap--scroll">
+            <table className="portal-admin-table portal-admin-playback-test-steps-table">
+              <thead>
+                <tr>
+                  <th scope="col">Step</th>
+                  <th scope="col">Status</th>
+                  <th scope="col">Details</th>
+                  <th scope="col">Duration</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(result.steps || []).map((step) => (
+                  <tr key={step.id} className={`portal-admin-playback-test-step-row portal-admin-playback-test-step-row--${step.status}`}>
+                    <th scope="row">{step.label}</th>
+                    <td>
+                      <PortalAdminPlaybackTestStepBadge status={step.status} />
+                    </td>
+                    <td className="portal-admin-playback-test-step-detail">
+                      {step.status === 'failed' ? (
+                        <>
+                          {step.error || 'Step failed.'}
+                          {step.errorCode ? <> Reference: {step.errorCode}</> : null}
+                        </>
+                      ) : (
+                        formatPlaybackTestStepDetail(step.detail)
+                      )}
+                    </td>
+                    <td>{step.durationMs != null ? formatJobDuration(step.durationMs) : '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {result.ok && streamSrc ? (
+            <div className="portal-admin-voice-memo-playback-test-player">
+              <p className="portal-admin-hint">Playback uses the applicant stream token (same URL as the portal).</p>
+              <audio
+                controls
+                preload="metadata"
+                src={streamSrc}
+                onError={() => setAudioError('Browser could not decode the stream. Check server logs for VMTR14 or VMCL codes.')}
+              >
+                Your browser does not support audio playback.
+              </audio>
+              {audioError ? (
+                <p className="portal-admin-status portal-admin-status--error" role="alert">
+                  {audioError}
+                </p>
+              ) : null}
+            </div>
+          ) : result.ok ? (
+            <p className="portal-admin-hint">
+              Provide an AESOP ID to enable in-browser playback. Drive-only tests still validate cache and stream probes.
+            </p>
+          ) : null}
+        </>
+      ) : null}
+    </section>
+  );
+}
+
 function PortalAdminJobsTab({ mirrorCacheStatus }) {
   const [overview, setOverview] = useState(null);
   const [overviewError, setOverviewError] = useState('');
@@ -4856,6 +5155,7 @@ function PortalAdminPage() {
           {[
             { id: 'overview', label: 'Overview' },
             { id: 'jobs', label: 'Jobs' },
+            { id: 'voice-memo-test', label: 'Playback test' },
             { id: 'all-classes', label: 'All classes' },
             { id: 'lookup', label: 'User Lookup' },
             { id: 'high-grades', label: `Grades above ${thresholdLabel}%` },
@@ -5056,6 +5356,8 @@ function PortalAdminPage() {
         ) : null}
 
         {activeTab === 'jobs' ? <PortalAdminJobsTab mirrorCacheStatus={mirrorCacheStatus} /> : null}
+
+        {activeTab === 'voice-memo-test' ? <PortalAdminVoiceMemoPlaybackTestPanel /> : null}
 
         {activeTab === 'all-classes' ? (
           <section className="portal-admin-panel" aria-label="All classes">

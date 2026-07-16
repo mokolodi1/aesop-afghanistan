@@ -39,6 +39,10 @@ const {
 } = require('./services/adminPortal');
 const { triggerCronJob, cancelCronJob } = require('./services/cronRemote');
 const { listJobDefinitions } = require('./services/jobRegistry');
+const {
+  runAdminVoiceMemoPlaybackTest,
+  formatAdminVoiceMemoPlaybackTestError,
+} = require('./services/adminVoiceMemoPlaybackTest');
 const { getLastRunsByJob, listJobRuns, getJobRun } = require('./services/jobRuns');
 const {
   loadReviewAssignmentsForReviewer,
@@ -1970,6 +1974,55 @@ app.post('/api/portal-admin/jobs/run-log', portalAdminRateLimiter, async (req, r
     console.error('Error loading job run log:', formatErrorForLog(error));
     const status = error.statusCode || 500;
     res.status(status).json({ error: error.message || 'Could not load run log.' });
+  }
+});
+
+app.post('/api/portal-admin/jobs/voice-memo-playback-test', portalAdminRateLimiter, async (req, res) => {
+  try {
+    const profile = await requirePortalAdmin(res, req.body);
+    if (!profile) {
+      return;
+    }
+    if (!isDatabaseEnabled()) {
+      return res.status(503).json({ error: 'Postgres is required for voice memo cache tests.' });
+    }
+
+    const aesopId = typeof req.body.aesopId === 'string' ? req.body.aesopId.trim() : '';
+    const driveFileId =
+      typeof req.body.driveFileId === 'string' ? req.body.driveFileId.trim() : '';
+
+    console.log(
+      `[voice-memo-playback-test] started by ${profile.email} ` +
+        `aesopId=${aesopId || '(none)'} driveFileId=${driveFileId || '(none)'}`,
+    );
+
+    const result = await runAdminVoiceMemoPlaybackTest({ aesopId, driveFileId });
+    if (result.ok) {
+      console.log(
+        `[voice-memo-playback-test] ok driveFileId=${result.driveFileId} ` +
+          `steps=${result.steps.filter((step) => step.status === 'succeeded').length}/${result.steps.length}`,
+      );
+    } else {
+      console.warn(
+        '[voice-memo-playback-test] failed:',
+        result.errorCode || result.code,
+        result.error,
+      );
+    }
+    res.json({ success: true, result });
+  } catch (error) {
+    const formatted = formatAdminVoiceMemoPlaybackTestError(error);
+    console.error(
+      '[voice-memo-playback-test] failed:',
+      formatted.errorCode || formatted.code,
+      formatted.message,
+    );
+    res.status(formatted.statusCode || 500).json({
+      success: false,
+      error: formatted.message,
+      code: formatted.code,
+      errorCode: formatted.errorCode,
+    });
   }
 });
 

@@ -790,6 +790,78 @@ function voiceMemoMetadataContext(meta) {
 }
 
 /**
+ * @param {import('google-auth-library').OAuth2Client} auth
+ * @returns {Promise<string>}
+ */
+async function getDriveAccessToken(auth) {
+  const { token } = await auth.getAccessToken();
+  const accessToken = token || auth.credentials?.access_token;
+  if (!accessToken) {
+    throw new Error("Google Drive access token is unavailable.");
+  }
+  return accessToken;
+}
+
+/**
+ * @param {number} status
+ * @param {unknown} body
+ */
+function buildDriveHttpError(status, body) {
+  const payload = body && typeof body === "object" ? body : {};
+  const message = String(payload?.error?.message || `Drive request failed with HTTP ${status}.`);
+  const error = new Error(message);
+  error.response = { status, data: payload };
+  error.code = status;
+  error.errors = payload?.error?.errors;
+  return error;
+}
+
+/**
+ * Drive v3 over native fetch. googleapis/gaxios can fail to attach Authorization on some
+ * Node versions even when credentials exist; bearer fetch is reliable for local dev.
+ * @param {import('google-auth-library').OAuth2Client} auth
+ * @param {string} pathname
+ * @param {Record<string, string|number|boolean|null|undefined>} [query]
+ */
+async function fetchDriveApi(auth, pathname, query = {}) {
+  const accessToken = await getDriveAccessToken(auth);
+  const url = new URL(`https://www.googleapis.com/drive/v3/${pathname}`);
+  for (const [key, value] of Object.entries(query)) {
+    if (value != null && value !== "") {
+      url.searchParams.set(key, String(value));
+    }
+  }
+  const response = await fetch(url, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  const body = await response.json().catch(() => null);
+  if (!response.ok) {
+    throw buildDriveHttpError(response.status, body);
+  }
+  return body;
+}
+
+/**
+ * @param {import('google-auth-library').OAuth2Client} auth
+ * @param {string} fileId
+ * @returns {Promise<Buffer>}
+ */
+async function fetchDriveFileMedia(auth, fileId) {
+  const accessToken = await getDriveAccessToken(auth);
+  const url = new URL(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}`);
+  url.searchParams.set("alt", "media");
+  url.searchParams.set("supportsAllDrives", "true");
+  const response = await fetch(url, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => null);
+    throw buildDriveHttpError(response.status, body);
+  }
+  return Buffer.from(await response.arrayBuffer());
+}
+
+/**
  * @param {ReturnType<typeof google.drive>} drive
  * @param {string} fileId
  * @param {import('googleapis').drive_v3.Schema$File|{ data?: import('googleapis').drive_v3.Schema$File }} meta
@@ -944,25 +1016,19 @@ async function downloadVoiceMemoFile(fileId, options = {}) {
     maybeEnableDriveScriptRateLimit(options.deadlineAt);
 
     let meta = options.metadata;
-    let drive = options.drive;
-    if (!drive) {
-      const auth = await buildServiceAccountJwt([DRIVE_READONLY_SCOPE]);
-      drive = google.drive({ version: "v3", auth });
-    }
+    const auth = await buildServiceAccountJwt([DRIVE_READONLY_SCOPE]);
 
     if (!meta) {
-      const response = await driveApiCall(
+      meta = await driveApiCall(
         "files.get(download metadata)",
         () =>
-          drive.files.get({
-            fileId: normalizedFileId,
+          fetchDriveApi(auth, `files/${encodeURIComponent(normalizedFileId)}`, {
             fields: "mimeType,name,size",
             supportsAllDrives: true,
           }),
         retryOptions,
       );
       recordDriveFilesGet(1);
-      meta = response.data;
     }
 
     const { fileName, driveMimeType, knownSize } = voiceMemoMetadataContext(meta);
@@ -974,21 +1040,12 @@ async function downloadVoiceMemoFile(fileId, options = {}) {
       return null;
     }
 
-    const media = await driveApiCall(
+    const content = await driveApiCall(
       "files.get(download media)",
-      () =>
-        drive.files.get(
-          { fileId: normalizedFileId, alt: "media", supportsAllDrives: true },
-          { responseType: "arraybuffer" },
-        ),
+      () => fetchDriveFileMedia(auth, normalizedFileId),
       retryOptions,
     );
     recordDriveFilesGet(1);
-
-    let arrayBuffer = media.data;
-    media.data = null;
-    const content = Buffer.from(arrayBuffer);
-    arrayBuffer = null;
 
     return {
       fileId: normalizedFileId,

@@ -1,5 +1,5 @@
 const { formatErrorForLog } = require("../utils/errorLogging");
-const { isDriveThrottleError } = require("../utils/driveThrottle");
+const { driveErrorStatus, isDriveThrottleError } = require("../utils/driveThrottle");
 
 const DRIVE_TRY_AGAIN_LATER_MESSAGE =
   "Your voice note is safe and submitted. We are experiencing high traffic volume and cannot play your audio right now. You may try refreshing the stream later to try again.";
@@ -23,6 +23,7 @@ const VOICE_MEMO_ERROR_CODES = {
   STALE_SUBMISSION: "VMST12",
   INVALID_CREDENTIALS: "VMIN13",
   TRANSCODE_FAILED: "VMTR14",
+  DRIVE_ACCESS: "VMDR15",
 };
 
 /**
@@ -60,7 +61,12 @@ function resolveVoiceMemoStreamError(error) {
       : new Error(String(error ?? "Unknown voice memo stream error"));
 
   const message = String(err.message || "").trim();
-  const statusCode = Number.isFinite(err.statusCode) ? Number(err.statusCode) : 503;
+  const httpStatus = driveErrorStatus(err);
+  const statusCode = Number.isFinite(err.statusCode)
+    ? Number(err.statusCode)
+    : httpStatus != null
+      ? httpStatus
+      : 503;
   const semanticCode = String(err.code || "").trim();
   const existingErrorCode = String(err.errorCode || "").trim();
 
@@ -110,6 +116,17 @@ function resolveVoiceMemoStreamError(error) {
       statusCode: 503,
       code: "DRIVE_THROTTLED",
       errorCode: VOICE_MEMO_ERROR_CODES.DRIVE_THROTTLED,
+    };
+  }
+
+  if (
+    /unregistered callers|missing a valid api key/i.test(message)
+  ) {
+    return {
+      message: DRIVE_TRY_AGAIN_LATER_MESSAGE,
+      statusCode: 403,
+      code: "DRIVE_ACCESS_DENIED",
+      errorCode: VOICE_MEMO_ERROR_CODES.DRIVE_ACCESS,
     };
   }
 
