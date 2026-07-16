@@ -3,7 +3,6 @@ const {
   loadAllPeopleRowsFromSheets,
   loadEmailToPeopleProfileMap,
   buildLatestDingNumberByUserIdMap,
-  resolvePortalRoleFromPeopleSheet,
   applyDerivedPeopleStatusToRows,
   loadClassroomRoleEmailSetsFromSheets,
   initGoogleSheets,
@@ -36,10 +35,9 @@ const MIRROR_SYNC_TIME_BUDGET_MS = JOB_MAX_RUNTIME_MS;
  * @param {object} profile
  * @param {Set<string>} applicantIdSet
  */
-function buildPeopleStagingFields(profile, applicantIdSet) {
+function buildPeopleStagingFields(profile, _applicantIdSet) {
   const email = profile.email.trim().toLowerCase();
   const identityKey = personSheetIdentityKey(profile);
-  const portalRole = resolvePortalRoleFromPeopleSheet(profile, applicantIdSet);
   const aesopId = profile.id ? String(profile.id).trim() : null;
   const sheetRowPayload = { ...(profile.sheetRow || {}) };
   if (profile.sheetRowNumber != null && Number.isFinite(Number(profile.sheetRowNumber))) {
@@ -51,7 +49,6 @@ function buildPeopleStagingFields(profile, applicantIdSet) {
     email,
     name: profile.name || null,
     phone: profile.phone || null,
-    portalRole,
     reviewerRole: profile.reviewerRole ? String(profile.reviewerRole).trim() : null,
     peopleType: profile.peopleType ? String(profile.peopleType).trim() : null,
     adminRole: profile.adminRole ? String(profile.adminRole).trim() : null,
@@ -71,15 +68,14 @@ async function upsertPersonStagingRow(runner, profile, applicantIdSet) {
   const fields = buildPeopleStagingFields(profile, applicantIdSet);
   const result = await runner.query(
     `INSERT INTO people_staging (
-       identity_key, aesop_id, email, name, phone, portal_role, reviewer_role,
+       identity_key, aesop_id, email, name, phone, reviewer_role,
        people_type, admin_role, people_status, last_login, past_ding, sheet_row
-     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb)
+     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb)
      ON CONFLICT (identity_key) DO UPDATE SET
        aesop_id = EXCLUDED.aesop_id,
        email = EXCLUDED.email,
        name = EXCLUDED.name,
        phone = EXCLUDED.phone,
-       portal_role = EXCLUDED.portal_role,
        reviewer_role = EXCLUDED.reviewer_role,
        people_type = EXCLUDED.people_type,
        admin_role = EXCLUDED.admin_role,
@@ -94,7 +90,6 @@ async function upsertPersonStagingRow(runner, profile, applicantIdSet) {
       fields.email,
       fields.name,
       fields.phone,
-      fields.portalRole,
       fields.reviewerRole,
       fields.peopleType,
       fields.adminRole,

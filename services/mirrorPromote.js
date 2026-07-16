@@ -203,7 +203,6 @@ function stagingRowToProfile(row) {
     email: String(row.email || "").trim(),
     name: row.name ? String(row.name) : "",
     phone: row.phone ? String(row.phone) : "",
-    portalRole: row.portal_role ? String(row.portal_role) : "",
     reviewerRole: row.reviewer_role ? String(row.reviewer_role) : "",
     peopleType: row.people_type ? String(row.people_type) : "",
     adminRole: row.admin_role ? String(row.admin_role) : "",

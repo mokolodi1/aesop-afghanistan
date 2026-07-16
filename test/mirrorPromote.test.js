@@ -67,9 +67,9 @@ test("partial staging does not change production people count", async (t) => {
   await truncateMirrorStagingTables(pool);
   await pool.query(
     `INSERT INTO people_staging (
-       identity_key, aesop_id, email, name, portal_role, sheet_row
+       identity_key, aesop_id, email, name, people_type, sheet_row
      ) VALUES ($1, $2, $3, $4, $5, $6::jsonb)`,
-    ["id:test-staging-only", "test-staging-only", "staging-only@example.com", "Staging Only", "Student", "{}"],
+    ["id:test-staging-only", "test-staging-only", "staging-only@example.com", "Staging Only", "Student: Classroom", "{}"],
   );
 
   const after = await pool.query(`SELECT COUNT(*)::int AS count FROM people`);
@@ -88,10 +88,10 @@ test("promote preserves existing people.id for matched aesop_id", async (t) => {
   const email = `${aesopId}@example.com`;
 
   const inserted = await pool.query(
-    `INSERT INTO people (aesop_id, email, name, portal_role, synced_at)
+    `INSERT INTO people (aesop_id, email, name, people_type, synced_at)
      VALUES ($1, $2, $3, $4, NOW())
      RETURNING id`,
-    [aesopId, email, "Promote Test", "Student"],
+    [aesopId, email, "Promote Test", "Student: Classroom"],
   );
   const originalId = inserted.rows[0].id;
 
@@ -99,19 +99,19 @@ test("promote preserves existing people.id for matched aesop_id", async (t) => {
   const identityKey = personSheetIdentityKey({ id: aesopId, email, name: "Promote Test Updated" });
   await pool.query(
     `INSERT INTO people_staging (
-       identity_key, aesop_id, email, name, portal_role, sheet_row
+       identity_key, aesop_id, email, name, people_type, sheet_row
      ) VALUES ($1, $2, $3, $4, $5, $6::jsonb)`,
-    [identityKey, aesopId, email, "Promote Test Updated", "Teacher", "{}"],
+    [identityKey, aesopId, email, "Promote Test Updated", "Teacher: Classroom", "{}"],
   );
 
   const mirrorSyncRunId = await createMirrorSyncRun(null);
   await promoteStagingMirror(mirrorSyncRunId, new Set());
   await finalizeMirrorSyncRun(mirrorSyncRunId, "succeeded", { peopleCount: 1 });
 
-  const row = await pool.query(`SELECT id, name, portal_role FROM people WHERE id = $1`, [originalId]);
+  const row = await pool.query(`SELECT id, name, people_type FROM people WHERE id = $1`, [originalId]);
   assert.equal(row.rows[0].id, originalId);
   assert.equal(row.rows[0].name, "Promote Test Updated");
-  assert.equal(row.rows[0].portal_role, "Teacher");
+  assert.equal(row.rows[0].people_type, "Teacher: Classroom");
 
   await pool.query(`DELETE FROM people WHERE id = $1`, [originalId]);
 });
@@ -126,10 +126,10 @@ test("promote skips ding insert when number unchanged", async (t) => {
   const email = `${aesopId}@example.com`;
 
   const person = await pool.query(
-    `INSERT INTO people (aesop_id, email, name, portal_role, synced_at)
+    `INSERT INTO people (aesop_id, email, name, people_type, synced_at)
      VALUES ($1, $2, $3, $4, NOW())
      RETURNING id`,
-    [aesopId, email, "Ding Test", "Student"],
+    [aesopId, email, "Ding Test", "Student: Classroom"],
   );
   const personId = person.rows[0].id;
 
@@ -147,9 +147,9 @@ test("promote skips ding insert when number unchanged", async (t) => {
   const identityKey = personSheetIdentityKey({ id: aesopId, email, name: "Ding Test" });
   await pool.query(
     `INSERT INTO people_staging (
-       identity_key, aesop_id, email, name, portal_role, sheet_row
+       identity_key, aesop_id, email, name, people_type, sheet_row
      ) VALUES ($1, $2, $3, $4, $5, $6::jsonb)`,
-    [identityKey, aesopId, email, "Ding Test", "Student", "{}"],
+    [identityKey, aesopId, email, "Ding Test", "Student: Classroom", "{}"],
   );
   await pool.query(
     `INSERT INTO ding_numbers_staging (identity_key, number) VALUES ($1, $2)`,
@@ -194,9 +194,9 @@ test("cleared applicants_staging leaves production applicants unchanged", async 
   });
   await pool.query(
     `INSERT INTO people_staging (
-       identity_key, aesop_id, email, name, portal_role, sheet_row
+       identity_key, aesop_id, email, name, people_type, sheet_row
      ) VALUES ($1, $2, $3, $4, $5, $6::jsonb)`,
-    [identityKey, "id:test-people-anchor", "anchor-soft-fail@example.com", "Anchor", "Student", "{}"],
+    [identityKey, "id:test-people-anchor", "anchor-soft-fail@example.com", "Anchor", "Student: Classroom", "{}"],
   );
   await pool.query(
     `INSERT INTO applicants_staging (aesop_id, name, round1)

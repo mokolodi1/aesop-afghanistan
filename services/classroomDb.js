@@ -112,15 +112,25 @@ async function getRoleByEmailFromDb(email) {
   if (!person || !isPeopleIdentityFresh(person)) {
     return { found: false, role: "", isTeacher: false, teacherClasses: "" };
   }
-  const role = person.portalRole || "";
-  const normalizedRole = String(role).toLowerCase();
+  // Lazy require avoids a load-time cycle with googleSheets → classroomDb.
+  const { parsePortalRoleFromPeopleType, isPeopleSheetAdminRole } = require("./googleSheets");
+  const fromType = parsePortalRoleFromPeopleType(person.peopleType);
+  const statusLower = String(person.peopleStatus || "")
+    .trim()
+    .toLowerCase();
+  const teacherClasses = person.teacherClasses || "";
+  const isTeacher = fromType === "Teacher" || Boolean(String(teacherClasses).trim());
+  const isApplied =
+    statusLower === "applied" || (fromType == null && statusLower.includes("appl"));
+  const isAdmin = isPeopleSheetAdminRole(person.adminRole);
+  const role = isTeacher ? "Teacher" : fromType === "Student" ? "Student" : isApplied ? "Applied" : "";
   return {
-    found: !!role,
+    found: Boolean(role || isAdmin || teacherClasses),
     role,
-    isTeacher: normalizedRole === "teacher",
-    isApplied: normalizedRole === "applied",
-    isAdmin: normalizedRole === "admin",
-    teacherClasses: person.teacherClasses || "",
+    isTeacher,
+    isApplied,
+    isAdmin,
+    teacherClasses,
   };
 }
 
@@ -1037,30 +1047,30 @@ function isPeopleIdentityFresh(person) {
 
 /**
  * @param {import('../db/schema').people.$inferSelect} person
- * @returns {{ name: string, email: string, id: string, phone: string, portalRole: string, reviewerRole: string, peopleStatus: string }}
+ * @returns {{
+ *   name: string,
+ *   email: string,
+ *   id: string,
+ *   phone: string,
+ *   adminRole: string,
+ *   peopleType: string,
+ *   reviewerRole: string,
+ *   peopleStatus: string,
+ * }}
  */
 function personRowToProfile(person) {
   const aesopId = person.aesopId || "";
-  const portalRole = person.portalRole || "";
   // people_status is derived at mirror time from Classroom + Applicants (not People Status column).
   const storedStatus = person.peopleStatus ? String(person.peopleStatus).trim() : "";
-  const roleLower = String(portalRole).trim().toLowerCase();
   return {
     name: person.name || "",
     email: person.email || "",
     id: aesopId,
     phone: person.phone || "",
-    portalRole,
+    adminRole: person.adminRole || "",
+    peopleType: person.peopleType || "",
     reviewerRole: person.reviewerRole || "",
-    peopleStatus:
-      storedStatus ||
-      (roleLower === "applied"
-        ? "Applied"
-        : roleLower === "teacher"
-          ? "Teaching"
-          : roleLower === "student"
-            ? "Admitted"
-            : ""),
+    peopleStatus: storedStatus,
   };
 }
 

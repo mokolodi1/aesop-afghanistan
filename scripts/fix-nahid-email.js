@@ -23,7 +23,7 @@ async function fixDatabase() {
 
   const pool = getPool();
   const existing = await pool.query(
-    `SELECT id, aesop_id, email, portal_role
+    `SELECT id, aesop_id, email, people_type, admin_role
      FROM people
      WHERE lower(email) IN (lower($1), lower($2)) OR aesop_id = $3
      ORDER BY id`,
@@ -55,7 +55,7 @@ async function fixDatabase() {
       `UPDATE people
        SET aesop_id = $1,
            email = $2,
-           portal_role = COALESCE(NULLIF(portal_role, ''), 'Student'),
+           people_type = COALESCE(NULLIF(trim(people_type), ''), 'Student: Classroom'),
            synced_at = NOW()
        WHERE id = $3`,
       [AESOP_ID, GOOD_EMAIL, keepId],
@@ -69,7 +69,7 @@ async function fixDatabase() {
   }
 
   const after = await pool.query(
-    `SELECT id, aesop_id, email, portal_role
+    `SELECT id, aesop_id, email, people_type, admin_role
      FROM people
      WHERE lower(email) = lower($1) OR aesop_id = $2`,
     [GOOD_EMAIL, AESOP_ID],

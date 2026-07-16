@@ -3,7 +3,7 @@
  * Legacy no-op: People Status column is no longer used.
  *
  * Status is derived from Classroom Roles/Grades, the Applicants sheet, and
- * 262-prefix AESOP IDs during people mirror / portal role resolution.
+ * 262-prefix AESOP IDs during people mirror / people status resolution.
  * Re-enable sheet writes only by setting GOOGLE_PEOPLE_STATUS_COLUMN to a
  * column letter, then use syncPeopleStatusOnPeopleSheet.
  */

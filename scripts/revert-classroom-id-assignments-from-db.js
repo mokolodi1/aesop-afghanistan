@@ -9,10 +9,7 @@
  */
 require("../config/secrets");
 const { getPool, closeDatabase, isDatabaseEnabled } = require("../db/index");
-const {
-  initGoogleSheets,
-  parsePortalRoleFromPeopleType,
-} = require("../services/googleSheets");
+const { initGoogleSheets } = require("../services/googleSheets");
 
 const STAGING_TAB = "Classroom ID Assignments (Jul 2026)";
 const DRY_RUN = process.argv.includes("--dry-run");
@@ -80,7 +77,7 @@ async function loadStagingAssignments() {
       aesopId,
       email,
       name,
-      portalRole: parsePortalRoleFromPeopleType(typeRaw),
+      peopleType: typeRaw || null,
       sheetRow: row.rowNumber,
     });
   }

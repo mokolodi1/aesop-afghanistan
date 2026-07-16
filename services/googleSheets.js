@@ -484,34 +484,6 @@ function parsePortalRoleFromPeopleType(rawType) {
   return null;
 }
 
-/**
- * Resolve portal_role from People tab type column, Admins column, and Applicants tab membership.
- * @param {{ id?: string, peopleType?: string, portalRole?: string }} profile
- * @param {Set<string>|null|undefined} applicantIdSet lowercase AESOP IDs from Applicants sheet
- * @returns {"Admin"|"Teacher"|"Student"|"Applied"|null}
- */
-function resolvePortalRoleFromPeopleSheet(profile, applicantIdSet) {
-  const adminRaw = profile?.portalRole || "";
-  if (isPeopleSheetAdminRole(adminRaw)) {
-    return "Admin";
-  }
-
-  const fromType = parsePortalRoleFromPeopleType(profile?.peopleType);
-  if (fromType) {
-    return fromType;
-  }
-
-  const typeText = String(profile?.peopleType || "").trim();
-  if (!typeText) {
-    const idKey = String(profile?.id || "").trim().toLowerCase();
-    if (idKey && applicantIdSet && applicantIdSet.has(idKey)) {
-      return "Applied";
-    }
-  }
-
-  return null;
-}
-
 function resolvePeopleReviewerColumnIndex() {
   const columnRef = config.googleSheets.peopleReviewerColumn;
   if (columnRef == null || String(columnRef).trim() === "" || String(columnRef).trim().toUpperCase() === "OFF") {
@@ -1288,7 +1260,16 @@ function googleSheetPlainText(value) {
 /**
  * Find name and email for the row where the id column matches userId.
  * @param {string} userId - User ID to lookup (pre-sanitized)
- * @returns {Promise<{ name: string, email: string, id: string, phone: string, portalRole: string }|null>}
+ * @returns {Promise<{
+ *   name: string,
+ *   email: string,
+ *   id: string,
+ *   phone: string,
+ *   adminRole: string,
+ *   peopleType: string,
+ *   reviewerRole: string,
+ *   peopleStatus: string,
+ * }|null>}
  */
 async function findProfileById(userId) {
   const idKey = String(userId || "").trim();
@@ -1306,10 +1287,10 @@ async function findProfileById(userId) {
         // stale DB mirror must never strip admin access, so upgrade from the
         // sheet when the column says admin (never downgrade).
         if (
-          !isPeopleSheetAdminRole(profile.portalRole) &&
+          !isPeopleSheetAdminRole(profile.adminRole) &&
           (await isPeopleSheetAdminByIdentity(profile.id, profile.email))
         ) {
-          profile.portalRole = "Admin";
+          profile.adminRole = "yes";
         }
         return profile;
       }
@@ -1358,10 +1339,8 @@ async function findProfileById(userId) {
           email: String(rowData[emailColumnIndex] || "").trim(),
           id: aesopId,
           phone: phoneRaw,
-          portalRole: resolvePortalRoleFromPeopleSheet(
-            { id: aesopId, peopleType, portalRole: adminRole },
-            applicantIdSet,
-          ) || "",
+          adminRole,
+          peopleType,
           reviewerRole: readPeopleReviewerRoleFromRow(row, rowData, reviewerColumnIndex),
           peopleStatus: derivePeopleSheetStatus({
             aesopId,
@@ -2520,7 +2499,6 @@ async function getUserData(email) {
  *   name: string,
  *   phone: string,
  *   peopleType: string,
- *   portalRole: string,
  *   adminRole: string,
  *   reviewerRole: string,
  *   peopleStatus: string,
@@ -2576,7 +2554,6 @@ async function loadAllPeopleRowsFromSheets(options = {}) {
         name: String(rowData[nameColumnIndex] ?? "").trim(),
         phone: phoneRaw,
         peopleType,
-        portalRole: adminRole,
         adminRole,
         reviewerRole: readPeopleReviewerRoleFromRow(row, rowData, reviewerColumnIndex),
         // Status is derived later from Classroom + Applicants (not People Status column).
@@ -3380,7 +3357,6 @@ module.exports = {
   loadPeopleSheetAdminSets,
   isPeopleSheetReviewerRole,
   parsePortalRoleFromPeopleType,
-  resolvePortalRoleFromPeopleSheet,
   readPeopleTypeFromRow,
   resolvePeopleTypeColumnIndex,
   isAppliedPeopleStatus,

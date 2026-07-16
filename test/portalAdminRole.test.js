@@ -1,9 +1,6 @@
 const { describe, it } = require("node:test");
 const assert = require("node:assert/strict");
-const {
-  isPeopleSheetAdminRole,
-  resolvePortalRoleFromPeopleSheet,
-} = require("../services/googleSheets");
+const { isPeopleSheetAdminRole } = require("../services/googleSheets");
 const { isPortalAdmin } = require("../services/adminPortal");
 
 describe("isPeopleSheetAdminRole (default deny)", () => {
@@ -39,51 +36,15 @@ describe("isPeopleSheetAdminRole (default deny)", () => {
   });
 });
 
-describe("resolvePortalRoleFromPeopleSheet", () => {
-  it("returns Admin only when the Admins column is explicitly marked", () => {
-    assert.equal(
-      resolvePortalRoleFromPeopleSheet(
-        { id: "a1", peopleType: "Student: A-1", portalRole: "yes" },
-        new Set(),
-      ),
-      "Admin",
-    );
-    assert.equal(
-      resolvePortalRoleFromPeopleSheet(
-        { id: "a1", peopleType: "Student: A-1", portalRole: "Teacher" },
-        new Set(),
-      ),
-      "Student",
-    );
-    assert.equal(
-      resolvePortalRoleFromPeopleSheet(
-        { id: "a1", peopleType: "Teacher: I-1", portalRole: "x" },
-        new Set(),
-      ),
-      "Teacher",
-    );
-    assert.equal(
-      resolvePortalRoleFromPeopleSheet(
-        { id: "a1", peopleType: "Student: A-1", portalRole: "" },
-        new Set(),
-      ),
-      "Student",
-    );
-  });
-});
-
 describe("isPortalAdmin", () => {
-  it("never grants admin from email alone", () => {
+  it("reads only adminRole from the People Admins column", () => {
     assert.equal(isPortalAdmin("teo@example.com"), false);
     assert.equal(isPortalAdmin({ email: "teo@example.com" }), false);
-    assert.equal(isPortalAdmin({ email: "teo@example.com", portalRole: "Teacher" }), false);
-    assert.equal(isPortalAdmin({ email: "teo@example.com", portalRole: "Student" }), false);
-    assert.equal(isPortalAdmin({ email: "teo@example.com", portalRole: "x" }), false);
-  });
-
-  it("grants admin only for mirrored Admin / explicit sheet markers", () => {
-    assert.equal(isPortalAdmin({ portalRole: "Admin" }), true);
-    assert.equal(isPortalAdmin({ portalRole: "yes" }), true);
-    assert.equal(isPortalAdmin({ portalRole: "1" }), true);
+    assert.equal(isPortalAdmin({ email: "teo@example.com", adminRole: "Teacher" }), false);
+    assert.equal(isPortalAdmin({ email: "teo@example.com", adminRole: "Student" }), false);
+    assert.equal(isPortalAdmin({ email: "teo@example.com", adminRole: "x" }), false);
+    assert.equal(isPortalAdmin({ adminRole: "Admin" }), true);
+    assert.equal(isPortalAdmin({ adminRole: "yes" }), true);
+    assert.equal(isPortalAdmin({ adminRole: "1" }), true);
   });
 });

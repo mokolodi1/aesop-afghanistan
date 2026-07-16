@@ -5,7 +5,6 @@ const {
   resolveColumnIndex,
   loadEmailToPeopleProfileMap,
   listAllClassroomGradeRows,
-  resolvePortalRoleFromPeopleSheet,
 } = require("./googleSheets");
 const { formatErrorForLog } = require("../utils/errorLogging");
 const { isDatabaseEnabled } = require("../db/index");
@@ -18,7 +17,6 @@ const {
   isPeopleMirrorFresh,
 } = require("./classroomDb");
 const { exportSyncBackup } = require("./backupExport");
-const { loadApplicantAesopIdSetFromSheets } = require("./voiceMemoSync");
 const { getServiceAccountCredentials } = require("./googleAuth");
 
 /**
@@ -376,7 +374,6 @@ async function runClassroomSync() {
     }
 
     const profileMap = await loadEmailToPeopleProfileMap();
-    const applicantIdSet = await loadApplicantAesopIdSetFromSheets();
     const peopleEmails = new Set([...teacherClasses.keys(), ...studentSections.keys()]);
     for (const row of dbEnrollments) {
       peopleEmails.add(row.email);
@@ -391,13 +388,11 @@ async function runClassroomSync() {
     for (const email of peopleEmails) {
       const profile = profileMap.get(email);
       const isTeacher = teacherClasses.has(email);
-      const portalRole = resolvePortalRoleFromPeopleSheet(profile, applicantIdSet);
       dbPeople.push({
         email,
         aesopId: profile?.id || "",
         name: emailToName.get(email) || profile?.name || "",
         phone: profile?.phone || "",
-        portalRole,
         teacherClasses: isTeacher
           ? Array.from(teacherClasses.get(email)).sort().join(CLASS_LIST_DELIMITER)
           : "",

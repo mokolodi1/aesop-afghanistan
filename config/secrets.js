@@ -38,7 +38,7 @@ function buildGoogleSheetsConfig(fileSection) {
       "peopleTypeHeader",
       "Type (teacher, student)",
     ),
-    /** People sheet column for manual portal role (e.g. Admin). Blank or OFF disables. */
+    /** People sheet Admins column (explicit admin markers only). Blank or OFF disables. */
     peopleRoleColumn: envOr("GOOGLE_PEOPLE_ROLE_COLUMN", "peopleRoleColumn", "S"),
     /** Header label on People sheet for manual admin flag (used with loadHeaderRow). */
     peopleRoleHeader: envOr("GOOGLE_PEOPLE_ROLE_COLUMN_HEADER", "peopleRoleHeader", "Admins"),

@@ -69,7 +69,7 @@ This runs `mirrorPeopleAndDingFromSheets()` every hour (without full Ding change
 
 | Source | Postgres `people` columns |
 |--------|---------------------------|
-| People tab | `aesop_id`, `name`, `email`, `phone`, `people_type`, `admin_role`, `people_status` (derived from Classroom + Applicants + 262 IDs — not the People Status column), `last_login`, `past_ding`, `reviewer_role`, `portal_role` (derived), `sheet_row` (full header→value JSON) |
+| People tab | `aesop_id`, `name`, `email`, `phone`, `people_type`, `admin_role` (People Admins column), `people_status` (derived from Classroom + Applicants + 262 IDs — not the People Status column), `last_login`, `past_ding`, `reviewer_role`, `sheet_row` (full header→value JSON) |
 
 Other hourly mirrors:
 
@@ -180,6 +180,6 @@ Returns `{ ok, database: { enabled, ok }, classroomEnabled }`.
 
 - `sync_runs` — Classroom sync audit log (legacy; superseded by `job_runs` for the Jobs tab)
 - `job_runs` — one row per sync job run (scheduled or admin-triggered) with status, result summary, and captured logs
-- `people` — AESOP IDs, emails, portal roles (**People sheet mirror only**; Classroom sync links by email)
+- `people` — AESOP IDs, emails, `people_type` / `admin_role` / `people_status` (**People sheet mirror only**; Classroom sync links by email)
 - `courses`, `course_enrollments`, `course_grades`, `assignments`, `assignment_grades` — Classroom cache
 - `ding_numbers`, `ding_change_history`, `ding_topups` — Ding mirror and future DingConnect automation audit

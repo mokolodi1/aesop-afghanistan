@@ -260,7 +260,7 @@ async function resolvePortalRoleAndGrade({ userId, email, name }) {
 
 /**
  * Verify portal session body (userId + email) against the People sheet.
- * @returns {Promise<{ id: string, name: string, email: string, phone: string, portalRole: string }|null>}
+ * @returns {Promise<{ id: string, name: string, email: string, phone: string, adminRole?: string }|null>}
  */
 async function verifyPortalSessionBody(userId, email) {
   const idKey = sanitizeIdentifier(userId);
@@ -320,7 +320,7 @@ async function requirePortalReviewer(res, body) {
 /**
  * @param {import('express').Response} res
  * @param {{ userId: string, email: string }} body
- * @returns {Promise<{ id: string, name: string, email: string, phone: string, portalRole: string }|null>}
+ * @returns {Promise<{ id: string, name: string, email: string, phone: string, adminRole?: string }|null>}
  */
 async function requirePortalAdmin(res, body) {
   const profile = await verifyPortalSessionBody(body.userId, body.email);
@@ -564,10 +564,10 @@ app.post('/api/verify-magic-link', async (req, res) => {
           if (fromDb) {
             profile = personRowToProfile(fromDb);
             if (
-              !isPeopleSheetAdminRole(profile.portalRole) &&
+              !isPeopleSheetAdminRole(profile.adminRole) &&
               (await isPeopleSheetAdminByIdentity(profile.id || result.userId, profile.email))
             ) {
-              profile.portalRole = 'Admin';
+              profile.adminRole = 'yes';
             }
           }
         } catch (dbError) {
@@ -607,7 +607,7 @@ app.post('/api/verify-magic-link', async (req, res) => {
         email: emailFromSheet,
         name: studentName,
       });
-      const isAdmin = isPortalAdmin({ email: emailFromSheet, portalRole: profile?.portalRole });
+      const isAdmin = isPortalAdmin({ adminRole: profile?.adminRole });
       const isReviewer = await resolvePortalReviewerAccess(profile);
       const applicationStatus = await resolveApplicationStatus(studentUserId, isApplicant);
 
@@ -1043,7 +1043,7 @@ app.post('/api/portal-class-grade', portalClassGradeRateLimiter, async (req, res
       email: profileEmail,
       name: studentName,
     });
-    const isAdmin = isPortalAdmin({ email: profileEmail, portalRole: profile?.portalRole });
+    const isAdmin = isPortalAdmin({ adminRole: profile?.adminRole });
     const isReviewer = await resolvePortalReviewerAccess(profile);
     const applicationStatus = await resolveApplicationStatus(userId, isApplicant);
 
@@ -1146,7 +1146,7 @@ app.post('/api/portal-teacher-roster', portalTeacherRosterRateLimiter, async (re
     const role = isDatabaseEnabled()
       ? await getRoleByEmailFromDb(profileEmail)
       : await getRoleByEmail(profileEmail);
-    if (!isPortalAdmin({ email: profileEmail, portalRole: profile?.portalRole }) && (!role.found || !role.isTeacher)) {
+    if (!isPortalAdmin({ adminRole: profile?.adminRole }) && (!role.found || !role.isTeacher)) {
       return res.status(403).json({ error: 'Only teachers can view class rosters.' });
     }
 

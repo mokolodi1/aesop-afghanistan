@@ -45,12 +45,25 @@ function buildIndexedRow(indexed) {
   return arr;
 }
 
-function buildPeopleAppendRow({ aesopId, name, email, portalRole }) {
+function classroomRoleFromEnrollments(roles) {
+  const normalized = new Set(
+    (roles || []).map((role) => String(role || "").trim().toLowerCase()).filter(Boolean),
+  );
+  if (normalized.has("teacher")) {
+    return "Teacher";
+  }
+  if (normalized.has("student")) {
+    return "Student";
+  }
+  return "Student";
+}
+
+function buildPeopleAppendRow({ aesopId, name, email, classroomRole }) {
   const idIdx = resolveColumnIndex(config.googleSheets.idColumn || "B");
   const nameIdx = resolveColumnIndex(config.googleSheets.nameColumn || "C");
   const emailIdx = resolveColumnIndex(config.googleSheets.emailColumn || "D");
   const typeIdx = resolveColumnIndex(config.googleSheets.peopleTypeColumn || "E");
-  const typeValue = portalRole === "Teacher" ? "Teacher: Classroom" : "Student: Classroom";
+  const typeValue = classroomRole === "Teacher" ? "Teacher: Classroom" : "Student: Classroom";
   return buildIndexedRow({
     [idIdx]: googleSheetPlainText(aesopId),
     [nameIdx]: name || "",
@@ -65,16 +78,28 @@ async function loadOrphanPeople() {
     `SELECT
        lower(trim(p.email)) AS email,
        p.name,
-       p.portal_role,
-       (SELECT COUNT(*)::int FROM course_enrollments ce WHERE ce.person_id = p.id) AS course_count
+       p.people_type,
+       COALESCE(array_agg(DISTINCT ce.role) FILTER (WHERE ce.role IS NOT NULL), '{}') AS enrollment_roles,
+       (SELECT COUNT(*)::int FROM course_enrollments ce2 WHERE ce2.person_id = p.id) AS course_count
      FROM people p
+     LEFT JOIN course_enrollments ce ON ce.person_id = p.id
      WHERE p.aesop_id IS NULL
-       AND EXISTS (SELECT 1 FROM course_enrollments ce WHERE ce.person_id = p.id)
+       AND EXISTS (SELECT 1 FROM course_enrollments ce3 WHERE ce3.person_id = p.id)
+     GROUP BY p.id
      ORDER BY
-       CASE WHEN p.portal_role = 'Teacher' THEN 0 WHEN p.portal_role = 'Student' THEN 1 ELSE 2 END,
+       CASE
+         WHEN EXISTS (
+           SELECT 1 FROM course_enrollments ce4
+           WHERE ce4.person_id = p.id AND lower(ce4.role) = 'teacher'
+         ) THEN 0
+         ELSE 1
+       END,
        lower(trim(p.email))`,
   );
-  return result.rows;
+  return result.rows.map((row) => ({
+    ...row,
+    classroom_role: classroomRoleFromEnrollments(row.enrollment_roles),
+  }));
 }
 
 async function loadExistingIdSet() {
@@ -112,11 +137,11 @@ function writeAssignmentCsv(assigned) {
     const s = String(value ?? "");
     return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
   };
-  const header = ["aesop_id", "email", "name", "portal_role", "course_count"];
+  const header = ["aesop_id", "email", "name", "classroom_role", "course_count"];
   const toCsv = (rows) => [header.join(","), ...rows.map((row) => header.map((key) => esc(row[key])).join(","))].join("\n") + "\n";
 
-  const teachers = assigned.filter((row) => row.portal_role === "Teacher");
-  const students = assigned.filter((row) => row.portal_role === "Student");
+  const teachers = assigned.filter((row) => row.classroom_role === "Teacher");
+  const students = assigned.filter((row) => row.classroom_role === "Student");
   const staffTeachers = teachers.filter((row) => row.email.endsWith("@aesopafghanistan.org"));
 
   fs.writeFileSync(path.join(docsDir, "assigned-classroom-orphan-ids.csv"), toCsv(assigned));
@@ -133,7 +158,7 @@ async function ensureStagingWorksheet(doc) {
   if (!worksheet) {
     worksheet = await doc.addSheet({
       title,
-      headerValues: ["AESOP ID", "Name", "Email", "Type (teacher, student)", "Status", "portal_role", "course_count"],
+      headerValues: ["AESOP ID", "Name", "Email", "Type (teacher, student)", "Status", "classroom_role", "course_count"],
     });
     return worksheet;
   }
@@ -153,9 +178,9 @@ async function appendStagingRows(assigned) {
     googleSheetPlainText(person.aesop_id),
     person.name || "",
     person.email || "",
-    person.portal_role === "Teacher" ? "Teacher: Classroom" : "Student: Classroom",
-    person.portal_role === "Teacher" ? "Teaching" : "Admitted",
-    person.portal_role || "",
+    person.classroom_role === "Teacher" ? "Teacher: Classroom" : "Student: Classroom",
+    person.classroom_role === "Teacher" ? "Teaching" : "Admitted",
+    person.classroom_role || "",
     String(person.course_count ?? ""),
   ]);
 
@@ -176,14 +201,16 @@ async function updateDatabaseIds(assigned) {
   try {
     await client.query("BEGIN");
     for (const person of assigned) {
+      const peopleType =
+        person.classroom_role === "Teacher" ? "Teacher: Classroom" : "Student: Classroom";
       const result = await client.query(
         `UPDATE people
          SET aesop_id = $1,
-             portal_role = COALESCE(NULLIF(portal_role, ''), $2),
+             people_type = COALESCE(NULLIF(trim(people_type), ''), $2),
              synced_at = NOW()
          WHERE lower(trim(email)) = lower(trim($3))
            AND aesop_id IS NULL`,
-        [person.aesop_id, person.portal_role, person.email],
+        [person.aesop_id, peopleType, person.email],
       );
       updated += result.rowCount;
     }
@@ -213,7 +240,7 @@ async function appendPeopleRows(assigned) {
       aesopId: person.aesop_id,
       name: person.name,
       email: person.email,
-      portalRole: person.portal_role,
+      classroomRole: person.classroom_role,
     }),
   );
 

@@ -12,7 +12,6 @@ const {
   loadEmailToPeopleProfileMap,
   buildLatestDingNumberByUserIdMap,
   getPortalDingChangeHistory,
-  resolvePortalRoleFromPeopleSheet,
   applyDerivedPeopleStatusToRows,
   loadClassroomRoleEmailSetsFromSheets,
   initGoogleSheets,
@@ -49,7 +48,7 @@ const MIRROR_DRIVE_TIME_BUDGET_MS = JOB_MAX_RUNTIME_MS;
 
 const INSERT_PERSON_FROM_SHEET_SQL = `
   INSERT INTO people (
-    aesop_id, email, name, phone, portal_role, reviewer_role,
+    aesop_id, email, name, phone, reviewer_role,
     people_type, admin_role, people_status, last_login, past_ding, sheet_row, synced_at
   )
   SELECT
@@ -61,7 +60,7 @@ const INSERT_PERSON_FROM_SHEET_SQL = `
       ) THEN NULL
       ELSE trim($1::text)
     END,
-    $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb, $13
+    $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12
   RETURNING *
 `;
 
@@ -82,16 +81,15 @@ const UPDATE_PERSON_FROM_SHEET_SQL = `
     email = $2,
     name = $3,
     phone = COALESCE($4, people.phone),
-    portal_role = $5,
-    reviewer_role = $6,
-    people_type = $7,
-    admin_role = $8,
-    people_status = $9,
-    last_login = $10,
-    past_ding = $11,
-    sheet_row = $12::jsonb,
-    synced_at = $13
-  WHERE id = $14
+    reviewer_role = $5,
+    people_type = $6,
+    admin_role = $7,
+    people_status = $8,
+    last_login = $9,
+    past_ding = $10,
+    sheet_row = $11::jsonb,
+    synced_at = $12
+  WHERE id = $13
   RETURNING *
 `;
 
@@ -195,9 +193,8 @@ async function findExistingPersonId(runner, profile) {
  * @param {Date} syncedAt
  * @param {Set<string>} applicantIdSet
  */
-function buildPersonInsertParams(profile, syncedAt, applicantIdSet) {
+function buildPersonInsertParams(profile, syncedAt, _applicantIdSet) {
   const email = profile.email.trim().toLowerCase();
-  const portalRole = resolvePortalRoleFromPeopleSheet(profile, applicantIdSet);
   const aesopId = profile.id ? String(profile.id).trim() : null;
   const sheetRowPayload = { ...(profile.sheetRow || {}) };
   if (profile.sheetRowNumber != null && Number.isFinite(Number(profile.sheetRowNumber))) {
@@ -208,7 +205,6 @@ function buildPersonInsertParams(profile, syncedAt, applicantIdSet) {
     email,
     profile.name || null,
     profile.phone || null,
-    portalRole,
     profile.reviewerRole ? String(profile.reviewerRole).trim() : null,
     profile.peopleType ? String(profile.peopleType).trim() : null,
     profile.adminRole ? String(profile.adminRole).trim() : null,

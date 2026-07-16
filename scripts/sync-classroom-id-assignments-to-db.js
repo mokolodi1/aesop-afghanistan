@@ -9,10 +9,7 @@
  */
 require("../config/secrets");
 const { getPool, closeDatabase, isDatabaseEnabled } = require("../db/index");
-const {
-  initGoogleSheets,
-  parsePortalRoleFromPeopleType,
-} = require("../services/googleSheets");
+const { initGoogleSheets } = require("../services/googleSheets");
 
 const STAGING_TAB = "Classroom ID Assignments (Jul 2026)";
 const DRY_RUN = process.argv.includes("--dry-run");
@@ -88,7 +85,7 @@ async function loadStagingAssignments() {
       aesopId,
       email,
       name,
-      portalRole: parsePortalRoleFromPeopleType(typeRaw),
+      peopleType: typeRaw || null,
       typeRaw,
       sheetRow: row.rowNumber,
     });
@@ -160,11 +157,11 @@ async function applyAssignments(assignments) {
         `UPDATE people
          SET aesop_id = $1,
              name = COALESCE(NULLIF(trim($2), ''), name),
-             portal_role = COALESCE(NULLIF($3, ''), portal_role),
+             people_type = COALESCE(NULLIF(trim($3), ''), people_type),
              synced_at = NOW()
          WHERE id = $4
            AND aesop_id IS NULL`,
-        [assignment.aesopId, assignment.name, assignment.portalRole, person.id],
+        [assignment.aesopId, assignment.name, assignment.peopleType, person.id],
       );
       if (result.rowCount === 0) {
         stats.skipped += 1;
