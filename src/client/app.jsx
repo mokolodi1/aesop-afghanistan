@@ -7168,7 +7168,7 @@ function PortalAdminStatsPage() {
           <div className="portal-session-banner" role="status">
             <p className="portal-session-banner-title">Access denied</p>
             <p className="portal-session-banner-text">
-              Your account is not on the admin allowlist. Contact operations if you need access.
+              This account is not currently marked as an admin in the People sheet.
             </p>
           </div>
         </div>

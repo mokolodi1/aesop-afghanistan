@@ -175,26 +175,15 @@ async function attachSheetsDingNumbers(students) {
 }
 
 /**
- * @param {string|{ email?: string, portalRole?: string }} emailOrProfile
+ * Admin access is controlled only by the People sheet "Admins" column (portalRole).
+ * Default deny: emails alone never grant admin; only an explicit Admins-column mark
+ * (or the mirrored portal_role "Admin") does.
+ * @param {string|{ portalRole?: string }|null|undefined} _emailOrProfile
  * @returns {boolean}
  */
-function isPortalAdmin(emailOrProfile) {
-  const email =
-    typeof emailOrProfile === "string"
-      ? emailOrProfile
-      : typeof emailOrProfile?.email === "string"
-        ? emailOrProfile.email
-        : "";
+function isPortalAdmin(_emailOrProfile) {
   const portalRole =
-    typeof emailOrProfile === "object" && emailOrProfile ? emailOrProfile.portalRole : "";
-  const normalized = typeof email === "string" ? email.trim().toLowerCase() : "";
-  if (!normalized) {
-    return isPeopleSheetAdminRole(portalRole);
-  }
-  const allowlist = config.admin?.emails;
-  if (Array.isArray(allowlist) && allowlist.length > 0 && allowlist.includes(normalized)) {
-    return true;
-  }
+    typeof _emailOrProfile === "object" && _emailOrProfile ? _emailOrProfile.portalRole : "";
   return isPeopleSheetAdminRole(portalRole);
 }
 
@@ -230,11 +219,11 @@ async function resolvePortalReviewerAccess(profile) {
 }
 
 /**
- * @param {string} email
+ * @param {{ portalRole?: string }|null|undefined} profile
  * @returns {boolean}
  */
-function isAdminEmail(email) {
-  return isPortalAdmin(email);
+function isAdminEmail(profile) {
+  return isPortalAdmin(profile);
 }
 
 /**

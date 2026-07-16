@@ -696,9 +696,6 @@ async function shouldSkipRateLimitForPortalAdmin(req) {
   if (!userId && !emailSan) {
     return false;
   }
-  if (emailSan && isPortalAdmin({ email: emailSan })) {
-    return true;
-  }
   return isPeopleSheetAdminByIdentity(userId, emailSan);
 }
 

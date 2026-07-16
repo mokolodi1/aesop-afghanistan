@@ -491,7 +491,8 @@ function buildEmailFromEnv() {
 }
 
 /**
- * Portal admin allowlist and DingConnect+ bulk top-up defaults.
+ * Portal admin settings (DingConnect+ bulk top-up defaults, grade threshold).
+ * Admin access is controlled only by the People sheet "Admins" column.
  * @param {Record<string, unknown>|undefined} fileSection
  */
 function buildAdminConfig(fileSection) {
@@ -508,31 +509,9 @@ function buildAdminConfig(fileSection) {
     return fallback;
   };
 
-  const parseEmails = () => {
-    const fromEnv = process.env.PORTAL_ADMIN_EMAILS;
-    if (fromEnv != null && String(fromEnv).trim() !== "") {
-      return String(fromEnv)
-        .split(",")
-        .map((e) => e.trim().toLowerCase())
-        .filter(Boolean);
-    }
-    const fromFile = f.emails;
-    if (Array.isArray(fromFile)) {
-      return fromFile.map((e) => String(e).trim().toLowerCase()).filter(Boolean);
-    }
-    if (typeof fromFile === "string" && fromFile.trim()) {
-      return fromFile
-        .split(",")
-        .map((e) => e.trim().toLowerCase())
-        .filter(Boolean);
-    }
-    return [];
-  };
-
   const thresholdRaw = envOr("PORTAL_ADMIN_GRADE_THRESHOLD", "gradeThreshold", "65");
   const gradeThreshold = Number.parseFloat(thresholdRaw);
   return {
-    emails: parseEmails(),
     gradeThreshold: Number.isFinite(gradeThreshold) ? gradeThreshold : 65,
     dingConnectTopUpAmount: envOr("DINGCONNECT_TOPUP_AMOUNT", "dingConnectTopUpAmount", "500"),
     dingConnectTopUpSku: envOr("DINGCONNECT_TOPUP_SKU", "dingConnectTopUpSku", "DINGCONNECT_PLUS_AF"),

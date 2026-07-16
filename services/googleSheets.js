@@ -1021,9 +1021,24 @@ function buildPeopleSheetRowObject(headerValues, rowData) {
 }
 
 function peopleRoleHeaderCandidates() {
+  // Only the People sheet Admins column. Do not fall back to generic headers like
+  // "Role" / "Portal Role" — those can carry teacher/student labels and must never
+  // be treated as an admin flag.
   const configured = config.googleSheets.peopleRoleHeader;
-  const fromConfig = configured != null && String(configured).trim() !== "" ? [String(configured).trim()] : [];
-  return [...fromConfig, "Admins", "Admin", "Role", "Portal Role", "PortalRole"];
+  const fromConfig =
+    configured != null && String(configured).trim() !== "" ? [String(configured).trim()] : [];
+  const defaults = ["Admins", "Admin"];
+  const seen = new Set();
+  const out = [];
+  for (const header of [...fromConfig, ...defaults]) {
+    const key = String(header || "").trim().toLowerCase();
+    if (!key || seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    out.push(String(header).trim());
+  }
+  return out;
 }
 
 function peopleReviewerHeaderCandidates() {
@@ -1148,30 +1163,27 @@ function isPeopleSheetReviewerRole(role) {
   );
 }
 
-/** @param {string} role */
-// Admin is controlled entirely by the People sheet "Admins" column (S). Because
-// that column exists only to flag admins, treat ANY non-empty value as admin
-// unless it is an explicit negative. This means "Admin", "yes", "TRUE", "1", "x",
-// a name, etc. all grant access, while blanks / "no" / "false" / "0" do not.
-const PEOPLE_ADMIN_NEGATIVE_VALUES = new Set([
-  "no",
-  "n",
-  "false",
-  "f",
-  "0",
-  "off",
-  "none",
-  "-",
-  "na",
-  "n/a",
+/**
+ * Admin is controlled only by the People sheet "Admins" column (S).
+ * Default deny: only these explicit affirmative markers grant admin.
+ * Names, "x", Teacher/Student/Applied, and any other non-empty junk must NOT.
+ */
+const PEOPLE_ADMIN_POSITIVE_VALUES = new Set([
+  "admin",
+  "admins",
+  "yes",
+  "y",
+  "true",
+  "1",
 ]);
 
+/** @param {string} role */
 function isPeopleSheetAdminRole(role) {
   const normalized = String(role || "").trim().toLowerCase();
   if (!normalized) {
     return false;
   }
-  return !PEOPLE_ADMIN_NEGATIVE_VALUES.has(normalized);
+  return PEOPLE_ADMIN_POSITIVE_VALUES.has(normalized);
 }
 
 const PEOPLE_ADMIN_SET_TTL_MS = 5 * 60 * 1000;
