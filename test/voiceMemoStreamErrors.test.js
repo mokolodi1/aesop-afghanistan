@@ -61,6 +61,13 @@ test("mapVoiceMemoStreamError preserves searchable errorCode on mapped errors", 
   assert.equal(mapped.statusCode, 503);
 });
 
+test("resolveVoiceMemoStreamError maps ffmpeg partial-file failures to VMTR14", () => {
+  const error = new Error("stream 0, offset 0x28: partial file");
+  const resolved = resolveVoiceMemoStreamError(error);
+  assert.equal(resolved.errorCode, VOICE_MEMO_ERROR_CODES.TRANSCODE_FAILED);
+  assert.equal(resolved.code, "TRANSCODE_FAILED");
+});
+
 test("all voice memo error codes are unique 6-character identifiers", () => {
   const codes = Object.values(VOICE_MEMO_ERROR_CODES);
   assert.equal(new Set(codes).size, codes.length);

@@ -82,6 +82,19 @@ function resolveVoiceMemoStreamError(error) {
     };
   }
 
+  if (
+    /partial file|invalid data found when processing input|incorrect codec parameters|ffmpeg exited/i.test(
+      message,
+    )
+  ) {
+    return {
+      message: DRIVE_TRY_AGAIN_LATER_MESSAGE,
+      statusCode: 503,
+      code: "TRANSCODE_FAILED",
+      errorCode: VOICE_MEMO_ERROR_CODES.TRANSCODE_FAILED,
+    };
+  }
+
   if (semanticCode === "VOICE_MEMO_NOT_CACHED" || message === VOICE_MEMO_NOT_CACHED_MESSAGE) {
     return {
       message: message || VOICE_MEMO_NOT_CACHED_MESSAGE,

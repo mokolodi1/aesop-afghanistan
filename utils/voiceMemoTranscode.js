@@ -1,4 +1,8 @@
 const { spawn } = require("child_process");
+const { randomBytes } = require("crypto");
+const { mkdtemp, readFile, rm, writeFile } = require("fs/promises");
+const { tmpdir } = require("os");
+const { join } = require("path");
 const { PassThrough, Readable } = require("stream");
 const { sniffVoiceMemoMimeTypeFromBuffer } = require("./voiceMemoContentType");
 const { voiceMemoExtensionFromFileName } = require("./voiceMemoExtensions");
@@ -132,6 +136,21 @@ async function voiceMemoNeedsBrowserPlaybackTranscode(buffer, fileName = "") {
 }
 
 /**
+ * @param {Buffer|null|undefined} buffer
+ * @returns {boolean}
+ */
+function isValidVoiceMemoPlaybackM4a(buffer) {
+  return Boolean(buffer && buffer.length >= 16 && isMp4FamilyBuffer(buffer));
+}
+
+/**
+ * @returns {string[]}
+ */
+function voiceMemoFfmpegInputFlags() {
+  return ["-fflags", "+genpts+igndts+discardcorrupt", "-err_detect", "ignore_err"];
+}
+
+/**
  * @param {Buffer} buffer
  * @param {string[]} ffmpegArgs
  * @returns {Promise<Buffer>}
@@ -174,6 +193,63 @@ function runFfmpegBufferTransform(buffer, ffmpegArgs, options = {}) {
 }
 
 /**
+ * @param {Buffer} buffer
+ * @returns {Promise<Buffer|null>}
+ */
+async function transcodeVoiceMemoToM4aViaTempFiles(buffer) {
+  const tempRoot = await mkdtemp(join(tmpdir(), "voice-memo-transcode-"));
+  const inputPath = join(tempRoot, `input-${randomBytes(6).toString("hex")}`);
+  const outputPath = join(tempRoot, `output-${randomBytes(6).toString("hex")}.m4a`);
+  try {
+    await writeFile(inputPath, buffer);
+    const result = await new Promise((resolve) => {
+      const ffmpeg = spawn(
+        "ffmpeg",
+        [
+          "-hide_banner",
+          "-loglevel",
+          "error",
+          ...voiceMemoFfmpegInputFlags(),
+          "-i",
+          inputPath,
+          "-vn",
+          "-c:a",
+          "aac",
+          "-movflags",
+          "+faststart",
+          "-f",
+          "mp4",
+          outputPath,
+        ],
+        { stdio: ["ignore", "ignore", "pipe"] },
+      );
+      ffmpeg.stderr.on("data", (chunk) => {
+        const message = String(chunk || "").trim();
+        if (message) {
+          console.warn("[voice-memo-transcode]", message);
+        }
+      });
+      ffmpeg.on("error", () => resolve(null));
+      ffmpeg.on("close", async (code) => {
+        if (code !== 0) {
+          resolve(null);
+          return;
+        }
+        try {
+          const output = await readFile(outputPath);
+          resolve(isValidVoiceMemoPlaybackM4a(output) ? output : null);
+        } catch {
+          resolve(null);
+        }
+      });
+    });
+    return result;
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+/**
  * Re-encode any voice memo to AAC-in-MP4 with faststart for cache storage.
  * @param {Buffer} buffer
  * @returns {Promise<Buffer>}
@@ -183,12 +259,13 @@ async function transcodeVoiceMemoToM4aBuffer(buffer) {
     return null;
   }
 
-  const result = await runFfmpegBufferTransform(
+  const pipeResult = await runFfmpegBufferTransform(
     buffer,
     [
       "-hide_banner",
       "-loglevel",
       "error",
+      ...voiceMemoFfmpegInputFlags(),
       "-i",
       "pipe:0",
       "-vn",
@@ -203,10 +280,11 @@ async function transcodeVoiceMemoToM4aBuffer(buffer) {
     { fallbackToInput: false },
   );
 
-  if (!result || result.length < 16 || !isMp4FamilyBuffer(result)) {
-    return null;
+  if (isValidVoiceMemoPlaybackM4a(pipeResult)) {
+    return pipeResult;
   }
-  return result;
+
+  return transcodeVoiceMemoToM4aViaTempFiles(buffer);
 }
 
 /**
@@ -285,21 +363,23 @@ function isMp4FamilyBuffer(buffer) {
 
 /**
  * Move the MP4 moov atom to the front so browsers can read metadata via range requests.
- * Falls back to the original bytes when ffmpeg is unavailable or remux fails.
  * @param {Buffer} buffer
- * @returns {Promise<Buffer>}
+ * @param {{ fallbackToInput?: boolean }} [options]
+ * @returns {Promise<Buffer|null>}
  */
-async function remuxVoiceMemoMp4Faststart(buffer) {
+async function remuxVoiceMemoMp4Faststart(buffer, options = {}) {
+  const fallbackToInput = options.fallbackToInput !== false;
   if (!isMp4FamilyBuffer(buffer) || !(await isFfmpegAvailable())) {
-    return buffer;
+    return fallbackToInput ? buffer : null;
   }
 
-  return runFfmpegBufferTransform(
+  const result = await runFfmpegBufferTransform(
     buffer,
     [
       "-hide_banner",
       "-loglevel",
       "error",
+      ...voiceMemoFfmpegInputFlags(),
       "-i",
       "pipe:0",
       "-c",
@@ -310,8 +390,13 @@ async function remuxVoiceMemoMp4Faststart(buffer) {
       "mp4",
       "pipe:1",
     ],
-    { fallbackToInput: true },
+    { fallbackToInput },
   );
+
+  if (isValidVoiceMemoPlaybackM4a(result)) {
+    return result;
+  }
+  return fallbackToInput ? buffer : null;
 }
 
 module.exports = {
@@ -323,6 +408,7 @@ module.exports = {
   getMp4FtypBrand,
   isFfmpegAvailable,
   isMp4FamilyBuffer,
+  isValidVoiceMemoPlaybackM4a,
   transcodeVoiceMemoToM4aStream,
   transcodeVoiceMemoToM4aBuffer,
   remuxVoiceMemoMp4Faststart,

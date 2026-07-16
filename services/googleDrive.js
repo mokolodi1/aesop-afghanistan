@@ -939,63 +939,67 @@ async function downloadVoiceMemoFile(fileId, options = {}) {
     return null;
   }
 
-  const retryOptions = { deadlineAt: options.deadlineAt };
-  maybeEnableDriveScriptRateLimit(options.deadlineAt);
+  try {
+    const retryOptions = { deadlineAt: options.deadlineAt };
+    maybeEnableDriveScriptRateLimit(options.deadlineAt);
 
-  let meta = options.metadata;
-  let drive = options.drive;
-  if (!drive) {
-    const auth = await buildServiceAccountJwt([DRIVE_READONLY_SCOPE]);
-    drive = google.drive({ version: "v3", auth });
-  }
+    let meta = options.metadata;
+    let drive = options.drive;
+    if (!drive) {
+      const auth = await buildServiceAccountJwt([DRIVE_READONLY_SCOPE]);
+      drive = google.drive({ version: "v3", auth });
+    }
 
-  if (!meta) {
-    const response = await driveApiCall(
-      "files.get(download metadata)",
+    if (!meta) {
+      const response = await driveApiCall(
+        "files.get(download metadata)",
+        () =>
+          drive.files.get({
+            fileId: normalizedFileId,
+            fields: "mimeType,name,size",
+            supportsAllDrives: true,
+          }),
+        retryOptions,
+      );
+      recordDriveFilesGet(1);
+      meta = response.data;
+    }
+
+    const { fileName, driveMimeType, knownSize } = voiceMemoMetadataContext(meta);
+    if (knownSize != null && knownSize > VOICE_MEMO_AUDIO_CACHE_MAX_BYTES) {
+      console.warn(
+        `[voice-memo-audio] skipping ${fileName || normalizedFileId}: ` +
+          `file exceeds ${VOICE_MEMO_AUDIO_CACHE_MAX_BYTES} byte cache limit`,
+      );
+      return null;
+    }
+
+    const media = await driveApiCall(
+      "files.get(download media)",
       () =>
-        drive.files.get({
-          fileId: normalizedFileId,
-          fields: "mimeType,name,size",
-          supportsAllDrives: true,
-        }),
+        drive.files.get(
+          { fileId: normalizedFileId, alt: "media", supportsAllDrives: true },
+          { responseType: "arraybuffer" },
+        ),
       retryOptions,
     );
     recordDriveFilesGet(1);
-    meta = response.data;
+
+    let arrayBuffer = media.data;
+    media.data = null;
+    const content = Buffer.from(arrayBuffer);
+    arrayBuffer = null;
+
+    return {
+      fileId: normalizedFileId,
+      fileName,
+      mimeType: resolveVoiceMemoStreamMimeType(fileName, driveMimeType, content),
+      sizeBytes: content.length,
+      content,
+    };
+  } catch (error) {
+    throw mapVoiceMemoStreamError(error);
   }
-
-  const { fileName, driveMimeType, knownSize } = voiceMemoMetadataContext(meta);
-  if (knownSize != null && knownSize > VOICE_MEMO_AUDIO_CACHE_MAX_BYTES) {
-    console.warn(
-      `[voice-memo-audio] skipping ${fileName || normalizedFileId}: ` +
-        `file exceeds ${VOICE_MEMO_AUDIO_CACHE_MAX_BYTES} byte cache limit`,
-    );
-    return null;
-  }
-
-  const media = await driveApiCall(
-    "files.get(download media)",
-    () =>
-      drive.files.get(
-        { fileId: normalizedFileId, alt: "media", supportsAllDrives: true },
-        { responseType: "arraybuffer" },
-      ),
-    retryOptions,
-  );
-  recordDriveFilesGet(1);
-
-  let arrayBuffer = media.data;
-  media.data = null;
-  const content = Buffer.from(arrayBuffer);
-  arrayBuffer = null;
-
-  return {
-    fileId: normalizedFileId,
-    fileName,
-    mimeType: resolveVoiceMemoStreamMimeType(fileName, driveMimeType, content),
-    sizeBytes: content.length,
-    content,
-  };
 }
 
 module.exports = {

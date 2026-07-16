@@ -12,6 +12,7 @@ const {
   voiceMemoNeedsBrowserPlaybackTranscode,
   isFfmpegAvailable,
   isMp4FamilyBuffer,
+  isValidVoiceMemoPlaybackM4a,
   transcodeVoiceMemoToM4aBuffer,
   remuxVoiceMemoMp4Faststart,
 } = require("../utils/voiceMemoTranscode");
@@ -19,6 +20,7 @@ const {
   VOICE_MEMO_ERROR_CODES,
   VOICE_MEMO_NOT_CACHED_MESSAGE,
   createVoiceMemoPlaybackError,
+  mapVoiceMemoStreamError,
 } = require("./voiceMemoStreamErrors");
 
 /** Download/cache in chunks so cron jobs can reclaim memory between files. */
@@ -255,7 +257,8 @@ async function normalizeVoiceMemoContentForBrowserPlayback(content, fileName) {
   }
 
   if (isMp4FamilyBuffer(content)) {
-    return remuxVoiceMemoMp4Faststart(content);
+    const remuxed = await remuxVoiceMemoMp4Faststart(content, { fallbackToInput: false });
+    return remuxed || null;
   }
 
   return content;
@@ -266,7 +269,12 @@ async function normalizeVoiceMemoContentForBrowserPlayback(content, fileName) {
  * @param {string} rangeHeader
  */
 async function streamVoiceMemoFromDriveForPlayback(fileId, rangeHeader = "") {
-  const download = await downloadVoiceMemoFile(fileId);
+  let download;
+  try {
+    download = await downloadVoiceMemoFile(fileId);
+  } catch (error) {
+    throw mapVoiceMemoStreamError(error);
+  }
   if (!download?.content || download.content.length <= 0) {
     throw createVoiceMemoPlaybackError(
       "No voice memo file was found for your account.",
@@ -297,6 +305,77 @@ async function streamVoiceMemoFromDriveForPlayback(fileId, rangeHeader = "") {
     mimeType: "audio/mp4",
     playbackFileName: voiceMemoPlaybackFileName(download.fileName),
   });
+}
+
+/**
+ * Cached rows should already be browser-ready AAC. Raw AMR/3GP leftovers are stale.
+ * @param {Buffer} content
+ * @param {string} fileName
+ * @returns {Promise<boolean>}
+ */
+async function isVoiceMemoCacheStale(content, fileName) {
+  if (!content || content.length < 16) {
+    return true;
+  }
+  if (!(await isFfmpegAvailable())) {
+    return false;
+  }
+  return voiceMemoNeedsBrowserPlaybackTranscode(content, fileName);
+}
+
+/**
+ * @param {string[]} currentFileIds
+ * @param {Map<string, string>} fileNameById
+ * @param {{ deadlineAt?: number }} [options]
+ * @returns {Promise<number>}
+ */
+async function refreshStaleVoiceMemoCacheEntries(currentFileIds, fileNameById, options = {}) {
+  let refreshed = 0;
+  for (const fileId of currentFileIds) {
+    const row = await getVoiceMemoAudioRow(fileId);
+    if (!row?.content) {
+      continue;
+    }
+    const content = Buffer.isBuffer(row.content) ? row.content : Buffer.from(row.content);
+    if (!(await isVoiceMemoCacheStale(content, row.fileName))) {
+      continue;
+    }
+
+    console.warn(
+      `[voice-memo-audio] stale cache for ${row.fileName || fileId} ` +
+        `(bytes=${content.length}); deleting and re-downloading from Drive`,
+    );
+    await deleteVoiceMemoAudioRow(fileId);
+
+    const download = await downloadVoiceMemoFile(fileId, { deadlineAt: options.deadlineAt });
+    if (!download?.content || download.content.length <= 0) {
+      continue;
+    }
+    if (download.sizeBytes > VOICE_MEMO_AUDIO_CACHE_MAX_BYTES) {
+      continue;
+    }
+
+    const prepared = await prepareVoiceMemoAudioCacheEntry(
+      download.content,
+      download.fileName || fileNameById.get(fileId) || "voice-memo.m4a",
+      download.mimeType,
+    );
+    if (!prepared) {
+      download.content = null;
+      continue;
+    }
+
+    await upsertVoiceMemoAudio({
+      driveFileId: download.fileId,
+      fileName: prepared.fileName,
+      mimeType: prepared.mimeType,
+      sizeBytes: prepared.sizeBytes,
+      content: prepared.content,
+    });
+    refreshed += 1;
+    download.content = null;
+  }
+  return refreshed;
 }
 
 /**
@@ -367,6 +446,8 @@ async function syncVoiceMemoAudioFromScan(scan, options = {}) {
     fileNameById.set(fileId, String(parsed?.fileName || "").trim() || "voice-memo.m4a");
   }
 
+  const refreshed = await refreshStaleVoiceMemoCacheEntries(currentFileIds, fileNameById, options);
+
   let downloaded = 0;
   let skipped = 0;
   const chunks = chunkArray(missingIds, VOICE_MEMO_AUDIO_SYNC_CHUNK_SIZE);
@@ -418,12 +499,14 @@ async function syncVoiceMemoAudioFromScan(scan, options = {}) {
 
   console.info(
     `[voice-memo-audio] driveFiles=${currentFileIds.length}, downloaded=${downloaded}, ` +
-      `alreadyCached=${currentFileIds.length - missingIds.length}, skipped=${skipped}, pruned=${pruned}`,
+      `alreadyCached=${currentFileIds.length - missingIds.length}, refreshed=${refreshed}, ` +
+      `skipped=${skipped}, pruned=${pruned}`,
   );
 
   return {
     driveFiles: currentFileIds.length,
     alreadyCached: currentFileIds.length - missingIds.length,
+    refreshed,
     downloaded,
     skipped,
     pruned,
@@ -446,8 +529,21 @@ async function prepareVoiceMemoAudioCacheEntry(content, fileName, mimeType) {
       }
       content = transcoded;
     } else if (isMp4FamilyBuffer(content)) {
-      content = await remuxVoiceMemoMp4Faststart(content);
+      const remuxed = await remuxVoiceMemoMp4Faststart(content, { fallbackToInput: false });
+      if (!remuxed) {
+        console.warn(`[voice-memo-audio] skipping cache for ${fileName}: mp4 faststart remux failed`);
+        return null;
+      }
+      content = remuxed;
     }
+  }
+
+  if (
+    (await isFfmpegAvailable()) &&
+    (await voiceMemoNeedsBrowserPlaybackTranscode(content, fileName))
+  ) {
+    console.warn(`[voice-memo-audio] skipping cache for ${fileName}: still needs browser transcode`);
+    return null;
   }
 
   const resolvedMimeType = resolveVoiceMemoMimeType({
@@ -520,7 +616,16 @@ async function streamVoiceMemoFromCache(fileId, rangeHeader = "") {
   }
 
   if (isMp4FamilyBuffer(content)) {
-    content = await remuxVoiceMemoMp4Faststart(content);
+    const remuxed = await remuxVoiceMemoMp4Faststart(content, { fallbackToInput: false });
+    if (!remuxed) {
+      console.warn(
+        `[voice-memo-audio] cache remux failed for ${row.fileName || normalizedFileId} ` +
+          `(bytes=${content.length}); deleting cache row and retrying from Drive`,
+      );
+      await deleteVoiceMemoAudioRow(normalizedFileId);
+      return streamVoiceMemoFromDriveForPlayback(normalizedFileId, rangeHeader);
+    }
+    content = remuxed;
   }
 
   const actualSize = content.length;
@@ -568,6 +673,148 @@ async function streamVoiceMemoForPlayback(fileId, rangeHeader = "") {
   return streamVoiceMemoFromDriveForPlayback(normalizedFileId, rangeHeader);
 }
 
+/**
+ * @param {import('stream').Readable} stream
+ * @param {number} [maxBytes]
+ * @returns {Promise<{ bytesRead: number, buffer: Buffer }>}
+ */
+function drainReadableStream(stream, maxBytes = 64 * 1024) {
+  return new Promise((resolve, reject) => {
+    /** @type {Buffer[]} */
+    const chunks = [];
+    let total = 0;
+    let settled = false;
+
+    const finish = () => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      resolve({ bytesRead: total, buffer: Buffer.concat(chunks) });
+    };
+
+    stream.on("data", (chunk) => {
+      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      chunks.push(buffer);
+      total += buffer.length;
+      if (total >= maxBytes) {
+        stream.destroy();
+        finish();
+      }
+    });
+    stream.on("end", finish);
+    stream.on("close", () => {
+      if (total > 0) {
+        finish();
+      }
+    });
+    stream.on("error", (error) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      reject(error);
+    });
+  });
+}
+
+/**
+ * Delete any cached row, download from Drive, and store a browser-playable cache entry.
+ * @param {string} driveFileId
+ */
+async function recacheSingleVoiceMemoFromDrive(driveFileId) {
+  const normalizedFileId = String(driveFileId || "").trim();
+  if (!normalizedFileId) {
+    throw createVoiceMemoPlaybackError(
+      "A voice memo file id is required.",
+      400,
+      "MISSING_FILE_ID",
+      VOICE_MEMO_ERROR_CODES.MISSING_FILE_ID,
+    );
+  }
+
+  const existing = await getVoiceMemoAudioRow(normalizedFileId);
+  const hadCache = Boolean(existing?.content && existing.content.length > 0);
+  await deleteVoiceMemoAudioRow(normalizedFileId);
+
+  const download = await downloadVoiceMemoFile(normalizedFileId);
+  if (!download?.content || download.content.length <= 0) {
+    throw createVoiceMemoPlaybackError(
+      "No voice memo file was found for your account.",
+      404,
+      "NOT_FOUND",
+      VOICE_MEMO_ERROR_CODES.NOT_FOUND,
+    );
+  }
+
+  if (download.sizeBytes > VOICE_MEMO_AUDIO_CACHE_MAX_BYTES) {
+    throw createVoiceMemoPlaybackError(
+      DRIVE_TRY_AGAIN_LATER_MESSAGE,
+      503,
+      "TRANSCODE_FAILED",
+      VOICE_MEMO_ERROR_CODES.TRANSCODE_FAILED,
+    );
+  }
+
+  const needsTranscode = await voiceMemoNeedsBrowserPlaybackTranscode(
+    download.content,
+    download.fileName,
+  );
+  const prepared = await prepareVoiceMemoAudioCacheEntry(
+    download.content,
+    download.fileName,
+    download.mimeType,
+  );
+  if (!prepared) {
+    throw createVoiceMemoPlaybackError(
+      DRIVE_TRY_AGAIN_LATER_MESSAGE,
+      503,
+      "TRANSCODE_FAILED",
+      VOICE_MEMO_ERROR_CODES.TRANSCODE_FAILED,
+    );
+  }
+
+  await upsertVoiceMemoAudio({
+    driveFileId: normalizedFileId,
+    fileName: prepared.fileName,
+    mimeType: prepared.mimeType,
+    sizeBytes: prepared.sizeBytes,
+    content: prepared.content,
+  });
+
+  return {
+    hadCache,
+    clearedCache: hadCache,
+    driveFileId: normalizedFileId,
+    fileName: download.fileName,
+    driveBytes: download.content.length,
+    driveMimeType: download.mimeType,
+    cachedBytes: prepared.sizeBytes,
+    cachedMimeType: prepared.mimeType,
+    transcoded: needsTranscode,
+  };
+}
+
+/**
+ * Exercise the same playback path applicants use after cache is populated.
+ * @param {string} driveFileId
+ * @param {string} [rangeHeader]
+ */
+async function probeVoiceMemoPlaybackStream(driveFileId, rangeHeader = "") {
+  const streamResult = await streamVoiceMemoForPlayback(driveFileId, rangeHeader);
+  const drained = await drainReadableStream(streamResult.stream);
+  return {
+    status: streamResult.status,
+    mimeType: streamResult.mimeType,
+    fileName: streamResult.fileName,
+    size: streamResult.size,
+    contentRange: streamResult.contentRange,
+    contentLength: streamResult.contentLength,
+    bytesRead: drained.bytesRead,
+    playableHeader: isMp4FamilyBuffer(drained.buffer) || drained.bytesRead > 0,
+  };
+}
+
 module.exports = {
   VOICE_MEMO_AUDIO_CACHE_MAX_BYTES,
   VOICE_MEMO_NOT_CACHED_MESSAGE,
@@ -580,4 +827,7 @@ module.exports = {
   listCachedVoiceMemoFileIds,
   pruneVoiceMemoAudioNotInDrive,
   upsertVoiceMemoAudio,
+  deleteVoiceMemoAudioRow,
+  recacheSingleVoiceMemoFromDrive,
+  probeVoiceMemoPlaybackStream,
 };
