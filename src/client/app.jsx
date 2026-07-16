@@ -9576,11 +9576,6 @@ function PortalReviewVoicePlayer({ assignment, t, onRefreshStream }) {
 
   return (
     <div className="portal-review-voice-row">
-      {assignment.durationStatus === 'too_long' ? (
-        <p className="portal-field-hint portal-voice-memo-duration-ok">
-          {t('reviews.durationExceeding')}
-        </p>
-      ) : null}
       <div className="portal-review-voice-player" aria-label={t('reviews.playVoice')}>
         <audio
           controls

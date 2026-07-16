@@ -313,7 +313,6 @@ const TRANSLATIONS = {
     'reviews.hidePrompt': 'Hide prompt',
     'reviews.playVoice': 'Play voice note',
     'reviews.downloadMp4': 'Download MP4',
-    'reviews.durationExceeding': 'They exceeded expectations!',
     'reviews.refreshStream': 'Refresh stream',
     'reviews.refreshingStream': 'Refreshing…',
     'reviews.voiceComingSoon': 'Coming soon',
@@ -329,7 +328,7 @@ const TRANSLATIONS = {
     'reviews.unableToGrade': 'Unable to grade',
     'reviews.unableToGradeFlagged': 'Unable to grade — Flagged',
     'reviews.unableToGradeOffHint':
-      'Use when the voice note is in a language other than English or is otherwise unintelligible.',
+      'If the essay or voice note is in a language other than English or is otherwise unintelligible.',
     'reviews.technicalSection': 'Technical',
     'reviews.technicalSectionHelp':
       'For technical issues with the grading of this applicant. Nothing here will affect the eligibility of an applicant.',
@@ -717,7 +716,6 @@ const TRANSLATIONS = {
     'reviews.hidePrompt': 'پنهان کردن سؤال',
     'reviews.playVoice': 'پخش یادداشت صوتی',
     'reviews.downloadMp4': 'دانلود MP4',
-    'reviews.durationExceeding': 'آنها فراتر از انتظار عمل کردند!',
     'reviews.refreshStream': 'تازه کردن جریان',
     'reviews.refreshingStream': 'در حال تازه‌سازی…',
     'reviews.voiceComingSoon': 'به‌زودی',
@@ -733,7 +731,7 @@ const TRANSLATIONS = {
     'reviews.unableToGrade': 'قابل نمره‌دهی نیست',
     'reviews.unableToGradeFlagged': 'قابل نمره‌دهی نیست — علامت‌گذاری شد',
     'reviews.unableToGradeOffHint':
-      'وقتی یادداشت صوتی به زبانی غیر از انگلیسی است یا به‌طور دیگر نامفهوم است.',
+      'اگر انشا یا یادداشت صوتی به زبانی غیر از انگلیسی است یا به‌طور دیگر نامفهوم است.',
     'reviews.technicalSection': 'فنی',
     'reviews.technicalSectionHelp':
       'برای مسائل فنی در نمره‌دهی این متقاضی. هیچ‌چیز در اینجا بر واجد شرایط بودن متقاضی اثر نمی‌گذارد.',
