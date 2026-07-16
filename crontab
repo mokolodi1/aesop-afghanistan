@@ -14,14 +14,14 @@
 # 'skipped' row if another run of the same job is active.
 
 # Hourly Postgres cache refresh on every AFT hour (:00), except 2:00 AM and
-# 4:00 AM AFT when voice-memo-sync / classroom-sync run instead. People,
-# current Ding numbers, Applicants, ApplicantReviews, and Drive voice memo
-# metadata. Classroom is excluded unless HOURLY_CACHE_INCLUDE_CLASSROOM=true
-# is set in fly.toml [env].
+# 4:00 AM AFT when voice-memo-sync / classroom-sync run instead. Mirrors People,
+# Ding, Applicants, Reviews, and Drive metadata, then caches voice memo audio
+# (Drive → Postgres only) at the end. Classroom excluded unless
+# HOURLY_CACHE_INCLUDE_CLASSROOM=true in fly.toml [env].
 30 0-20,22 * * * node scripts/run-job.js hourly-cache
 
-# Daily voice memo sync from Google Drive to the Applicants sheet.
-# 2:00 AM Afghanistan time (21:30 UTC).
+# Daily voice memo sync: sheet writes first (Round 2, link, date, length), then
+# audio download/transcode for portal playback. 2:00 AM Afghanistan (21:30 UTC).
 30 21 * * * node scripts/run-job.js voice-memo-sync
 
 # Daily Google Classroom sync (rosters, grades, Ding change history).

@@ -73,11 +73,10 @@ const JOB_DEFINITIONS = {
   "hourly-cache": {
     label: "Hourly cache refresh",
     description:
-      "Mirrors the People tab, current Ding numbers, Applicants, ApplicantReviews, and " +
-      "Drive voice memo metadata from Google Sheets and Drive into the Postgres cache. " +
-      "Core sheet data, Drive file links, and durations are promoted first; only voice memo audio download runs afterward.",
+      "Mirrors People, Ding numbers, Applicants, ApplicantReviews, and Drive metadata into Postgres, " +
+      "then caches voice memo audio (Drive → Postgres only) at the end.",
     schedule: "Hourly on the hour (AFT), except 2:00 AM and 4:00 AM",
-    // Shares the cron VM with voice-memo-sync; both download Drive media.
+    // Shares the cron VM with voice-memo-sync; audio transcode runs last.
     exclusiveGroup: "driveHeavy",
     async run(payload = {}) {
       const { refreshPortalCaches } = require("./portalCacheRefresh");
@@ -185,10 +184,10 @@ const JOB_DEFINITIONS = {
   "voice-memo-sync": {
     label: "Voice memo sync",
     description:
-      "Checks Google Drive for applicant voice notes and updates the Applicants sheet: " +
-      "Round 2, voice note link, last updated, and memo length.",
+      "Scans Google Drive for applicant voice notes, writes Round 2, link, date, and length " +
+      "to the Applicants sheet, then downloads/transcodes audio for portal playback.",
     schedule: "Daily at 2:00 AM Afghanistan time",
-    // Shares the cron VM with hourly-cache; both download Drive media.
+    // Shares the cron VM with hourly-cache; audio transcode runs after sheet writes.
     exclusiveGroup: "driveHeavy",
     async run() {
       const { syncVoiceMemoRound2Status } = require("./voiceMemoSync");

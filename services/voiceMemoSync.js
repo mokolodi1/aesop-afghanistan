@@ -980,24 +980,6 @@ async function runVoiceMemoRound2Sync(options = {}) {
   const scan = await scanVoiceMemoFolder(folderId, { ...scanOptions, deadlineAt });
   const memoById = scan.memosById;
 
-  let audioCacheResult = {
-    driveFiles: 0,
-    downloaded: 0,
-    pruned: 0,
-    skipped: 0,
-    transcodeFailures: [],
-  };
-  try {
-    audioCacheResult = await syncVoiceMemoAudioFromScan(scan, { deadlineAt });
-    console.info(
-      `[sync-voice-memos] voice memo audio cache: driveFiles=${audioCacheResult.driveFiles}, ` +
-        `downloaded=${audioCacheResult.downloaded}, pruned=${audioCacheResult.pruned}, ` +
-        `transcodeFailures=${audioCacheResult.transcodeFailures?.length || 0}`,
-    );
-  } catch (error) {
-    console.warn("[sync-voice-memos] voice memo audio cache failed:", error.message || error);
-  }
-
   // One values.get is much lighter than worksheet.getRows() on large Applicants tabs.
   let {
     dataRows,
@@ -1238,6 +1220,9 @@ async function runVoiceMemoRound2Sync(options = {}) {
 
   if (pending.length > 0) {
     pending.sort((a, b) => a.gridRowIdx - b.gridRowIdx);
+    console.info(
+      `[sync-voice-memos] Phase 1: writing ${pending.length} Applicants row update(s)...`,
+    );
     const { worksheet } = await loadApplicantsWorksheet({ deadlineAt });
     const columnIndices = [round2ColIdx, linksColIdx, dateColIdx];
     if (lengthEnabled) {
@@ -1291,6 +1276,25 @@ async function runVoiceMemoRound2Sync(options = {}) {
           `(rows ${minRow + 1}-${maxRow})`,
       );
     }
+  }
+
+  let audioCacheResult = {
+    driveFiles: 0,
+    downloaded: 0,
+    pruned: 0,
+    skipped: 0,
+    transcodeFailures: [],
+  };
+  console.info("[sync-voice-memos] Phase 2: downloading/transcoding voice memo audio...");
+  try {
+    audioCacheResult = await syncVoiceMemoAudioFromScan(scan, { deadlineAt });
+    console.info(
+      `[sync-voice-memos] voice memo audio cache: driveFiles=${audioCacheResult.driveFiles}, ` +
+        `downloaded=${audioCacheResult.downloaded}, pruned=${audioCacheResult.pruned}, ` +
+        `transcodeFailures=${audioCacheResult.transcodeFailures?.length || 0}`,
+    );
+  } catch (error) {
+    console.warn("[sync-voice-memos] voice memo audio cache failed:", error.message || error);
   }
 
   const result = {

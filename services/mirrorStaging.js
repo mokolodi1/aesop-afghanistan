@@ -261,19 +261,9 @@ async function mirrorApplicantsFromSheetsToStaging(deadlineAt) {
   return { mirrored, driveFiles, driveScan };
 }
 
-/** @deprecated Use mirrorApplicantsFromSheetsToStaging + syncApplicantVoiceMemoAudioCache */
+/** @deprecated Use mirrorApplicantsFromSheetsToStaging */
 async function mirrorApplicantsAndDriveToStaging(deadlineAt) {
-  const sheetResult = await mirrorApplicantsFromSheetsToStaging(deadlineAt);
-  const audioResult = await syncApplicantVoiceMemoAudioCache({
-    deadlineAt,
-    driveScan: sheetResult.driveScan,
-  });
-  return {
-    mirrored: sheetResult.mirrored,
-    driveFiles: sheetResult.driveFiles,
-    downloaded: audioResult.downloaded,
-    pruned: audioResult.pruned,
-  };
+  return mirrorApplicantsFromSheetsToStaging(deadlineAt);
 }
 
 async function mirrorApplicantReviewsToStaging(deadlineAt) {
@@ -455,9 +445,9 @@ async function mirrorPeopleAndDingViaStaging(options = {}) {
       );
     }
 
-    let voiceMemoResult = { downloaded: 0, pruned: 0, driveFiles: 0 };
+    let voiceMemoResult = { downloaded: 0, pruned: 0 };
     try {
-      console.log("[people-mirror] Phase 2: syncing voice memo audio cache...");
+      console.log("[people-mirror] Phase 2: caching voice memo audio (Drive → Postgres)...");
       voiceMemoResult = await syncApplicantVoiceMemoAudioCache({
         deadlineAt,
         driveScan: applicantsResult.driveScan,
@@ -466,7 +456,7 @@ async function mirrorPeopleAndDingViaStaging(options = {}) {
         `[people-mirror] Voice memo audio: downloaded=${voiceMemoResult.downloaded}, pruned=${voiceMemoResult.pruned}`,
       );
     } catch (error) {
-      console.warn("[people-mirror] Voice memo audio sync failed:", error.message);
+      console.warn("[people-mirror] Voice memo audio cache failed:", error.message);
     }
 
     return {

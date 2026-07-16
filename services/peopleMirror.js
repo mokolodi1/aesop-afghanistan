@@ -732,8 +732,8 @@ async function mirrorApplicantsFromSheetsOnly(options = {}) {
 }
 
 /**
- * Phase 2 of hourly mirror: download/transcode voice memo audio only.
- * All Drive metadata (file ids, links, durations) is handled in phase 1.
+ * One-directional Drive → Postgres audio cache (download/transcode only, no sheet writes).
+ * Runs at the end of hourly mirror and voice-memo-sync after metadata is settled.
  * @param {{ deadlineAt?: number, driveScan?: object|null }} [options]
  */
 async function syncApplicantVoiceMemoAudioCache(options = {}) {
@@ -790,8 +790,8 @@ async function mirrorApplicantsAndDriveFromSheets(options = {}) {
   return {
     mirrored: sheetResult.mirrored,
     driveFiles: sheetResult.driveFiles,
-    downloaded: audioResult.downloaded,
-    pruned: audioResult.pruned,
+    voiceMemoDownloaded: audioResult.downloaded,
+    voiceMemoPruned: audioResult.pruned,
   };
 }
 
@@ -901,9 +901,9 @@ async function mirrorPeopleAndDingFromSheets(options = {}) {
     console.warn("[people-mirror] ApplicantReviews mirror failed:", error.message);
   }
 
-  let voiceMemoResult = { downloaded: 0, pruned: 0, driveFiles: 0 };
+  let voiceMemoResult = { downloaded: 0, pruned: 0 };
   try {
-    console.log("[people-mirror] Phase 2: syncing voice memo audio cache...");
+    console.log("[people-mirror] Phase 2: caching voice memo audio (Drive → Postgres)...");
     voiceMemoResult = await syncApplicantVoiceMemoAudioCache({
       deadlineAt,
       driveScan: applicantsResult.driveScan,
@@ -912,7 +912,7 @@ async function mirrorPeopleAndDingFromSheets(options = {}) {
       `[people-mirror] Voice memo audio: downloaded=${voiceMemoResult.downloaded}, pruned=${voiceMemoResult.pruned}`,
     );
   } catch (error) {
-    console.warn("[people-mirror] Voice memo audio sync failed:", error.message);
+    console.warn("[people-mirror] Voice memo audio cache failed:", error.message);
   }
 
   return {
