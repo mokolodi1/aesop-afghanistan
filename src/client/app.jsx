@@ -9079,116 +9079,103 @@ function PortalReviewSuspectedAiToggle({ active, onToggle, t }) {
   );
 }
 
-function formatReviewSaveStatusLabel({ saveStatus, lastSavedAt, nowMs, t }) {
-  if (saveStatus === 'pending') {
-    return t('reviews.savePending');
+function formatReviewSavedAgoLabel({ lastSavedAt, nowMs, t }) {
+  if (!lastSavedAt) {
+    return '';
   }
-  if (saveStatus === 'saving') {
-    return t('reviews.saveSaving');
+  const elapsedSeconds = Math.max(0, Math.floor((nowMs - lastSavedAt) / 1000));
+  if (elapsedSeconds < 60) {
+    return t('reviews.saveSavedRecently');
   }
-  if (saveStatus === 'error') {
-    return t('reviews.saveStatusError');
+  const elapsedMinutes = Math.floor(elapsedSeconds / 60);
+  if (elapsedMinutes === 1) {
+    return t('reviews.saveSavedMinutesAgo', { minutes: elapsedMinutes });
   }
-  if (saveStatus === 'saved' && lastSavedAt) {
-    const elapsedSeconds = Math.max(0, Math.floor((nowMs - lastSavedAt) / 1000));
-    if (elapsedSeconds < 60) {
-      return t('reviews.saveSavedRecently');
-    }
-    const elapsedMinutes = Math.floor(elapsedSeconds / 60);
-    if (elapsedMinutes === 1) {
-      return t('reviews.saveSavedMinutesAgo', { minutes: elapsedMinutes });
-    }
-    return t('reviews.saveSavedMinutesAgoPlural', { minutes: elapsedMinutes });
-  }
-  return '';
+  return t('reviews.saveSavedMinutesAgoPlural', { minutes: elapsedMinutes });
 }
 
-function PortalReviewSaveStatus({ saveStatus, lastSavedAt, onSaveNow, t }) {
+function PortalReviewSaveStatus({ saveStatus, lastSavedAt, hasUnsavedChanges, onSaveNow, t }) {
   const [nowMs, setNowMs] = useState(() => Date.now());
 
   useEffect(() => {
-    if (saveStatus !== 'saved' || !lastSavedAt) {
+    if (!lastSavedAt) {
       return undefined;
     }
     const intervalId = window.setInterval(() => {
       setNowMs(Date.now());
     }, 1000);
     return () => window.clearInterval(intervalId);
-  }, [saveStatus, lastSavedAt]);
+  }, [lastSavedAt]);
 
-  const label = formatReviewSaveStatusLabel({ saveStatus, lastSavedAt, nowMs, t });
-  if (!label && saveStatus !== 'pending') {
-    return null;
-  }
+  const savedLabel = formatReviewSavedAgoLabel({ lastSavedAt, nowMs, t });
+  const statusLabel =
+    saveStatus === 'saving'
+      ? t('reviews.saveSaving')
+      : saveStatus === 'error'
+        ? t('reviews.saveStatusError')
+        : savedLabel;
+  const canSaveNow = hasUnsavedChanges && saveStatus !== 'saving';
+
+  const indicatorStatus =
+    saveStatus === 'saving' ? 'saving' : saveStatus === 'error' ? 'error' : 'saved';
 
   return (
     <span
-      className={`portal-review-save-indicator portal-review-save-indicator--${saveStatus}`}
+      className={`portal-review-save-indicator portal-review-save-indicator--${indicatorStatus}${
+        hasUnsavedChanges ? ' portal-review-save-indicator--unsaved' : ''
+      }`}
       role="status"
       aria-live="polite"
     >
-      {saveStatus === 'pending' ? (
-        <span className="portal-review-save-indicator-stack">
+      <span className="portal-review-save-indicator-stack">
+        {statusLabel ? (
           <span className="portal-review-save-indicator-line">
             <span className="portal-review-save-indicator-icon" aria-hidden="true">
-              <svg viewBox="0 0 16 16" width="14" height="14" focusable="false">
-                <circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" strokeWidth="1.5" opacity="0.25" />
-                <path
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.5"
-                  strokeLinecap="round"
-                  d="M8 2a6 6 0 0 1 6 6"
-                />
-              </svg>
+              {indicatorStatus === 'saving' ? (
+                <svg viewBox="0 0 16 16" width="14" height="14" focusable="false">
+                  <circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" strokeWidth="1.5" opacity="0.25" />
+                  <path
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.5"
+                    strokeLinecap="round"
+                    d="M8 2a6 6 0 0 1 6 6"
+                  />
+                </svg>
+              ) : indicatorStatus === 'error' ? (
+                <svg viewBox="0 0 16 16" width="14" height="14" focusable="false">
+                  <path
+                    fill="currentColor"
+                    d="M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13zm.75 3.5a.75.75 0 0 0-1.5 0v4a.75.75 0 0 0 1.5 0v-4zm-.75 6.25a.875.875 0 1 0 0-1.75.875.875 0 0 0 0 1.75z"
+                  />
+                </svg>
+              ) : (
+                <svg viewBox="0 0 16 16" width="14" height="14" focusable="false">
+                  <path
+                    fill="currentColor"
+                    d="M11.5 1.5 14 4v8.25A1.75 1.75 0 0 1 12.25 14H3.75A1.75 1.75 0 0 1 2 12.25V3.75A1.75 1.75 0 0 1 3.75 2h5.8l1.95-1.95zm-.2 1.05-1.3 1.3H12v7.9H4V4h7.3z"
+                  />
+                </svg>
+              )}
             </span>
-            <span>{t('reviews.savePending')}</span>
+            <span>{statusLabel}</span>
           </span>
-          <button
-            type="button"
-            className="portal-review-save-now-link"
-            disabled={saveStatus === 'saving'}
-            onClick={(event) => {
-              event.preventDefault();
-              onSaveNow?.();
-            }}
-          >
-            {t('reviews.saveNow')}
-          </button>
-        </span>
-      ) : (
-        <>
-          <span className="portal-review-save-indicator-icon" aria-hidden="true">
-            {saveStatus === 'saving' ? (
-              <svg viewBox="0 0 16 16" width="14" height="14" focusable="false">
-                <circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" strokeWidth="1.5" opacity="0.25" />
-                <path
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.5"
-                  strokeLinecap="round"
-                  d="M8 2a6 6 0 0 1 6 6"
-                />
-              </svg>
-            ) : saveStatus === 'error' ? (
-              <svg viewBox="0 0 16 16" width="14" height="14" focusable="false">
-                <path
-                  fill="currentColor"
-                  d="M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13zm.75 3.5a.75.75 0 0 0-1.5 0v4a.75.75 0 0 0 1.5 0v-4zm-.75 6.25a.875.875 0 1 0 0-1.75.875.875 0 0 0 0 1.75z"
-                />
-              </svg>
-            ) : (
-              <svg viewBox="0 0 16 16" width="14" height="14" focusable="false">
-                <path
-                  fill="currentColor"
-                  d="M11.5 1.5 14 4v8.25A1.75 1.75 0 0 1 12.25 14H3.75A1.75 1.75 0 0 1 2 12.25V3.75A1.75 1.75 0 0 1 3.75 2h5.8l1.95-1.95zm-.2 1.05-1.3 1.3H12v7.9H4V4h7.3z"
-                />
-              </svg>
-            )}
-          </span>
-          <span className="portal-review-save-indicator-label">{label}</span>
-        </>
-      )}
+        ) : null}
+        <button
+          type="button"
+          className="portal-review-save-now-link"
+          disabled={!canSaveNow}
+          onClick={(event) => {
+            event.preventDefault();
+            if (!canSaveNow) {
+              return;
+            }
+            onSaveNow?.();
+          }}
+        >
+          {t('reviews.saveNow')}
+        </button>
+      </span>
     </span>
   );
 }
@@ -9201,6 +9188,7 @@ function useReviewAutoSave({ drafts, onSaveOne }) {
   const onSaveOneRef = useRef(onSaveOne);
   const [saveStatus, setSaveStatus] = useState('idle');
   const [lastSavedAt, setLastSavedAt] = useState(null);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
 
   draftsRef.current = drafts;
   onSaveOneRef.current = onSaveOne;
@@ -9221,6 +9209,7 @@ function useReviewAutoSave({ drafts, onSaveOne }) {
       await onSaveOneRef.current(applicantId, draft);
       dirtyRef.current.delete(applicantId);
       pendingDraftsRef.current.delete(applicantId);
+      setHasUnsavedChanges(dirtyRef.current.size > 0);
       setLastSavedAt(Date.now());
       setSaveStatus('saved');
     } catch {
@@ -9236,7 +9225,7 @@ function useReviewAutoSave({ drafts, onSaveOne }) {
       }
       dirtyRef.current.add(applicantId);
       pendingDraftsRef.current.set(applicantId, draft);
-      setSaveStatus('pending');
+      setHasUnsavedChanges(true);
       const existing = debounceTimersRef.current.get(applicantId);
       if (existing) {
         window.clearTimeout(existing);
@@ -9289,10 +9278,10 @@ function useReviewAutoSave({ drafts, onSaveOne }) {
         if (savedCount > 0) {
           setLastSavedAt(Date.now());
           setSaveStatus('saved');
-        } else {
-          setSaveStatus('pending');
         }
+        setHasUnsavedChanges(dirtyRef.current.size > 0);
       } catch {
+        setHasUnsavedChanges(dirtyRef.current.size > 0);
         setSaveStatus('error');
       }
     },
@@ -9311,7 +9300,7 @@ function useReviewAutoSave({ drafts, onSaveOne }) {
     };
   }, [flushApplicant]);
 
-  return { markDirty, saveNow, saveStatus, lastSavedAt };
+  return { markDirty, saveNow, saveStatus, lastSavedAt, hasUnsavedChanges };
 }
 
 function getReviewPromptDisplayText(text, showTranslation) {
@@ -10026,12 +10015,18 @@ function PortalReviewInstructionsPanel() {
   );
 }
 
-function PortalReviewStudentList({ assignments, drafts, selectedApplicantId, onSelect, saveStatus, lastSavedAt, onSaveNow, t }) {
+function PortalReviewStudentList({ assignments, drafts, selectedApplicantId, onSelect, saveStatus, lastSavedAt, hasUnsavedChanges, onSaveNow, t }) {
   return (
     <aside className="portal-review-sidebar" aria-label={t('reviews.studentList')}>
       <div className="portal-review-sidebar-head">
         <h3 className="portal-review-sidebar-title">{t('reviews.studentList')}</h3>
-        <PortalReviewSaveStatus saveStatus={saveStatus} lastSavedAt={lastSavedAt} onSaveNow={onSaveNow} t={t} />
+        <PortalReviewSaveStatus
+          saveStatus={saveStatus}
+          lastSavedAt={lastSavedAt}
+          hasUnsavedChanges={hasUnsavedChanges}
+          onSaveNow={onSaveNow}
+          t={t}
+        />
       </div>
       <ul className="portal-review-student-list">
         {assignments.map((assignment) => {
@@ -10108,7 +10103,10 @@ function PortalReviewApplicationsPage() {
     });
   }, []);
 
-  const { markDirty, saveNow, saveStatus, lastSavedAt } = useReviewAutoSave({ drafts, onSaveOne: saveOne });
+  const { markDirty, saveNow, saveStatus, lastSavedAt, hasUnsavedChanges } = useReviewAutoSave({
+    drafts,
+    onSaveOne: saveOne,
+  });
 
   const refreshStreamTokens = useCallback(async () => {
     const data = await portalApiPost('/api/portal-reviews/list', {}, { timeoutMs: 45000 });
@@ -10304,6 +10302,7 @@ function PortalReviewApplicationsPage() {
                   onSelect={handleSelectApplicant}
                   saveStatus={saveStatus}
                   lastSavedAt={lastSavedAt}
+                  hasUnsavedChanges={hasUnsavedChanges}
                   onSaveNow={() => saveNow(selectedApplicantId)}
                   t={t}
                 />

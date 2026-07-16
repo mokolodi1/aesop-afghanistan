@@ -5037,18 +5037,17 @@ html[dir='rtl'] .portal-voice-memo-substeps {
   border-radius: 2px;
 }
 
-.portal-review-save-now-link:disabled {
-  opacity: 0.55;
+.portal-review-save-now-link:disabled,
+.portal-review-save-now-link:disabled:hover {
+  color: var(--aesop-muted, #9ca3af);
   cursor: not-allowed;
   text-decoration: none;
 }
 
-.portal-review-save-indicator--pending,
 .portal-review-save-indicator--saving {
   color: var(--aesop-ink-soft, #454545);
 }
 
-.portal-review-save-indicator--pending .portal-review-save-indicator-icon,
 .portal-review-save-indicator--saving .portal-review-save-indicator-icon {
   animation: portal-review-save-spin 0.9s linear infinite;
 }
