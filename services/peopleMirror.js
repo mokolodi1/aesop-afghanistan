@@ -576,7 +576,7 @@ async function collectApplicantMirrorEntriesFromSheet(options = {}) {
     const round1 = String(rowData[columns.round1] ?? "").trim();
     const round2 = String(rowData[columns.round2] ?? "").trim();
     const round2Prompt = readApplicantRound2Prompt(rowData, columns);
-    const applicantLinks = String(rowData[columns.links] ?? "").trim();
+    let applicantLinks = String(rowData[columns.links] ?? "").trim();
     const submittedAt = String(rowData[columns.date] ?? "").trim();
 
     let driveFileId = null;
