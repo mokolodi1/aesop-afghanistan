@@ -219,23 +219,14 @@ function getJobDefinition(name) {
 }
 
 /**
- * Jobs that must not run concurrently with `jobName` on the same machine
- * (same job, or others in the same exclusiveGroup).
+ * Job names to scan for an active run before starting `jobName`. The cron
+ * machine runs one job at a time — any running job blocks every other job.
  * @param {string} jobName
  * @returns {string[]}
  */
 function getConflictingJobNames(jobName) {
-  const definition = getJobDefinition(jobName);
-  if (!definition) {
-    return [jobName].filter(Boolean);
-  }
-  const group = definition.exclusiveGroup;
-  if (!group) {
-    return [jobName];
-  }
-  return Object.entries(JOB_DEFINITIONS)
-    .filter(([, def]) => def.exclusiveGroup === group)
-    .map(([name]) => name);
+  void jobName;
+  return Object.keys(JOB_DEFINITIONS);
 }
 
 module.exports = {

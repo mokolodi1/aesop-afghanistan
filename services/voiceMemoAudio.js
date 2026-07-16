@@ -27,6 +27,45 @@ const {
 const VOICE_MEMO_AUDIO_SYNC_CHUNK_SIZE = 10;
 
 /**
+ * @param {Array<{ fileId: string|null, fileName: string, reason: string }>|null|undefined} failures
+ * @param {{ fileId?: string, fileName?: string, reason: string }} entry
+ */
+function recordVoiceMemoCacheFailure(failures, { fileId, fileName, reason }) {
+  if (!Array.isArray(failures)) {
+    return;
+  }
+  failures.push({
+    fileId: String(fileId || "").trim() || null,
+    fileName: String(fileName || "").trim() || "voice-memo",
+    reason: String(reason || "unknown"),
+  });
+}
+
+/**
+ * @param {Array<{ fileId: string|null, fileName: string, reason: string }>|null|undefined} failures
+ * @param {{ label?: string }} [options]
+ */
+function logVoiceMemoAudioTranscodeFailures(failures, { label = "[voice-memo-audio]" } = {}) {
+  const items = Array.isArray(failures) ? failures : [];
+  if (items.length === 0) {
+    console.info(`${label} audio cache: no transcode failures.`);
+    return;
+  }
+  const sorted = [...items].sort(
+    (a, b) =>
+      a.fileName.localeCompare(b.fileName) || String(a.fileId || "").localeCompare(String(b.fileId || "")),
+  );
+  console.warn(
+    `${label} ===== Audio transcode failures (${sorted.length}) — manual review needed =====`,
+  );
+  for (const entry of sorted) {
+    const idSuffix = entry.fileId ? ` · Drive ${entry.fileId}` : "";
+    console.warn(`${label}   - ${entry.fileName}${idSuffix}: ${entry.reason}`);
+  }
+  console.warn(`${label} ================================================================`);
+}
+
+/**
  * @param {{
  *   memosById?: Map<string, unknown>,
  *   parsedFiles?: Array<{ fileId?: string, fileName?: string }>,
@@ -330,6 +369,7 @@ async function isVoiceMemoCacheStale(content, fileName) {
  * @returns {Promise<number>}
  */
 async function refreshStaleVoiceMemoCacheEntries(currentFileIds, fileNameById, options = {}) {
+  const failures = options.failures;
   let refreshed = 0;
   for (const fileId of currentFileIds) {
     const row = await getVoiceMemoAudioRow(fileId);
@@ -359,6 +399,7 @@ async function refreshStaleVoiceMemoCacheEntries(currentFileIds, fileNameById, o
       download.content,
       download.fileName || fileNameById.get(fileId) || "voice-memo.m4a",
       download.mimeType,
+      { fileId, failures },
     );
     if (!prepared) {
       download.content = null;
@@ -376,6 +417,21 @@ async function refreshStaleVoiceMemoCacheEntries(currentFileIds, fileNameById, o
     download.content = null;
   }
   return refreshed;
+}
+
+/**
+ * Delete every cached voice memo audio row so the next sync re-downloads all files.
+ * @returns {Promise<{ cleared: number }>}
+ */
+async function clearAllVoiceMemoAudioCache() {
+  const pool = getPool();
+  if (!pool) {
+    const error = new Error("Postgres is not configured.");
+    error.statusCode = 503;
+    throw error;
+  }
+  const result = await pool.query(`DELETE FROM voice_memo_audio`);
+  return { cleared: result.rowCount || 0 };
 }
 
 /**
@@ -425,12 +481,22 @@ function chunkArray(items, size) {
  *   parsedFiles?: Array<{ fileId?: string, fileName?: string }>,
  * }|null|undefined} scan
  * @param {{ deadlineAt?: number }} [options]
- * @returns {Promise<{ driveFiles: number, cached: number, downloaded: number, skipped: number, pruned: number }>}
+ * @returns {Promise<{ driveFiles: number, cached: number, downloaded: number, skipped: number, pruned: number, transcodeFailures: Array<{ fileId: string|null, fileName: string, reason: string }> }>}
  */
 async function syncVoiceMemoAudioFromScan(scan, options = {}) {
   if (!isDatabaseEnabled()) {
-    return { driveFiles: 0, alreadyCached: 0, downloaded: 0, skipped: 0, pruned: 0 };
+    return {
+      driveFiles: 0,
+      alreadyCached: 0,
+      downloaded: 0,
+      skipped: 0,
+      pruned: 0,
+      transcodeFailures: [],
+    };
   }
+
+  /** @type {Array<{ fileId: string|null, fileName: string, reason: string }>} */
+  const transcodeFailures = [];
 
   const currentFileIds = collectDriveFileIdsFromScan(scan);
   const cachedIds = await listCachedVoiceMemoFileIds();
@@ -446,7 +512,10 @@ async function syncVoiceMemoAudioFromScan(scan, options = {}) {
     fileNameById.set(fileId, String(parsed?.fileName || "").trim() || "voice-memo.m4a");
   }
 
-  const refreshed = await refreshStaleVoiceMemoCacheEntries(currentFileIds, fileNameById, options);
+  const refreshed = await refreshStaleVoiceMemoCacheEntries(currentFileIds, fileNameById, {
+    ...options,
+    failures: transcodeFailures,
+  });
 
   let downloaded = 0;
   let skipped = 0;
@@ -472,6 +541,7 @@ async function syncVoiceMemoAudioFromScan(scan, options = {}) {
         download.content,
         download.fileName || fileNameById.get(fileId) || "voice-memo.m4a",
         download.mimeType,
+        { fileId, failures: transcodeFailures },
       );
       if (!prepared) {
         skipped += 1;
@@ -500,7 +570,7 @@ async function syncVoiceMemoAudioFromScan(scan, options = {}) {
   console.info(
     `[voice-memo-audio] driveFiles=${currentFileIds.length}, downloaded=${downloaded}, ` +
       `alreadyCached=${currentFileIds.length - missingIds.length}, refreshed=${refreshed}, ` +
-      `skipped=${skipped}, pruned=${pruned}`,
+      `skipped=${skipped}, pruned=${pruned}, transcodeFailures=${transcodeFailures.length}`,
   );
 
   return {
@@ -510,6 +580,7 @@ async function syncVoiceMemoAudioFromScan(scan, options = {}) {
     downloaded,
     skipped,
     pruned,
+    transcodeFailures,
   };
 }
 
@@ -517,14 +588,21 @@ async function syncVoiceMemoAudioFromScan(scan, options = {}) {
  * @param {Buffer} content
  * @param {string} fileName
  * @param {string} mimeType
+ * @param {{ fileId?: string, failures?: Array<{ fileId: string|null, fileName: string, reason: string }> }} [cacheOptions]
  * @returns {Promise<{ content: Buffer, fileName: string, mimeType: string, sizeBytes: number }|null>}
  */
-async function prepareVoiceMemoAudioCacheEntry(content, fileName, mimeType) {
+async function prepareVoiceMemoAudioCacheEntry(content, fileName, mimeType, cacheOptions = {}) {
+  const { fileId, failures } = cacheOptions;
   if (await isFfmpegAvailable()) {
     if (await voiceMemoNeedsBrowserPlaybackTranscode(content, fileName)) {
       const transcoded = await transcodeVoiceMemoToM4aBuffer(content);
       if (!transcoded) {
         console.warn(`[voice-memo-audio] skipping cache for ${fileName}: browser transcode failed`);
+        recordVoiceMemoCacheFailure(failures, {
+          fileId,
+          fileName,
+          reason: "browser transcode failed",
+        });
         return null;
       }
       content = transcoded;
@@ -532,6 +610,11 @@ async function prepareVoiceMemoAudioCacheEntry(content, fileName, mimeType) {
       const remuxed = await remuxVoiceMemoMp4Faststart(content, { fallbackToInput: false });
       if (!remuxed) {
         console.warn(`[voice-memo-audio] skipping cache for ${fileName}: mp4 faststart remux failed`);
+        recordVoiceMemoCacheFailure(failures, {
+          fileId,
+          fileName,
+          reason: "mp4 faststart remux failed",
+        });
         return null;
       }
       content = remuxed;
@@ -543,6 +626,11 @@ async function prepareVoiceMemoAudioCacheEntry(content, fileName, mimeType) {
     (await voiceMemoNeedsBrowserPlaybackTranscode(content, fileName))
   ) {
     console.warn(`[voice-memo-audio] skipping cache for ${fileName}: still needs browser transcode`);
+    recordVoiceMemoCacheFailure(failures, {
+      fileId,
+      fileName,
+      reason: "still needs browser transcode after processing",
+    });
     return null;
   }
 
@@ -825,6 +913,8 @@ module.exports = {
   streamVoiceMemoForPlayback,
   getVoiceMemoAudioRow,
   listCachedVoiceMemoFileIds,
+  clearAllVoiceMemoAudioCache,
+  logVoiceMemoAudioTranscodeFailures,
   pruneVoiceMemoAudioNotInDrive,
   upsertVoiceMemoAudio,
   deleteVoiceMemoAudioRow,

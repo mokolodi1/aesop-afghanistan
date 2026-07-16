@@ -6034,6 +6034,26 @@ html[dir='rtl'] .portal-voice-memo-substeps {
   font-size: 0.95rem;
 }
 
+.portal-admin-voice-memo-cache-actions {
+  margin: 0 0 16px;
+  padding-top: 4px;
+  border-top: 1px solid #e5e7eb;
+}
+
+.portal-admin-voice-memo-cache-actions .portal-admin-hint {
+  margin-bottom: 12px;
+}
+
+.portal-admin-voice-memo-cache-actions button {
+  width: auto;
+  padding: 10px 18px;
+  font-size: 0.95rem;
+}
+
+.portal-admin-voice-memo-transcode-failures {
+  margin-top: 16px;
+}
+
 .portal-admin-job-summary {
   max-width: 360px;
   font-size: 0.88rem;

@@ -8,10 +8,11 @@
  *   node scripts/run-job.js <job-name> [--trigger schedule|admin]
  *     [--run-id <id>] [--triggered-by <email>] [--payload <json>]
  *
- * - Scheduled (crontab): no --run-id; creates its own job_runs row. If another
- *   run of the same job is active, records a 'skipped' row and exits 0.
+ * - Scheduled (crontab): no --run-id; creates its own job_runs row. If any job
+ *   is already active, records a 'skipped' row and exits 0.
  * - Admin-triggered: the trigger API pre-creates the row (after the same
- *   already-running check) and passes --run-id.
+ *   already-running check) and passes --run-id. Re-checks immediately before
+ *   work starts so direct/manual invocations cannot bypass the global lock.
  */
 require("../config/secrets");
 const util = require("util");
@@ -19,13 +20,14 @@ const { formatErrorForLog } = require("../utils/errorLogging");
 const { setDriveScriptRateLimit } = require("../services/googleDrive");
 const { setSheetsScriptRateLimit } = require("../services/googleSheets");
 const { isDatabaseEnabled, closeDatabase } = require("../db/index");
-const { getJobDefinition, getConflictingJobNames } = require("../services/jobRegistry");
+const { getJobDefinition } = require("../services/jobRegistry");
 const {
   createJobRun,
   finalizeJobRun,
   failJobRunIfStillRunning,
   updateJobRunLogs,
-  findActiveJobRunAmong,
+  findBlockingJobRun,
+  formatActiveJobBusyMessage,
   pruneJobRuns,
 } = require("../services/jobRuns");
 
@@ -101,18 +103,9 @@ async function main() {
   let runId = presetRunId;
 
   if (recording && runId == null) {
-    const conflictingNames = getConflictingJobNames(jobName);
-    const active = await findActiveJobRunAmong(conflictingNames);
+    const active = await findBlockingJobRun(jobName);
     if (active) {
-      const activeLabel = getJobDefinition(String(active.jobName))?.label || active.jobName;
-      const skipMessage =
-        active.jobName === jobName
-          ? `Skipped: ${definition.label} is already running ` +
-            `(run #${active.id}, started ${active.startedAt}` +
-            `${active.triggeredBy ? ` by ${active.triggeredBy}` : ""}).`
-          : `Skipped: ${definition.label} cannot start while ${activeLabel} is running ` +
-            `(run #${active.id}, started ${active.startedAt}` +
-            `${active.triggeredBy ? ` by ${active.triggeredBy}` : ""}).`;
+      const skipMessage = `Skipped: ${formatActiveJobBusyMessage(jobName, active)}`;
       console.warn(`[run-job] ${skipMessage}`);
       const skippedId = await createJobRun({ jobName, triggerSource: trigger, triggeredBy });
       await finalizeJobRun(skippedId, { status: "skipped", error: skipMessage, logs: skipMessage });
@@ -152,6 +145,21 @@ async function main() {
     `[run-job] ${jobName} started (trigger=${trigger}${triggeredBy ? `, by ${triggeredBy}` : ""}` +
       `${runId != null ? `, run #${runId}` : ""})`,
   );
+
+  if (recording) {
+    const active = await findBlockingJobRun(jobName, { exceptRunId: runId });
+    if (active) {
+      const skipMessage = `Skipped: ${formatActiveJobBusyMessage(jobName, active)}`;
+      console.warn(`[run-job] ${skipMessage}`);
+      if (flusher) {
+        clearInterval(flusher);
+      }
+      await finalizeJobRun(runId, { status: "skipped", error: skipMessage, logs: capture.getText() });
+      capture.restore();
+      return 0;
+    }
+  }
+
   const startedMs = Date.now();
   try {
     const result = await definition.run({ ...payload, jobRunId: runId });

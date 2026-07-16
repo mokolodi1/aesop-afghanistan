@@ -148,7 +148,7 @@ function driveRetryAfterMs(error) {
 /**
  * Run a Drive API call, retrying 429s/rate limits with exponential backoff until
  * `deadlineAt`. Request paths use a short default budget; sync scripts pass a
- * deadline up to ~an hour away so throttled runs finish instead of failing.
+ * deadline up to 6 hours away so throttled runs finish instead of failing.
  * @template T
  * @param {string} label
  * @param {() => Promise<T>} fn

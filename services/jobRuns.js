@@ -9,8 +9,10 @@ const { getJobDefinition, getConflictingJobNames } = require("./jobRegistry");
 
 /** Logs beyond this are middle-truncated before storage. */
 const MAX_LOG_CHARS = 400 * 1024;
+/** Max wall-clock time a cron job may run before API retry budgets expire. */
+const JOB_MAX_RUNTIME_MS = 6 * 60 * 60 * 1000;
 /** A 'running' row older than this no longer blocks new runs (crashed run). */
-const ACTIVE_RUN_STALE_MS = 2 * 60 * 60 * 1000;
+const ACTIVE_RUN_STALE_MS = JOB_MAX_RUNTIME_MS;
 /** Runs kept per job when pruning. */
 const KEEP_RUNS_PER_JOB = 100;
 
@@ -133,31 +135,39 @@ async function updateJobRunLogs(runId, logs) {
 
 /**
  * @param {string} jobName
+ * @param {{ exceptRunId?: number|null }} [options]
  * @returns {Promise<Record<string, unknown>|null>} fresh 'running' run for the job
  */
-async function findActiveJobRun(jobName) {
+async function findActiveJobRun(jobName, { exceptRunId = null } = {}) {
   const pool = getPool();
   if (!pool) {
     return null;
+  }
+  const params = [jobName, ACTIVE_RUN_STALE_MS];
+  let exceptClause = "";
+  if (exceptRunId != null) {
+    exceptClause = " AND id <> $3";
+    params.push(exceptRunId);
   }
   const found = await pool.query(
     `SELECT id, job_name, trigger_source, triggered_by, status, started_at, finished_at, result, error
      FROM job_runs
      WHERE job_name = $1
        AND status = 'running'
-       AND started_at > NOW() - ($2::bigint * INTERVAL '1 millisecond')
+       AND started_at > NOW() - ($2::bigint * INTERVAL '1 millisecond')${exceptClause}
      ORDER BY started_at DESC
      LIMIT 1`,
-    [jobName, ACTIVE_RUN_STALE_MS],
+    params,
   );
   return rowToRun(found.rows[0]);
 }
 
 /**
  * @param {string[]} jobNames
+ * @param {{ exceptRunId?: number|null }} [options]
  * @returns {Promise<Record<string, unknown>|null>} freshest 'running' run among the names
  */
-async function findActiveJobRunAmong(jobNames) {
+async function findActiveJobRunAmong(jobNames, { exceptRunId = null } = {}) {
   const pool = getPool();
   if (!pool) {
     return null;
@@ -167,19 +177,79 @@ async function findActiveJobRunAmong(jobNames) {
     return null;
   }
   if (names.length === 1) {
-    return findActiveJobRun(names[0]);
+    return findActiveJobRun(names[0], { exceptRunId });
+  }
+  const params = [names, ACTIVE_RUN_STALE_MS];
+  let exceptClause = "";
+  if (exceptRunId != null) {
+    exceptClause = " AND id <> $3";
+    params.push(exceptRunId);
   }
   const found = await pool.query(
     `SELECT id, job_name, trigger_source, triggered_by, status, started_at, finished_at, result, error
      FROM job_runs
      WHERE job_name = ANY($1::text[])
        AND status = 'running'
-       AND started_at > NOW() - ($2::bigint * INTERVAL '1 millisecond')
+       AND started_at > NOW() - ($2::bigint * INTERVAL '1 millisecond')${exceptClause}
      ORDER BY started_at DESC
      LIMIT 1`,
-    [names, ACTIVE_RUN_STALE_MS],
+    params,
   );
   return rowToRun(found.rows[0]);
+}
+
+/**
+ * @param {{ exceptRunId?: number|null }} [options]
+ * @returns {{ runId: number }|null}
+ */
+function findLocalActiveChild({ exceptRunId = null } = {}) {
+  for (const [id, child] of activeChildrenByRunId) {
+    if (exceptRunId != null && id === exceptRunId) {
+      continue;
+    }
+    if (child.exitCode == null && child.signalCode == null && !child.killed) {
+      return { runId: id };
+    }
+  }
+  return null;
+}
+
+/**
+ * @param {string} jobName
+ * @param {Record<string, unknown>} active
+ * @returns {string}
+ */
+function formatActiveJobBusyMessage(jobName, active) {
+  const definition = getJobDefinition(jobName);
+  const label = definition?.label || jobName;
+  const activeLabel = getJobDefinition(String(active.jobName))?.label || active.jobName;
+  if (active.jobName === jobName) {
+    return (
+      `${label} is already running (run #${active.id}, started ${active.startedAt}` +
+      `${active.triggeredBy ? ` by ${active.triggeredBy}` : ""}).`
+    );
+  }
+  return (
+    `${label} cannot start while ${activeLabel} is running ` +
+    `(run #${active.id}, started ${active.startedAt}` +
+    `${active.triggeredBy ? ` by ${active.triggeredBy}` : ""}).`
+  );
+}
+
+/**
+ * @param {string} jobName
+ * @param {{ exceptRunId?: number|null }} [options]
+ * @returns {Promise<Record<string, unknown>|null>}
+ */
+async function findBlockingJobRun(jobName, { exceptRunId = null } = {}) {
+  const local = findLocalActiveChild({ exceptRunId });
+  if (local) {
+    const run = await getJobRun(local.runId);
+    if (run && run.status === "running") {
+      return run;
+    }
+  }
+  return findActiveJobRunAmong(getConflictingJobNames(jobName), { exceptRunId });
 }
 
 /** @param {number} runId @returns {Promise<Record<string, unknown>|null>} run incl. logs */
@@ -271,18 +341,9 @@ async function startJobRunChild({ jobName, triggerSource, triggeredBy = null, pa
 
   let runId = null;
   if (isDatabaseEnabled()) {
-    const conflictingNames = getConflictingJobNames(jobName);
-    const active = await findActiveJobRunAmong(conflictingNames);
+    const active = await findBlockingJobRun(jobName);
     if (active) {
-      const activeLabel = getJobDefinition(String(active.jobName))?.label || active.jobName;
-      const busy = new Error(
-        active.jobName === jobName
-          ? `${definition.label} is already running (started ${active.startedAt}` +
-              `${active.triggeredBy ? ` by ${active.triggeredBy}` : ""}).`
-          : `${definition.label} cannot start while ${activeLabel} is running ` +
-              `(run #${active.id}, started ${active.startedAt}` +
-              `${active.triggeredBy ? ` by ${active.triggeredBy}` : ""}).`,
-      );
+      const busy = new Error(formatActiveJobBusyMessage(jobName, active));
       busy.statusCode = 409;
       throw busy;
     }
@@ -393,6 +454,7 @@ async function cancelJobRun(runId, { reason = "Cancelled by admin." } = {}) {
 module.exports = {
   MAX_LOG_CHARS,
   KEEP_RUNS_PER_JOB,
+  JOB_MAX_RUNTIME_MS,
   ACTIVE_RUN_STALE_MS,
   truncateLogsText,
   createJobRun,
@@ -401,6 +463,8 @@ module.exports = {
   updateJobRunLogs,
   findActiveJobRun,
   findActiveJobRunAmong,
+  findBlockingJobRun,
+  formatActiveJobBusyMessage,
   getJobRun,
   listJobRuns,
   getLastRunsByJob,

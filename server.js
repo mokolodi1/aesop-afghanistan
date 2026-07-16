@@ -43,7 +43,8 @@ const {
   runAdminVoiceMemoPlaybackTest,
   formatAdminVoiceMemoPlaybackTestError,
 } = require('./services/adminVoiceMemoPlaybackTest');
-const { getLastRunsByJob, listJobRuns, getJobRun } = require('./services/jobRuns');
+const { getLastRunsByJob, listJobRuns, getJobRun, findBlockingJobRun } = require('./services/jobRuns');
+const { clearAllVoiceMemoAudioCache } = require('./services/voiceMemoAudio');
 const {
   loadReviewAssignmentsForReviewer,
   saveReviewAssessment,
@@ -2027,6 +2028,37 @@ app.post('/api/portal-admin/jobs/voice-memo-playback-test', portalAdminRateLimit
       code: formatted.code,
       errorCode: formatted.errorCode,
     });
+  }
+});
+
+app.post('/api/portal-admin/jobs/clear-voice-memo-audio-cache', portalAdminRateLimiter, async (req, res) => {
+  try {
+    const profile = await requirePortalAdmin(res, req.body);
+    if (!profile) {
+      return;
+    }
+    if (!isDatabaseEnabled()) {
+      return res.status(503).json({ error: 'Postgres is required for the voice memo audio cache.' });
+    }
+
+    const active = await findBlockingJobRun('voice-memo-sync');
+    if (active) {
+      return res.status(409).json({
+        error:
+          `Cannot clear the voice memo audio cache while a job is running ` +
+          `(run #${active.id}). Wait for it to finish or stop it first.`,
+      });
+    }
+
+    const result = await clearAllVoiceMemoAudioCache();
+    console.log(
+      `[voice-memo-audio-cache] cleared ${result.cleared} row(s) by ${profile.email}`,
+    );
+    res.json({ success: true, ...result });
+  } catch (error) {
+    console.error('Error clearing voice memo audio cache:', formatErrorForLog(error));
+    const status = error.statusCode || 500;
+    res.status(status).json({ error: error.message || 'Could not clear the voice memo audio cache.' });
   }
 });
 

@@ -324,17 +324,20 @@ const TRANSLATIONS = {
     'reviews.levelLabel': 'English Level',
     'reviews.suspectedAi': 'Suspected AI',
     'reviews.suspectedAiFlagged': 'Suspected AI — Flagged',
-    'reviews.suspectedAiOffHint': 'Mark if the essay may be AI-written',
+    'reviews.suspectedAiOffHint':
+      'Flag when multiple AI signs are present—em-dashes, no errors, overly sophisticated vocabulary, short paragraphs, “not only/but also” phrasing, or English described as a “bridge” or “opening doors”.',
     'reviews.unableToGrade': 'Unable to grade',
     'reviews.unableToGradeFlagged': 'Unable to grade — Flagged',
     'reviews.unableToGradeOffHint':
-      'Speaks in a language other than English or is otherwise uninteligible',
+      'Use when the voice note is in a language other than English or is otherwise unintelligible.',
     'reviews.technicalSection': 'Technical',
     'reviews.technicalSectionHelp':
       'For technical issues with the grading of this applicant. Nothing here will affect the eligibility of an applicant.',
     'reviews.flagAnIssue': 'Flag an issue',
     'reviews.technicalFlag': 'There is a technical problem with this application',
     'reviews.technicalFlagFlagged': 'Technical problem — Flagged',
+    'reviews.technicalFlagOffHint':
+      'For technical issues with grading this applicant. Does not affect eligibility.',
     'reviews.clearScores': 'Clear scores',
     'reviews.fitnessLabel': 'Fitness for Program',
     'reviews.fitness.instruction': 'Instruction following',
@@ -722,17 +725,20 @@ const TRANSLATIONS = {
     'reviews.levelLabel': 'سطح انگلیسی',
     'reviews.suspectedAi': 'مشکوک به هوش مصنوعی',
     'reviews.suspectedAiFlagged': 'مشکوک به هوش مصنوعی — علامت‌گذاری شد',
-    'reviews.suspectedAiOffHint': 'اگر انشا احتمالاً با هوش مصنوعی نوشته شده علامت بزنید',
+    'reviews.suspectedAiOffHint':
+      'وقتی چند نشانهٔ هوش مصنوعی وجود دارد علامت بزنید — خط تیرهٔ بلند (—)، بدون خطا، واژگان بیش‌ازحد پیچیده، پاراگراف‌های کوتاه، ساختار «نه تنها/بلکه»، یا انگلیسی به‌عنوان «پل» یا «گشودن درها».',
     'reviews.unableToGrade': 'قابل نمره‌دهی نیست',
     'reviews.unableToGradeFlagged': 'قابل نمره‌دهی نیست — علامت‌گذاری شد',
     'reviews.unableToGradeOffHint':
-      'به زبانی غیر از انگلیسی صحبت می‌کند یا به‌طور دیگر نامفهوم است',
+      'وقتی یادداشت صوتی به زبانی غیر از انگلیسی است یا به‌طور دیگر نامفهوم است.',
     'reviews.technicalSection': 'فنی',
     'reviews.technicalSectionHelp':
       'برای مسائل فنی در نمره‌دهی این متقاضی. هیچ‌چیز در اینجا بر واجد شرایط بودن متقاضی اثر نمی‌گذارد.',
     'reviews.flagAnIssue': 'گزارش یک مشکل',
     'reviews.technicalFlag': 'یک مشکل فنی در این درخواست وجود دارد',
     'reviews.technicalFlagFlagged': 'مشکل فنی — علامت‌گذاری شد',
+    'reviews.technicalFlagOffHint':
+      'برای مسائل فنی در نمره‌دهی این متقاضی. بر واجد شرایط بودن اثر نمی‌گذارد.',
     'reviews.clearScores': 'پاک کردن نمرات',
     'reviews.fitnessLabel': 'تناسب با برنامه',
     'reviews.fitness.instruction': 'پیروی از دستورالعمل',

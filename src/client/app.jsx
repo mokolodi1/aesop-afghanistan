@@ -4046,6 +4046,49 @@ function PortalAdminApplicationIssuesPanel({ lists, onEmailGroup }) {
   );
 }
 
+function PortalAdminVoiceMemoTranscodeFailuresSummary({ failures }) {
+  const items = Array.isArray(failures) ? failures : [];
+  if (items.length === 0) {
+    return null;
+  }
+  const sorted = [...items].sort(
+    (a, b) =>
+      String(a.fileName || '').localeCompare(String(b.fileName || '')) ||
+      String(a.fileId || '').localeCompare(String(b.fileId || '')),
+  );
+
+  return (
+    <section
+      className="portal-admin-voice-memo-warnings portal-admin-voice-memo-transcode-failures"
+      aria-label="Voice memo transcode failures"
+    >
+      <p className="portal-admin-voice-memo-warnings-title">
+        Audio transcode failures — manual review needed ({sorted.length})
+      </p>
+      <div className="portal-admin-table-wrap portal-admin-table-wrap--scroll">
+        <table className="portal-admin-table portal-admin-application-category-table">
+          <thead>
+            <tr>
+              <th scope="col">File</th>
+              <th scope="col">Drive file ID</th>
+              <th scope="col">Reason</th>
+            </tr>
+          </thead>
+          <tbody>
+            {sorted.map((entry) => (
+              <tr key={`${entry.fileId || 'unknown'}-${entry.fileName}-${entry.reason}`}>
+                <td>{entry.fileName || '—'}</td>
+                <td className="portal-admin-mono">{entry.fileId || '—'}</td>
+                <td>{entry.reason || '—'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
 function PortalAdminVoiceMemoSyncIssuesPanel({ syncResult }) {
   if (!syncResult) {
     return null;
@@ -4256,6 +4299,11 @@ function PortalAdminJobLogPanel({ jobName, logRun, logError, onClose }) {
             <PortalAdminVoiceMemoSyncIssuesPanel syncResult={logRun.result} />
           ) : null}
           <pre className="portal-admin-job-log-output">{logRun.logs || 'No logs captured.'}</pre>
+          {jobName === 'voice-memo-sync' && logRun.result ? (
+            <PortalAdminVoiceMemoTranscodeFailuresSummary
+              failures={logRun.result.audioTranscodeFailures}
+            />
+          ) : null}
           {logRun.status === 'running' ? (
             <p className="portal-admin-hint">Still running — logs refresh every few seconds.</p>
           ) : null}
@@ -4572,8 +4620,10 @@ function PortalAdminJobsTab({ mirrorCacheStatus }) {
   const [logRun, setLogRun] = useState(null);
   const [logError, setLogError] = useState('');
   const [refreshTick, setRefreshTick] = useState(0);
+  const [clearingVoiceMemoCache, setClearingVoiceMemoCache] = useState(false);
+  const [voiceMemoCacheNotice, setVoiceMemoCacheNotice] = useState('');
 
-  // Load the overview, then keep polling — quickly while a job is running.
+  const anyJobRunning = (overview?.jobs || []).some((job) => job.lastRun?.status === 'running');
   useEffect(() => {
     let cancelled = false;
     let timer = null;
@@ -4671,6 +4721,31 @@ function PortalAdminJobsTab({ mirrorCacheStatus }) {
       setActionError(err.message || 'Could not start the job.');
     } finally {
       setTriggeringJob('');
+    }
+  };
+
+  const clearVoiceMemoAudioCache = async () => {
+    const confirmed = window.confirm(
+      'Clear all cached voice memo audio in Postgres? The next voice memo sync will re-download and rewrite every file. This can take a while.',
+    );
+    if (!confirmed) {
+      return;
+    }
+    setClearingVoiceMemoCache(true);
+    setVoiceMemoCacheNotice('');
+    setActionError('');
+    try {
+      const data = await adminApiPost('/api/portal-admin/jobs/clear-voice-memo-audio-cache');
+      const cleared = Number(data.cleared) || 0;
+      setVoiceMemoCacheNotice(
+        cleared > 0
+          ? `Cleared ${cleared} cached voice memo${cleared === 1 ? '' : 's'}. Run voice memo sync to rebuild the cache.`
+          : 'Voice memo audio cache was already empty.',
+      );
+    } catch (err) {
+      setActionError(err.message || 'Could not clear the voice memo audio cache.');
+    } finally {
+      setClearingVoiceMemoCache(false);
     }
   };
 
@@ -4820,6 +4895,25 @@ function PortalAdminJobsTab({ mirrorCacheStatus }) {
                 {isExpanded ? 'Hide history' : 'View history'}
               </button>
             </div>
+            {job.name === 'voice-memo-sync' ? (
+              <div className="portal-admin-voice-memo-cache-actions">
+                <p className="portal-admin-hint">
+                  Clears all cached voice memo audio in Postgres. The next voice memo sync (or
+                  hourly cache) will re-download and transcode every file.
+                </p>
+                <button
+                  type="button"
+                  className="portal-btn portal-btn--secondary"
+                  disabled={clearingVoiceMemoCache || anyJobRunning}
+                  onClick={clearVoiceMemoAudioCache}
+                >
+                  {clearingVoiceMemoCache ? 'Clearing cache…' : 'Clear audio cache'}
+                </button>
+                {voiceMemoCacheNotice ? (
+                  <p className="portal-admin-status">{voiceMemoCacheNotice}</p>
+                ) : null}
+              </div>
+            ) : null}
             {isExpanded ? (
               <>
                 {runsLoading && runs.length === 0 ? (
@@ -9499,6 +9593,7 @@ function PortalReviewCard({
                 active={draft.technicalFlag === true}
                 labelKey="reviews.technicalFlag"
                 flaggedLabelKey="reviews.technicalFlagFlagged"
+                hintKey="reviews.technicalFlagOffHint"
                 onToggle={() => {
                   const nextDraft = { ...draft, technicalFlag: !draft.technicalFlag };
                   onDraftChange(assignment.applicantId, { technicalFlag: nextDraft.technicalFlag });

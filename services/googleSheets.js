@@ -20,6 +20,8 @@ const SHEETS_RETRY_DEFAULT_BUDGET_MS = 20 * 1000;
 const SHEETS_RETRY_BACKOFF_BASE_MS = 2000;
 const SHEETS_RETRY_BACKOFF_CAP_MS = 60 * 1000;
 const SHEETS_RETRY_AFTER_CAP_MS = 15 * 60 * 1000;
+/** Throttled calls keep retrying for at least this long even when the job deadline is near. */
+const SHEETS_THROTTLE_MIN_RETRY_MS = 10 * 60 * 1000;
 
 /** @type {number[]} */
 let sheetsScriptRequestTimestamps = [];
@@ -168,7 +170,7 @@ function sheetsRetryAfterMs(error) {
 
 /**
  * Run a Sheets API call, retrying 429s/rate limits with exponential backoff until
- * `deadlineAt`. Sync scripts pass a long deadline so throttled runs pause and
+ * `deadlineAt`. Sync scripts pass a long deadline (up to 6 hours) so throttled runs pause and
  * finish instead of failing the whole job.
  * @template T
  * @param {string} label
@@ -195,7 +197,10 @@ async function withSheetsRetry(label, fn, options = {}) {
       );
       const jitteredMs = Math.round(backoffMs * (0.5 + Math.random() * 0.5));
       const waitMs = Math.max(sheetsRetryAfterMs(error) ?? 0, jitteredMs);
-      if (Date.now() + waitMs > deadlineAt) {
+      const retryDeadlineAt = isSheetsThrottleError(error)
+        ? Math.max(deadlineAt, Date.now() + SHEETS_THROTTLE_MIN_RETRY_MS)
+        : deadlineAt;
+      if (Date.now() + waitMs > retryDeadlineAt) {
         if (isSheetsThrottleError(error)) {
           const exhausted = new Error(
             `Google Sheets ${label} hit rate limits and the retry budget ran out. Wait a minute and try again.`,

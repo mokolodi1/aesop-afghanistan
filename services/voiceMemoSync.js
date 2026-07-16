@@ -33,7 +33,8 @@ const {
   getApplicantVoiceMemoDurationsMapFromDb,
   updateApplicantDriveDurationSeconds,
 } = require("./classroomDb");
-const { syncVoiceMemoAudioFromScan } = require("./voiceMemoAudio");
+const { syncVoiceMemoAudioFromScan, logVoiceMemoAudioTranscodeFailures } = require("./voiceMemoAudio");
+const { JOB_MAX_RUNTIME_MS } = require("./jobRuns");
 
 const VOICE_NOTE_LINK_HEADERS = ["Voice note link", "Links"];
 const VOICE_NOTE_DATE_HEADERS = [
@@ -55,8 +56,8 @@ const VOICE_NOTE_LENGTH_HEADERS = [
 ];
 const ROUND2_PROMPT_HEADERS = ["Round 2 Prompt"];
 
-/** Drive throttling can stretch the voice memo sync; allow it to run up to ~an hour. */
-const SYNC_VOICE_MEMO_TIME_BUDGET_MS = 55 * 60 * 1000;
+/** Drive/Sheets throttling can stretch the voice memo sync; allow up to 6 hours. */
+const SYNC_VOICE_MEMO_TIME_BUDGET_MS = JOB_MAX_RUNTIME_MS;
 
 /**
  * Parse a `Voice memo length (secs)` sheet cell into whole seconds.
@@ -799,6 +800,7 @@ function logVoiceMemoSyncAudit(result) {
     "unmatched voice note AESOP IDs (not on Applicants sheet)",
     (result.unmatchedFiles || []).map((entry) => entry.aesopId),
   );
+  logVoiceMemoAudioTranscodeFailures(result.audioTranscodeFailures, { label: "[sync-voice-memos]" });
 }
 
 /**
@@ -848,7 +850,7 @@ let voiceMemoSyncInFlight = false;
  * Lengths are only computed for rows whose sheet length is blank/invalid or whose
  * Drive file changed since the last sync (detected via the Voice note link file id);
  * known lengths are reused from the sheet or the Postgres cache before probing Drive.
- * Drive/Sheets throttling (429s) is retried with backoff, so a run may take up to ~an hour.
+ * Drive/Sheets throttling (429s) is retried with backoff, so a run may take up to 6 hours.
  *
  * @param {{ timeBudgetMs?: number }} [options]
  * @returns {Promise<{ updated: number, skippedUpToDate: number, skippedNoFile: number, skippedNotAccepted: number, skippedNoId: number, driveFileCount: number, lengthsWritten: number, lengthsCleared: number, lengthsUnknown: number, lengthProbes: number, warnings: string[], duplicateAesopIds: Array, unmatchedFiles: Array, invalidFileNames: string[] }>}
@@ -978,12 +980,19 @@ async function runVoiceMemoRound2Sync(options = {}) {
   const scan = await scanVoiceMemoFolder(folderId, { ...scanOptions, deadlineAt });
   const memoById = scan.memosById;
 
-  let audioCacheResult = { driveFiles: 0, downloaded: 0, pruned: 0, skipped: 0 };
+  let audioCacheResult = {
+    driveFiles: 0,
+    downloaded: 0,
+    pruned: 0,
+    skipped: 0,
+    transcodeFailures: [],
+  };
   try {
     audioCacheResult = await syncVoiceMemoAudioFromScan(scan, { deadlineAt });
     console.info(
       `[sync-voice-memos] voice memo audio cache: driveFiles=${audioCacheResult.driveFiles}, ` +
-        `downloaded=${audioCacheResult.downloaded}, pruned=${audioCacheResult.pruned}`,
+        `downloaded=${audioCacheResult.downloaded}, pruned=${audioCacheResult.pruned}, ` +
+        `transcodeFailures=${audioCacheResult.transcodeFailures?.length || 0}`,
     );
   } catch (error) {
     console.warn("[sync-voice-memos] voice memo audio cache failed:", error.message || error);
@@ -1298,6 +1307,7 @@ async function runVoiceMemoRound2Sync(options = {}) {
     audioDownloaded: audioCacheResult.downloaded,
     audioPruned: audioCacheResult.pruned,
     audioSkipped: audioCacheResult.skipped,
+    audioTranscodeFailures: audioCacheResult.transcodeFailures || [],
     ...driveWarnings,
   };
   logVoiceMemoSyncAudit(result);

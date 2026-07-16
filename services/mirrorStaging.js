@@ -42,9 +42,10 @@ const {
   promoteStagingMirror,
 } = require("./mirrorPromote");
 const { syncVoiceMemoAudioFromScan } = require("./voiceMemoAudio");
+const { JOB_MAX_RUNTIME_MS } = require("./jobRuns");
 
-/** Sheets/Drive throttling can stretch the mirror; retry 429s for up to ~45 minutes. */
-const MIRROR_SYNC_TIME_BUDGET_MS = 45 * 60 * 1000;
+/** Sheets/Drive throttling can stretch the mirror; retry 429s for up to 6 hours. */
+const MIRROR_SYNC_TIME_BUDGET_MS = JOB_MAX_RUNTIME_MS;
 
 /**
  * @param {object} profile
