@@ -9114,7 +9114,7 @@ function PortalReviewSaveStatus({ saveStatus, lastSavedAt, hasUnsavedChanges, on
       : saveStatus === 'error'
         ? t('reviews.saveStatusError')
         : savedLabel;
-  const canSaveNow = hasUnsavedChanges && saveStatus !== 'saving';
+  const isSaving = saveStatus === 'saving';
 
   const indicatorStatus =
     saveStatus === 'saving' ? 'saving' : saveStatus === 'error' ? 'error' : 'saved';
@@ -9164,16 +9164,16 @@ function PortalReviewSaveStatus({ saveStatus, lastSavedAt, hasUnsavedChanges, on
         <button
           type="button"
           className="portal-review-save-now-link"
-          disabled={!canSaveNow}
+          disabled={isSaving}
           onClick={(event) => {
             event.preventDefault();
-            if (!canSaveNow) {
+            if (isSaving) {
               return;
             }
             onSaveNow?.();
           }}
         >
-          {t('reviews.saveNow')}
+          {t('reviews.saveNowWithAutoSave')}
         </button>
       </span>
     </span>
@@ -9200,8 +9200,6 @@ function useReviewAutoSave({ drafts, onSaveOne }) {
   const flushApplicant = useCallback(async (applicantId) => {
     const draft = getPendingDraft(applicantId);
     if (!reviewDraftCanPersist(draft)) {
-      dirtyRef.current.delete(applicantId);
-      pendingDraftsRef.current.delete(applicantId);
       return;
     }
     setSaveStatus('saving');
@@ -9220,16 +9218,20 @@ function useReviewAutoSave({ drafts, onSaveOne }) {
   const markDirty = useCallback(
     (applicantId, draftOverride) => {
       const draft = draftOverride || draftsRef.current[applicantId];
-      if (!reviewDraftCanPersist(draft)) {
-        return;
-      }
       dirtyRef.current.add(applicantId);
       pendingDraftsRef.current.set(applicantId, draft);
       setHasUnsavedChanges(true);
+
       const existing = debounceTimersRef.current.get(applicantId);
       if (existing) {
         window.clearTimeout(existing);
+        debounceTimersRef.current.delete(applicantId);
       }
+
+      if (!reviewDraftCanPersist(draft)) {
+        return;
+      }
+
       const timerId = window.setTimeout(() => {
         debounceTimersRef.current.delete(applicantId);
         flushApplicant(applicantId);
@@ -9249,11 +9251,8 @@ function useReviewAutoSave({ drafts, onSaveOne }) {
       const applicantIds = new Set(dirtyRef.current);
       const focused = String(focusedApplicantId || '').trim();
       if (focused) {
-        const focusedDraft = getPendingDraft(focused);
-        if (reviewDraftCanPersist(focusedDraft)) {
-          applicantIds.add(focused);
-          pendingDraftsRef.current.set(focused, focusedDraft);
-        }
+        applicantIds.add(focused);
+        pendingDraftsRef.current.set(focused, getPendingDraft(focused));
       }
 
       if (applicantIds.size === 0) {
@@ -9265,19 +9264,25 @@ function useReviewAutoSave({ drafts, onSaveOne }) {
       try {
         for (const applicantId of applicantIds) {
           const draft = getPendingDraft(applicantId);
-          if (!reviewDraftCanPersist(draft)) {
-            dirtyRef.current.delete(applicantId);
-            pendingDraftsRef.current.delete(applicantId);
+          const isFocused = applicantId === focused;
+          const shouldAttempt =
+            reviewDraftCanPersist(draft) ||
+            (isFocused && !reviewDraftIsEmpty(draft));
+          if (!shouldAttempt) {
             continue;
           }
           await onSaveOneRef.current(applicantId, draft);
-          dirtyRef.current.delete(applicantId);
-          pendingDraftsRef.current.delete(applicantId);
-          savedCount += 1;
+          if (reviewDraftCanPersist(draft)) {
+            dirtyRef.current.delete(applicantId);
+            pendingDraftsRef.current.delete(applicantId);
+            savedCount += 1;
+          }
         }
         if (savedCount > 0) {
           setLastSavedAt(Date.now());
           setSaveStatus('saved');
+        } else {
+          setSaveStatus('error');
         }
         setHasUnsavedChanges(dirtyRef.current.size > 0);
       } catch {
