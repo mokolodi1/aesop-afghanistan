@@ -8765,7 +8765,9 @@ function reviewScaleOptionLabel(score, t, { englishLevel = false } = {}) {
     return `5 — ${t('reviews.scale.midpoint')}`;
   }
   if (score === '10') {
-    return `10 — ${t('reviews.scale.highest')}`;
+    return englishLevel
+      ? `10 — ${t('reviews.scale.nativeFluency')}`
+      : `10 — ${t('reviews.scale.highest')}`;
   }
   return score;
 }
