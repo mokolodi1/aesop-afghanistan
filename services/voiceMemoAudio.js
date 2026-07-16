@@ -27,16 +27,101 @@ const {
 const VOICE_MEMO_AUDIO_SYNC_CHUNK_SIZE = 10;
 
 /**
+ * @param {string} fileName
+ * @returns {string|null}
+ */
+function voiceMemoAesopIdFromFileName(fileName) {
+  const name = String(fileName || "").trim();
+  if (!name) {
+    return null;
+  }
+  const match = /^(.+)\.[^.]+$/i.exec(name);
+  return match ? match[1].trim() : name;
+}
+
+/**
+ * @param {{
+ *   parsedFiles?: Array<{ fileId?: string, fileName?: string, aesopId?: string }>,
+ * }|null|undefined} scan
+ * @returns {Map<string, string>}
+ */
+function buildVoiceMemoAesopIdByFileIdMap(scan) {
+  /** @type {Map<string, string>} */
+  const aesopIdByFileId = new Map();
+  for (const parsed of scan?.parsedFiles || []) {
+    const fileId = String(parsed?.fileId || "").trim();
+    const aesopId = String(parsed?.aesopId || "").trim();
+    if (fileId && aesopId) {
+      aesopIdByFileId.set(fileId, aesopId);
+    }
+  }
+  return aesopIdByFileId;
+}
+
+/**
+ * @param {{ fileId?: string, fileName?: string, aesopId?: string, aesopIdByFileId?: Map<string, string> }} params
+ * @returns {string|null}
+ */
+function resolveVoiceMemoAesopId({ fileId, fileName, aesopId, aesopIdByFileId }) {
+  const direct = String(aesopId || "").trim();
+  if (direct) {
+    return direct;
+  }
+  const normalizedFileId = String(fileId || "").trim();
+  if (normalizedFileId && aesopIdByFileId?.has(normalizedFileId)) {
+    return aesopIdByFileId.get(normalizedFileId) || null;
+  }
+  return voiceMemoAesopIdFromFileName(fileName);
+}
+
+/**
+ * @param {string} message
+ * @param {{ fileId?: string, fileName?: string, aesopId?: string, aesopIdByFileId?: Map<string, string> }} [context]
+ */
+function logVoiceMemoAudioProgress(message, context = {}) {
+  const aesopId = resolveVoiceMemoAesopId(context);
+  if (aesopId) {
+    console.info(`[voice-memo-audio] AESOP ID ${aesopId}: ${message}`);
+    return;
+  }
+  const fileName = String(context.fileName || "").trim();
+  if (fileName) {
+    console.info(`[voice-memo-audio] ${fileName}: ${message}`);
+    return;
+  }
+  console.info(`[voice-memo-audio] ${message}`);
+}
+
+/**
+ * @param {string} message
+ * @param {{ fileId?: string, fileName?: string, aesopId?: string, aesopIdByFileId?: Map<string, string> }} [context]
+ */
+function logVoiceMemoAudioWarning(message, context = {}) {
+  const aesopId = resolveVoiceMemoAesopId(context);
+  if (aesopId) {
+    console.warn(`[voice-memo-audio] AESOP ID ${aesopId}: ${message}`);
+    return;
+  }
+  const fileName = String(context.fileName || "").trim();
+  if (fileName) {
+    console.warn(`[voice-memo-audio] ${fileName}: ${message}`);
+    return;
+  }
+  console.warn(`[voice-memo-audio] ${message}`);
+}
+
+/**
  * @param {Array<{ fileId: string|null, fileName: string, reason: string }>|null|undefined} failures
  * @param {{ fileId?: string, fileName?: string, reason: string }} entry
  */
-function recordVoiceMemoCacheFailure(failures, { fileId, fileName, reason }) {
+function recordVoiceMemoCacheFailure(failures, { fileId, fileName, aesopId, reason }) {
   if (!Array.isArray(failures)) {
     return;
   }
   failures.push({
     fileId: String(fileId || "").trim() || null,
     fileName: String(fileName || "").trim() || "voice-memo",
+    aesopId: String(aesopId || voiceMemoAesopIdFromFileName(fileName) || "").trim() || null,
     reason: String(reason || "unknown"),
   });
 }
@@ -59,8 +144,9 @@ function logVoiceMemoAudioTranscodeFailures(failures, { label = "[voice-memo-aud
     `${label} ===== Audio transcode failures (${sorted.length}) — manual review needed =====`,
   );
   for (const entry of sorted) {
+    const aesopLabel = entry.aesopId ? `AESOP ID ${entry.aesopId}` : entry.fileName;
     const idSuffix = entry.fileId ? ` · Drive ${entry.fileId}` : "";
-    console.warn(`${label}   - ${entry.fileName}${idSuffix}: ${entry.reason}`);
+    console.warn(`${label}   - ${aesopLabel}${idSuffix}: ${entry.reason}`);
   }
   console.warn(`${label} ================================================================`);
 }
@@ -370,6 +456,7 @@ async function isVoiceMemoCacheStale(content, fileName) {
  */
 async function refreshStaleVoiceMemoCacheEntries(currentFileIds, fileNameById, options = {}) {
   const failures = options.failures;
+  const aesopIdByFileId = options.aesopIdByFileId || new Map();
   let refreshed = 0;
   for (const fileId of currentFileIds) {
     const row = await getVoiceMemoAudioRow(fileId);
@@ -381,12 +468,18 @@ async function refreshStaleVoiceMemoCacheEntries(currentFileIds, fileNameById, o
       continue;
     }
 
-    console.warn(
-      `[voice-memo-audio] stale cache for ${row.fileName || fileId} ` +
-        `(bytes=${content.length}); deleting and re-downloading from Drive`,
+    const logContext = {
+      fileId,
+      fileName: row.fileName,
+      aesopIdByFileId,
+    };
+    logVoiceMemoAudioWarning(
+      `stale cache (bytes=${content.length}); deleting and re-downloading from Drive`,
+      logContext,
     );
     await deleteVoiceMemoAudioRow(fileId);
 
+    logVoiceMemoAudioProgress("processing (refresh stale cache)", logContext);
     const download = await downloadVoiceMemoFile(fileId, { deadlineAt: options.deadlineAt });
     if (!download?.content || download.content.length <= 0) {
       continue;
@@ -399,7 +492,12 @@ async function refreshStaleVoiceMemoCacheEntries(currentFileIds, fileNameById, o
       download.content,
       download.fileName || fileNameById.get(fileId) || "voice-memo.m4a",
       download.mimeType,
-      { fileId, failures },
+      {
+        fileId,
+        failures,
+        aesopId: resolveVoiceMemoAesopId(logContext),
+        aesopIdByFileId,
+      },
     );
     if (!prepared) {
       download.content = null;
@@ -413,6 +511,10 @@ async function refreshStaleVoiceMemoCacheEntries(currentFileIds, fileNameById, o
       sizeBytes: prepared.sizeBytes,
       content: prepared.content,
     });
+    logVoiceMemoAudioProgress(
+      `cached (${prepared.fileName}, ${prepared.sizeBytes} bytes)`,
+      logContext,
+    );
     refreshed += 1;
     download.content = null;
   }
@@ -495,12 +597,13 @@ async function syncVoiceMemoAudioFromScan(scan, options = {}) {
     };
   }
 
-  /** @type {Array<{ fileId: string|null, fileName: string, reason: string }>} */
+  /** @type {Array<{ fileId: string|null, fileName: string, aesopId?: string|null, reason: string }>} */
   const transcodeFailures = [];
 
   const currentFileIds = collectDriveFileIdsFromScan(scan);
   const cachedIds = await listCachedVoiceMemoFileIds();
   const missingIds = currentFileIds.filter((fileId) => !cachedIds.has(fileId));
+  const aesopIdByFileId = buildVoiceMemoAesopIdByFileIdMap(scan);
 
   /** @type {Map<string, string>} */
   const fileNameById = new Map();
@@ -515,6 +618,7 @@ async function syncVoiceMemoAudioFromScan(scan, options = {}) {
   const refreshed = await refreshStaleVoiceMemoCacheEntries(currentFileIds, fileNameById, {
     ...options,
     failures: transcodeFailures,
+    aesopIdByFileId,
   });
 
   let downloaded = 0;
@@ -523,14 +627,20 @@ async function syncVoiceMemoAudioFromScan(scan, options = {}) {
   for (let chunkIndex = 0; chunkIndex < chunks.length; chunkIndex += 1) {
     const chunk = chunks[chunkIndex];
     for (const fileId of chunk) {
+      const fileName = fileNameById.get(fileId) || "voice-memo.m4a";
+      const logContext = { fileId, fileName, aesopIdByFileId };
+      logVoiceMemoAudioProgress("processing", logContext);
+
       const download = await downloadVoiceMemoFile(fileId, { deadlineAt: options.deadlineAt });
       if (!download) {
         skipped += 1;
+        logVoiceMemoAudioWarning("skipped: Drive download failed", logContext);
         continue;
       }
       if (download.sizeBytes > VOICE_MEMO_AUDIO_CACHE_MAX_BYTES) {
-        console.warn(
-          `[voice-memo-audio] skipping ${download.fileName}: downloaded size ${download.sizeBytes} exceeds cache limit`,
+        logVoiceMemoAudioWarning(
+          `skipped: downloaded size ${download.sizeBytes} exceeds cache limit`,
+          { ...logContext, fileName: download.fileName || fileName },
         );
         skipped += 1;
         download.content = null;
@@ -539,9 +649,14 @@ async function syncVoiceMemoAudioFromScan(scan, options = {}) {
 
       const prepared = await prepareVoiceMemoAudioCacheEntry(
         download.content,
-        download.fileName || fileNameById.get(fileId) || "voice-memo.m4a",
+        download.fileName || fileName,
         download.mimeType,
-        { fileId, failures: transcodeFailures },
+        {
+          fileId,
+          failures: transcodeFailures,
+          aesopId: resolveVoiceMemoAesopId(logContext),
+          aesopIdByFileId,
+        },
       );
       if (!prepared) {
         skipped += 1;
@@ -556,6 +671,10 @@ async function syncVoiceMemoAudioFromScan(scan, options = {}) {
         sizeBytes: prepared.sizeBytes,
         content: prepared.content,
       });
+      logVoiceMemoAudioProgress(
+        `cached (${prepared.fileName}, ${prepared.sizeBytes} bytes)`,
+        logContext,
+      );
       downloaded += 1;
       download.content = null;
     }
@@ -592,27 +711,41 @@ async function syncVoiceMemoAudioFromScan(scan, options = {}) {
  * @returns {Promise<{ content: Buffer, fileName: string, mimeType: string, sizeBytes: number }|null>}
  */
 async function prepareVoiceMemoAudioCacheEntry(content, fileName, mimeType, cacheOptions = {}) {
-  const { fileId, failures } = cacheOptions;
+  const { fileId, failures, aesopId: aesopIdOption, aesopIdByFileId } = cacheOptions;
+  const aesopId = resolveVoiceMemoAesopId({
+    fileId,
+    fileName,
+    aesopId: aesopIdOption,
+    aesopIdByFileId,
+  });
+  const logContext = { fileId, fileName, aesopId, aesopIdByFileId };
+  const transcodeContext = { aesopId: aesopId || undefined, fileName };
+
   if (await isFfmpegAvailable()) {
-    if (await voiceMemoNeedsBrowserPlaybackTranscode(content, fileName)) {
-      const transcoded = await transcodeVoiceMemoToM4aBuffer(content);
+    if (await voiceMemoNeedsBrowserPlaybackTranscode(content, fileName, transcodeContext)) {
+      const transcoded = await transcodeVoiceMemoToM4aBuffer(content, transcodeContext);
       if (!transcoded) {
-        console.warn(`[voice-memo-audio] skipping cache for ${fileName}: browser transcode failed`);
+        logVoiceMemoAudioWarning("skipping cache: browser transcode failed", logContext);
         recordVoiceMemoCacheFailure(failures, {
           fileId,
           fileName,
+          aesopId,
           reason: "browser transcode failed",
         });
         return null;
       }
       content = transcoded;
     } else if (isMp4FamilyBuffer(content)) {
-      const remuxed = await remuxVoiceMemoMp4Faststart(content, { fallbackToInput: false });
+      const remuxed = await remuxVoiceMemoMp4Faststart(content, {
+        fallbackToInput: false,
+        context: transcodeContext,
+      });
       if (!remuxed) {
-        console.warn(`[voice-memo-audio] skipping cache for ${fileName}: mp4 faststart remux failed`);
+        logVoiceMemoAudioWarning("skipping cache: mp4 faststart remux failed", logContext);
         recordVoiceMemoCacheFailure(failures, {
           fileId,
           fileName,
+          aesopId,
           reason: "mp4 faststart remux failed",
         });
         return null;
@@ -623,12 +756,13 @@ async function prepareVoiceMemoAudioCacheEntry(content, fileName, mimeType, cach
 
   if (
     (await isFfmpegAvailable()) &&
-    (await voiceMemoNeedsBrowserPlaybackTranscode(content, fileName))
+    (await voiceMemoNeedsBrowserPlaybackTranscode(content, fileName, transcodeContext))
   ) {
-    console.warn(`[voice-memo-audio] skipping cache for ${fileName}: still needs browser transcode`);
+    logVoiceMemoAudioWarning("skipping cache: still needs browser transcode", logContext);
     recordVoiceMemoCacheFailure(failures, {
       fileId,
       fileName,
+      aesopId,
       reason: "still needs browser transcode after processing",
     });
     return null;

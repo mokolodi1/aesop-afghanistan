@@ -7,6 +7,21 @@ const { PassThrough, Readable } = require("stream");
 const { sniffVoiceMemoMimeTypeFromBuffer } = require("./voiceMemoContentType");
 const { voiceMemoExtensionFromFileName } = require("./voiceMemoExtensions");
 
+/** @typedef {{ aesopId?: string, fileName?: string }} VoiceMemoTranscodeContext */
+
+/**
+ * @param {string} message
+ * @param {VoiceMemoTranscodeContext} [context]
+ */
+function logVoiceMemoTranscodeMessage(message, context = {}) {
+  const aesopId = String(context.aesopId || "").trim();
+  const fileName = String(context.fileName || "").trim();
+  const subject = aesopId
+    ? `AESOP ID ${aesopId}${fileName ? ` (${fileName})` : ""}`
+    : fileName || "voice memo";
+  console.warn(`[voice-memo-transcode] ${subject}: ${message}`);
+}
+
 /** Extensions that browsers may not play reliably; normalize to m4a when ffmpeg is available. */
 const VOICE_MEMO_TRANSCODE_EXTENSIONS = new Set(["acc", "mpg", "mpga"]);
 
@@ -171,9 +186,10 @@ async function probeVoiceMemoHasVideoStream(buffer) {
  * reject as audio/mp4 even when range streaming succeeds.
  * @param {Buffer} buffer
  * @param {string} [fileName]
+ * @param {VoiceMemoTranscodeContext} [context]
  * @returns {Promise<boolean>}
  */
-async function voiceMemoNeedsBrowserPlaybackTranscode(buffer, fileName = "") {
+async function voiceMemoNeedsBrowserPlaybackTranscode(buffer, fileName = "", context = {}) {
   const extension = voiceMemoExtensionFromFileName(fileName);
   if (extension != null && voiceMemoNeedsTranscodeForPlayback(extension)) {
     return true;
@@ -199,17 +215,19 @@ async function voiceMemoNeedsBrowserPlaybackTranscode(buffer, fileName = "") {
   }
 
   if (await probeVoiceMemoHasVideoStream(buffer)) {
-    console.warn(
-      `[voice-memo-transcode] video track in ${fileName || "voice memo"} needs audio-only remux`,
-    );
+    logVoiceMemoTranscodeMessage("video track needs audio-only remux", {
+      ...context,
+      fileName: fileName || context.fileName,
+    });
     return true;
   }
 
   const codecName = await probeVoiceMemoAudioCodecName(buffer);
   if (codecName && !BROWSER_SAFE_MP4_AUDIO_CODECS.has(codecName)) {
-    console.warn(
-      `[voice-memo-transcode] codec ${codecName} in ${fileName || "voice memo"} needs browser transcode`,
-    );
+    logVoiceMemoTranscodeMessage(`codec ${codecName} needs browser transcode`, {
+      ...context,
+      fileName: fileName || context.fileName,
+    });
     return true;
   }
 
@@ -238,6 +256,7 @@ function voiceMemoFfmpegInputFlags() {
  */
 function runFfmpegBufferTransform(buffer, ffmpegArgs, options = {}) {
   const fallbackToInput = options.fallbackToInput !== false;
+  const context = options.context || {};
   return new Promise((resolve) => {
     let settled = false;
     /** @type {Buffer[]} */
@@ -263,7 +282,7 @@ function runFfmpegBufferTransform(buffer, ffmpegArgs, options = {}) {
     ffmpeg.stderr.on("data", (chunk) => {
       const message = String(chunk || "").trim();
       if (message) {
-        console.warn("[voice-memo-transcode]", message);
+        logVoiceMemoTranscodeMessage(message, context);
       }
     });
     ignoreBrokenPipeErrors(ffmpeg.stdin);
@@ -290,6 +309,7 @@ function runFfmpegBufferTransform(buffer, ffmpegArgs, options = {}) {
  */
 async function remuxVoiceMemoMp4FaststartViaTempFiles(buffer, options = {}) {
   const audioOnly = options.audioOnly === true;
+  const context = options.context || {};
   const tempRoot = await mkdtemp(join(tmpdir(), "voice-memo-remux-"));
   const inputPath = join(tempRoot, `input-${randomBytes(6).toString("hex")}`);
   const outputPath = join(tempRoot, `output-${randomBytes(6).toString("hex")}.m4a`);
@@ -321,7 +341,7 @@ async function remuxVoiceMemoMp4FaststartViaTempFiles(buffer, options = {}) {
       ffmpeg.stderr.on("data", (chunk) => {
         const message = String(chunk || "").trim();
         if (message) {
-          console.warn("[voice-memo-transcode]", message);
+          logVoiceMemoTranscodeMessage(message, context);
         }
       });
       ffmpeg.on("error", () => resolve(null));
@@ -346,9 +366,10 @@ async function remuxVoiceMemoMp4FaststartViaTempFiles(buffer, options = {}) {
 
 /**
  * @param {Buffer} buffer
+ * @param {VoiceMemoTranscodeContext} [context]
  * @returns {Promise<Buffer|null>}
  */
-async function transcodeVoiceMemoToM4aViaTempFiles(buffer) {
+async function transcodeVoiceMemoToM4aViaTempFiles(buffer, context = {}) {
   const tempRoot = await mkdtemp(join(tmpdir(), "voice-memo-transcode-"));
   const inputPath = join(tempRoot, `input-${randomBytes(6).toString("hex")}`);
   const outputPath = join(tempRoot, `output-${randomBytes(6).toString("hex")}.m4a`);
@@ -378,7 +399,7 @@ async function transcodeVoiceMemoToM4aViaTempFiles(buffer) {
       ffmpeg.stderr.on("data", (chunk) => {
         const message = String(chunk || "").trim();
         if (message) {
-          console.warn("[voice-memo-transcode]", message);
+          logVoiceMemoTranscodeMessage(message, context);
         }
       });
       ffmpeg.on("error", () => resolve(null));
@@ -404,9 +425,10 @@ async function transcodeVoiceMemoToM4aViaTempFiles(buffer) {
 /**
  * Re-encode any voice memo to AAC-in-MP4 with faststart for cache storage.
  * @param {Buffer} buffer
+ * @param {VoiceMemoTranscodeContext} [context]
  * @returns {Promise<Buffer>}
  */
-async function transcodeVoiceMemoToM4aBuffer(buffer) {
+async function transcodeVoiceMemoToM4aBuffer(buffer, context = {}) {
   if (!(await isFfmpegAvailable()) || !buffer || buffer.length === 0) {
     return null;
   }
@@ -414,7 +436,10 @@ async function transcodeVoiceMemoToM4aBuffer(buffer) {
   if (await probeVoiceMemoHasVideoStream(buffer)) {
     const codecName = await probeVoiceMemoAudioCodecName(buffer);
     if (codecName && BROWSER_SAFE_MP4_AUDIO_CODECS.has(codecName)) {
-      const remuxed = await remuxVoiceMemoMp4FaststartViaTempFiles(buffer, { audioOnly: true });
+      const remuxed = await remuxVoiceMemoMp4FaststartViaTempFiles(buffer, {
+        audioOnly: true,
+        context,
+      });
       if (isValidVoiceMemoPlaybackM4a(remuxed)) {
         return remuxed;
       }
@@ -439,14 +464,14 @@ async function transcodeVoiceMemoToM4aBuffer(buffer) {
       "mp4",
       "pipe:1",
     ],
-    { fallbackToInput: false },
+    { fallbackToInput: false, context },
   );
 
   if (isValidVoiceMemoPlaybackM4a(pipeResult)) {
     return pipeResult;
   }
 
-  return transcodeVoiceMemoToM4aViaTempFiles(buffer);
+  return transcodeVoiceMemoToM4aViaTempFiles(buffer, context);
 }
 
 /**
@@ -537,7 +562,7 @@ async function remuxVoiceMemoMp4Faststart(buffer, options = {}) {
   }
 
   const audioOnly = await probeVoiceMemoHasVideoStream(buffer);
-  const result = await remuxVoiceMemoMp4FaststartViaTempFiles(buffer, { audioOnly });
+  const result = await remuxVoiceMemoMp4FaststartViaTempFiles(buffer, { audioOnly, context: options.context });
 
   if (isValidVoiceMemoPlaybackM4a(result)) {
     return result;

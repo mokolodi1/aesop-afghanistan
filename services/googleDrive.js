@@ -93,9 +93,6 @@ async function acquireDriveRequestSlots(count = 1) {
     const oldest = driveScriptRequestTimestamps[0];
     const elapsed = Number.isFinite(oldest) ? now - oldest : DRIVE_SCRIPT_RATE_WINDOW_MS;
     const waitMs = Math.max(DRIVE_SCRIPT_RATE_WINDOW_MS - elapsed + 50, 250);
-    console.warn(
-      `[drive] pacing script traffic (${driveScriptRequestTimestamps.length}/${DRIVE_SCRIPT_MAX_REQUESTS_PER_MINUTE} req/min); waiting ${Math.ceil(waitMs / 1000)}s`,
-    );
     await sleep(waitMs);
   }
 }
