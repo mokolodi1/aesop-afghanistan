@@ -22,6 +22,7 @@ const VOICE_MEMO_ERROR_CODES = {
   STREAM_PIPE: "VMPI11",
   STALE_SUBMISSION: "VMST12",
   INVALID_CREDENTIALS: "VMIN13",
+  TRANSCODE_FAILED: "VMTR14",
 };
 
 /**
@@ -69,6 +70,15 @@ function resolveVoiceMemoStreamError(error) {
       statusCode,
       code: semanticCode || "VOICE_MEMO_STREAM_ERROR",
       errorCode: existingErrorCode,
+    };
+  }
+
+  if (semanticCode === "TRANSCODE_FAILED" || semanticCode === "VOICE_MEMO_TRANSCODE_FAILED") {
+    return {
+      message: DRIVE_TRY_AGAIN_LATER_MESSAGE,
+      statusCode: 503,
+      code: "TRANSCODE_FAILED",
+      errorCode: VOICE_MEMO_ERROR_CODES.TRANSCODE_FAILED,
     };
   }
 

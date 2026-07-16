@@ -136,7 +136,8 @@ async function voiceMemoNeedsBrowserPlaybackTranscode(buffer, fileName = "") {
  * @param {string[]} ffmpegArgs
  * @returns {Promise<Buffer>}
  */
-function runFfmpegBufferTransform(buffer, ffmpegArgs) {
+function runFfmpegBufferTransform(buffer, ffmpegArgs, options = {}) {
+  const fallbackToInput = options.fallbackToInput !== false;
   return new Promise((resolve) => {
     const input = Readable.from(buffer);
     /** @type {Buffer[]} */
@@ -158,15 +159,15 @@ function runFfmpegBufferTransform(buffer, ffmpegArgs) {
         console.warn("[voice-memo-transcode]", message);
       }
     });
-    ffmpeg.on("error", () => finish(buffer));
+    ffmpeg.on("error", () => finish(fallbackToInput ? buffer : null));
     ffmpeg.on("close", (code) => {
       if (code === 0 && chunks.length > 0) {
         finish(Buffer.concat(chunks));
         return;
       }
-      finish(buffer);
+      finish(fallbackToInput ? buffer : null);
     });
-    input.on("error", () => finish(buffer));
+    input.on("error", () => finish(fallbackToInput ? buffer : null));
     input.pipe(ffmpeg.stdin);
     ffmpeg.stdin.on("error", () => {});
   });
@@ -179,24 +180,33 @@ function runFfmpegBufferTransform(buffer, ffmpegArgs) {
  */
 async function transcodeVoiceMemoToM4aBuffer(buffer) {
   if (!(await isFfmpegAvailable()) || !buffer || buffer.length === 0) {
-    return buffer;
+    return null;
   }
 
-  return runFfmpegBufferTransform(buffer, [
-    "-hide_banner",
-    "-loglevel",
-    "error",
-    "-i",
-    "pipe:0",
-    "-vn",
-    "-c:a",
-    "aac",
-    "-movflags",
-    "+faststart",
-    "-f",
-    "mp4",
-    "pipe:1",
-  ]);
+  const result = await runFfmpegBufferTransform(
+    buffer,
+    [
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-i",
+      "pipe:0",
+      "-vn",
+      "-c:a",
+      "aac",
+      "-movflags",
+      "+faststart",
+      "-f",
+      "mp4",
+      "pipe:1",
+    ],
+    { fallbackToInput: false },
+  );
+
+  if (!result || result.length < 16 || !isMp4FamilyBuffer(result)) {
+    return null;
+  }
+  return result;
 }
 
 /**
@@ -284,20 +294,24 @@ async function remuxVoiceMemoMp4Faststart(buffer) {
     return buffer;
   }
 
-  return runFfmpegBufferTransform(buffer, [
-    "-hide_banner",
-    "-loglevel",
-    "error",
-    "-i",
-    "pipe:0",
-    "-c",
-    "copy",
-    "-movflags",
-    "+faststart",
-    "-f",
-    "mp4",
-    "pipe:1",
-  ]);
+  return runFfmpegBufferTransform(
+    buffer,
+    [
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-i",
+      "pipe:0",
+      "-c",
+      "copy",
+      "-movflags",
+      "+faststart",
+      "-f",
+      "mp4",
+      "pipe:1",
+    ],
+    { fallbackToInput: true },
+  );
 }
 
 module.exports = {

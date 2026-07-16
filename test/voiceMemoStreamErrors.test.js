@@ -67,4 +67,5 @@ test("all voice memo error codes are unique 6-character identifiers", () => {
   for (const code of codes) {
     assert.match(code, /^[A-Z0-9]{6}$/);
   }
+  assert.equal(VOICE_MEMO_ERROR_CODES.TRANSCODE_FAILED, "VMTR14");
 });
