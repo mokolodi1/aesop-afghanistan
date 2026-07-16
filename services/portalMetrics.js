@@ -32,6 +32,7 @@ const INCIDENT_SERIES_KEYS = [
   "verifyError",
   "rateLimitHits",
   "portalClassGradeFail",
+  "portalApiError",
   "sheetsApiError",
   "sheetsApiThrottle",
   "driveApiThrottle",
@@ -39,6 +40,9 @@ const INCIDENT_SERIES_KEYS = [
 
 /** Page types excluded from user-facing HTTP error-rate totals (expected or login-specific noise). */
 const USER_FACING_ERROR_PAGE_TYPES = PAGE_TYPES.filter((pageType) => pageType !== "verify");
+
+/** Authenticated portal API areas whose 4xx/5xx responses are user-visible problems. */
+const PORTAL_API_ERROR_PAGE_TYPES = ["profile", "ding", "admin", "reviewer", "other"];
 
 /** @type {Map<string, number>} */
 const localBuckets = new Map();
@@ -187,6 +191,14 @@ function recordPortalClassGradeFail(count = 1) {
   recordMetric("portal_class_grade.fail", count);
 }
 
+function recordPortalApiError(pageType, statusCode) {
+  const type = PORTAL_API_ERROR_PAGE_TYPES.includes(pageType) ? pageType : "other";
+  recordMetric("portal.api_error", 1, {
+    pageType: type,
+    statusClass: statusClassForCode(statusCode),
+  });
+}
+
 function recordDriveFilesList(count = 1) {
   recordMetric("drive.files_list", count);
 }
@@ -321,6 +333,13 @@ function createPortalMetricsMiddleware(options = {}) {
       const statusCode = res.statusCode || 200;
       const latencyMs = Date.now() - startedAt;
       recordPageServe(pageType, statusCode, latencyMs);
+      if (
+        statusCode >= 400 &&
+        statusCode !== 429 &&
+        PORTAL_API_ERROR_PAGE_TYPES.includes(pageType)
+      ) {
+        recordPortalApiError(pageType, statusCode);
+      }
       if (statusCode >= 400) {
         recordRecentError({
           at: new Date().toISOString(),
@@ -809,6 +828,7 @@ async function getPortalStats(windowKey = "5m") {
     verifyError: "verify.error",
     rateLimitHits: "rate_limit.hit",
     portalClassGradeFail: "portal_class_grade.fail",
+    portalApiError: "portal.api_error",
     sheetsApiError: "sheets.api_error",
     sheetsApiThrottle: "sheets.api_throttle",
     driveApiThrottle: "drive.api_throttle",
@@ -825,6 +845,30 @@ async function getPortalStats(windowKey = "5m") {
     incidentSeries[key] = series;
     incidentTotals[key] = series.reduce((sum, p) => sum + p.v, 0);
   }
+
+  const portalApiErrorMap = seriesMapForMetric(
+    allRows,
+    "portal.api_error",
+    undefined,
+    chartBucketSeconds,
+  );
+  const portalApiErrorBackfillMap = seriesMapForMetric(
+    allRows,
+    "page.serve",
+    (labels) =>
+      PORTAL_API_ERROR_PAGE_TYPES.includes(labels.pageType) &&
+      (labels.statusClass === "4xx" || labels.statusClass === "5xx"),
+    chartBucketSeconds,
+  );
+  const portalApiErrorMergedMap = new Map();
+  for (const bucket of timeline) {
+    const key = bucket.toISOString();
+    const explicit = portalApiErrorMap.get(key) || 0;
+    const derived = portalApiErrorBackfillMap.get(key) || 0;
+    portalApiErrorMergedMap.set(key, explicit > 0 ? explicit : derived);
+  }
+  incidentSeries.portalApiError = mapToSeries(timeline, portalApiErrorMergedMap);
+  incidentTotals.portalApiError = incidentSeries.portalApiError.reduce((sum, p) => sum + p.v, 0);
 
   // Prefer verify.* when present; fall back to legacy login.* for older buckets.
   if (incidentTotals.verifySuccess === 0 && loginSuccessSeries.some((p) => p.v > 0)) {
@@ -882,6 +926,7 @@ module.exports = {
   WINDOW_MS,
   PAGE_TYPES,
   USER_FACING_ERROR_PAGE_TYPES,
+  PORTAL_API_ERROR_PAGE_TYPES,
   INCIDENT_SERIES_KEYS,
   RECENT_ERROR_LIMIT,
   recordMetric,
@@ -896,6 +941,7 @@ module.exports = {
   recordMagicLinkSendFailed,
   recordRateLimitHit,
   recordPortalClassGradeFail,
+  recordPortalApiError,
   recordDriveFilesList,
   recordDriveFilesGet,
   recordSheetsApiCall,

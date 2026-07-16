@@ -6749,6 +6749,7 @@ const STATS_INCIDENT_LABELS = {
   verifyError: 'Verify errors',
   rateLimitHits: 'Rate-limit hits (429)',
   portalClassGradeFail: 'Class/grade failures',
+  portalApiError: 'Portal API errors',
   sheetsApiError: 'Sheets API errors',
   sheetsApiThrottle: 'Sheets throttles (batch jobs)',
   driveApiThrottle: 'Drive throttles (batch jobs)',
@@ -6756,6 +6757,7 @@ const STATS_INCIDENT_LABELS = {
 
 /** User-visible problems that affect portal visitors. */
 const STATS_USER_INCIDENT_KEYS = [
+  'portalApiError',
   'rateLimitHits',
   'portalClassGradeFail',
   'magicLinkSendFailed',
@@ -6801,6 +6803,7 @@ const STATS_CHART_COLORS = {
   verifyError: '#c92a2a',
   rateLimitHits: '#9c36b5',
   portalClassGradeFail: '#364fc7',
+  portalApiError: '#d9480f',
   sheetsApiError: '#e03131',
   sheetsApiThrottle: '#be4bdb',
   driveApiThrottle: '#7950f2',
@@ -7088,23 +7091,17 @@ function PortalAdminStatsPage() {
   const [error, setError] = useState('');
   const [lastUpdated, setLastUpdated] = useState('');
   const [liveErrors, setLiveErrors] = useState([]);
-  const sessionStartedAtRef = useRef(Date.now());
   const seenErrorIdsRef = useRef(new Set());
 
   const mergeRecentErrors = useCallback((incoming) => {
     if (!Array.isArray(incoming) || incoming.length === 0) {
       return;
     }
-    const sessionStart = sessionStartedAtRef.current;
     const fresh = incoming.filter((entry) => {
       if (!entry || entry.id == null) {
         return false;
       }
       if (seenErrorIdsRef.current.has(entry.id)) {
-        return false;
-      }
-      const atMs = Date.parse(entry.at);
-      if (!Number.isFinite(atMs) || atMs < sessionStart) {
         return false;
       }
       return true;
@@ -7312,7 +7309,7 @@ function PortalAdminStatsPage() {
           <PortalStatsMetricCard
             label="User problems"
             value={problemIncidentTotal}
-            hint="Rate limits, send fails, class/grade, Sheets errors"
+            hint="API failures, rate limits, send fails, class/grade, Sheets errors"
             tone={problemIncidentTotal > 0 ? 'bad' : 'good'}
           />
           <PortalStatsMetricCard
@@ -7336,7 +7333,7 @@ function PortalAdminStatsPage() {
         <div className="portal-stats-dashboard-grid">
           <PortalStatsPanel
             title="User problems over time"
-            subtitle="Issues that affect portal visitors. Excludes magic-link verify failures and batch-job throttling."
+            subtitle="Issues that affect portal visitors — failed API calls, rate limits, and backend errors. Excludes magic-link verify failures and batch-job throttling."
             wide
           >
             <div className="portal-stats-chip-row">
@@ -7507,12 +7504,12 @@ function PortalAdminStatsPage() {
 
         <PortalStatsPanel
           title="Live error log"
-          subtitle="4xx/5xx responses since you opened this page (up to 1,000). Refreshes every 10s. With multiple Fly machines, each instance keeps its own buffer."
+          subtitle="Recent 4xx/5xx responses from this Fly machine's in-memory buffer (up to 1,000). Refreshes every 10s."
           wide
         >
           {liveErrors.length === 0 ? (
             <p className="portal-admin-hint portal-stats-error-log-empty">
-              No errors recorded yet this session. Leave this page open to collect them as they happen.
+              No errors in this machine's recent buffer. API failures still appear in User problems above when persisted to metrics.
             </p>
           ) : (
             <div className="portal-stats-error-log-wrap">
@@ -8914,10 +8911,15 @@ function reviewDraftIsSaveable(draft) {
   if (!draft) {
     return false;
   }
+  const hasSkipReason =
+    draft.suspectedAi === true ||
+    draft.unableToGrade === true ||
+    draft.technicalFlag === true;
+  if (hasSkipReason) {
+    return true;
+  }
   const hasEnglish = ENGLISH_LEVEL_SCORES.includes(String(draft.englishLevel ?? '').trim());
-  const hasAi = draft.suspectedAi === true;
-  const hasUnable = draft.unableToGrade === true;
-  if (!hasEnglish && !hasAi && !hasUnable) {
+  if (!hasEnglish) {
     return false;
   }
   return FITNESS_CRITERIA.every((criterion) =>
@@ -8984,6 +8986,57 @@ function shouldKeepReviewHelpOpen(relatedTarget, anchorRef, popoverRef) {
     anchorRef.current?.contains(relatedTarget) === true ||
     popoverRef.current?.contains(relatedTarget) === true
   );
+}
+
+function chainWheelScrollToTarget(deltaY, targetEl) {
+  if (!targetEl || deltaY === 0) {
+    return false;
+  }
+  const maxScrollTop = targetEl.scrollHeight - targetEl.clientHeight;
+  if (maxScrollTop <= 0) {
+    return false;
+  }
+  const nextScrollTop = Math.min(Math.max(targetEl.scrollTop + deltaY, 0), maxScrollTop);
+  if (nextScrollTop === targetEl.scrollTop) {
+    return false;
+  }
+  targetEl.scrollTop = nextScrollTop;
+  return true;
+}
+
+function useReviewHelpPopoverScrollChaining(innerRef) {
+  useEffect(() => {
+    const inner = innerRef.current;
+    if (!inner) {
+      return undefined;
+    }
+
+    const onWheel = (event) => {
+      const { scrollTop, scrollHeight, clientHeight } = inner;
+      const atTop = scrollTop <= 0;
+      const atBottom = scrollTop + clientHeight >= scrollHeight - 1;
+      const scrollingDown = event.deltaY > 0;
+      const scrollingUp = event.deltaY < 0;
+
+      if ((scrollingDown && !atBottom) || (scrollingUp && !atTop)) {
+        return;
+      }
+
+      const reviewDetail = document.querySelector('.portal-review-detail');
+      if (reviewDetail && chainWheelScrollToTarget(event.deltaY, reviewDetail)) {
+        event.preventDefault();
+        return;
+      }
+
+      const root = document.scrollingElement;
+      if (root && chainWheelScrollToTarget(event.deltaY, root)) {
+        event.preventDefault();
+      }
+    };
+
+    inner.addEventListener('wheel', onWheel, { passive: false });
+    return () => inner.removeEventListener('wheel', onWheel);
+  }, [innerRef]);
 }
 
 function useReviewHelpPopoverDismiss({ open, setOpen, anchorRef, popoverRef }) {
@@ -9113,7 +9166,10 @@ function PortalReviewRubricHelp({ rubricKey, t, variant = 'fitness' }) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef(null);
   const popoverRef = useRef(null);
+  const popoverScrollRef = useRef(null);
   const hoverEnabled = variant !== 'english';
+
+  useReviewHelpPopoverScrollChaining(popoverScrollRef);
 
   const title =
     variant === 'english'
@@ -9170,7 +9226,7 @@ function PortalReviewRubricHelp({ rubricKey, t, variant = 'fitness' }) {
       >
         <p className="portal-review-rubric-popover-title">{title}</p>
         {variant === 'english' ? (
-          <div className="portal-review-rubric-popover-scroll">
+          <div className="portal-review-rubric-popover-scroll" ref={popoverScrollRef}>
             <ul className="portal-review-rubric-list">
               {SCALE_1_TO_10_DESC.map((score) => (
                 <li key={score} className="portal-review-rubric-item">
