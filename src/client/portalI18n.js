@@ -280,7 +280,8 @@ const TRANSLATIONS = {
     'intent.faq': 'FAQs',
 
     'reviews.pageTitle': 'Review Applications',
-    'reviews.pageLead': 'Review essays, set English level, and score fitness for the program.',
+    'reviews.showInstructions': 'Show instructions',
+    'reviews.hideInstructions': 'Hide instructions',
     'reviews.loading': 'Loading applications…',
     'reviews.loadError': 'Could not load review assignments.',
     'reviews.loadTimeout': 'Loading review assignments timed out. Please try again.',
@@ -288,12 +289,14 @@ const TRANSLATIONS = {
     'reviews.accessDenied':
       'Reviewer access is required to view this page. Your AESOP ID must be marked as a reviewer on the People sheet (Reviewer column), then sign out and use a new login link.',
     'reviews.applicantId': 'AESOP ID',
+    'reviews.copyAesopId': 'Copy AESOP ID',
+    'reviews.copiedAesopId': 'Copied',
     'reviews.age': 'Age',
     'reviews.appliedLevel': 'Applied level',
     'reviews.notAvailable': 'Not listed',
     'reviews.essayLabel': 'Essay',
-    'reviews.essayWordCount': '{{count}} words',
-    'reviews.essayWordCountOne': '1 word',
+    'reviews.essayWordCount': 'Length: {{count}} words',
+    'reviews.essayWordCountOne': 'Length: 1 word',
     'reviews.essayWordCountShortHint': '~100–200 recommended',
     'reviews.essayWordCountHint':
       'We recommended about 100–200 words for essays, but this was not a hard requirement—especially for students with limited English who were doing their best with the words they had.',
@@ -304,8 +307,8 @@ const TRANSLATIONS = {
     'reviews.voiceMemoPromptLabel': 'Voice memo prompt',
     'reviews.promptLabel': 'Round 2 Prompt',
     'reviews.promptMissing': 'No Round 2 prompt on file for this applicant.',
-    'reviews.showTranslation': 'Show translation',
-    'reviews.hideTranslation': 'Hide translation',
+    'reviews.showTranslation': 'Show prompt translations',
+    'reviews.hideTranslation': 'Hide prompt translations',
     'reviews.showPrompt': 'Show prompt',
     'reviews.hidePrompt': 'Hide prompt',
     'reviews.playVoice': 'Play voice note',
@@ -368,19 +371,19 @@ const TRANSLATIONS = {
     'reviews.rubric.englishLevel.2':
       'Ideas: very simple. Sentences: short but readable. Vocabulary: limited. Usage: plurals, possessives, subject–verb agreement.',
     'reviews.rubric.englishLevel.3':
-      'Ideas: simple. Sentences: longer, but not complex. Vocabulary: limited. Usage: past, present progressive, and future tenses; can/could or other modal verbs, with some errors.',
+      'Ideas: simple. Sentences: longer, but not extremely complex. Vocabulary: limited. Usage: past, present progressive, and future tenses; can/could or other modal verbs, with some errors.',
     'reviews.rubric.englishLevel.4':
       'Ideas: slightly more complex. Sentences: complex, but with errors. Vocabulary: developing. Usage: comparatives and superlatives; adverbs.',
     'reviews.rubric.englishLevel.5':
-      'Ideas: more complex. Sentences: longer and more complex. Vocabulary: limited. Usage: perfect tenses and passive verbs, with some errors.',
-    'reviews.rubric.englishLevel.6':
       'Ideas: more complex. Sentences: longer and more complex. Vocabulary: functional and flexible. Usage: perfect tenses and passive verbs, with few or no errors.',
-    'reviews.rubric.englishLevel.7':
+    'reviews.rubric.englishLevel.6':
       'Ideas: sophisticated. Sentences: complex but sometimes formulaic. Vocabulary: functional and flexible. Usage: conditionals; relative clauses.',
-    'reviews.rubric.englishLevel.8':
+    'reviews.rubric.englishLevel.7':
       'Ideas: sophisticated. Sentences: complex and varied. Vocabulary: wide and varied. Usage: metaphors, similes, and idioms.',
-    'reviews.rubric.englishLevel.9':
+    'reviews.rubric.englishLevel.8':
       'Ideas: sophisticated. Sentences: complex and varied. Vocabulary: exceptionally rich. Usage: full range of grammatical constructions, with few errors; colloquialisms.',
+    'reviews.rubric.englishLevel.9':
+      'Approaching native-level fluency; very few noticeable errors.',
     'reviews.rubric.englishLevel.10': 'Could be mistaken for a native English speaker.',
     'reviews.scalePlaceholder': 'Select score…',
     'reviews.scalePlaceholderFor': 'Select {{field}} score',
@@ -391,10 +394,9 @@ const TRANSLATIONS = {
     'reviews.scoringAria': 'Review scoring',
     'reviews.studentList': 'Applicants',
     'reviews.nextStudent': 'Next student',
-    'reviews.savePending': 'Saving soon…',
-    'reviews.saveSaving': 'Saving…',
-    'reviews.saveSavedJustNow': 'Saved just now',
-    'reviews.saveSavedSecondsAgo': 'Saved {{seconds}} seconds ago',
+    'reviews.savePending': 'Saving soon (every 30 secs)',
+    'reviews.saveSaving': 'Saving...',
+    'reviews.saveSavedRecently': 'Saved <1 min ago',
     'reviews.saveSavedMinutesAgo': 'Saved {{minutes}} minute ago',
     'reviews.saveSavedMinutesAgoPlural': 'Saved {{minutes}} minutes ago',
     'reviews.saveStatusError': 'Save failed — will retry',
@@ -676,7 +678,8 @@ const TRANSLATIONS = {
     'intent.faq': 'سوالات متداول',
 
     'reviews.pageTitle': 'بررسی درخواست‌ها',
-    'reviews.pageLead': 'انشا را بخوانید، سطح انگلیسی را تعیین کنید، و تناسب با برنامه را نمره دهید.',
+    'reviews.showInstructions': 'نمایش دستورالعمل‌ها',
+    'reviews.hideInstructions': 'پنهان کردن دستورالعمل‌ها',
     'reviews.loading': 'در حال بارگذاری درخواست‌ها…',
     'reviews.loadError': 'بارگذاری وظایف بررسی ممکن نشد.',
     'reviews.loadTimeout': 'بارگذاری وظایف بررسی بیش از حد طول کشید. لطفاً دوباره تلاش کنید.',
@@ -684,12 +687,14 @@ const TRANSLATIONS = {
     'reviews.accessDenied':
       'برای دیدن این صفحه دسترسی بررسی‌کننده لازم است. AESOP ID شما باید در برگه People در ستون Reviewer علامت‌گذاری شود، سپس خارج شوید و با لینک ورود جدید وارد شوید.',
     'reviews.applicantId': 'AESOP ID',
+    'reviews.copyAesopId': 'کپی شناسه AESOP',
+    'reviews.copiedAesopId': 'کپی شد',
     'reviews.age': 'سن',
     'reviews.appliedLevel': 'سطح درخواستی',
     'reviews.notAvailable': 'ثبت نشده',
     'reviews.essayLabel': 'انشا',
-    'reviews.essayWordCount': '{{count}} کلمه',
-    'reviews.essayWordCountOne': '۱ کلمه',
+    'reviews.essayWordCount': 'طول: {{count}} کلمه',
+    'reviews.essayWordCountOne': 'طول: ۱ کلمه',
     'reviews.essayWordCountShortHint': 'حدود ۱۰۰–۲۰۰ توصیه شده',
     'reviews.essayWordCountHint':
       'ما حدود ۱۰۰ تا ۲۰۰ کلمه برای انشا توصیه می‌کردیم، اما این یک الزام سخت نبود—به‌ویژه برای شاگردانی که انگلیسی محدود داشتند و با تمام توان از واژه‌هایی که داشتند استفاده می‌کردند.',
@@ -700,8 +705,8 @@ const TRANSLATIONS = {
     'reviews.voiceMemoPromptLabel': 'سؤال یادداشت صوتی',
     'reviews.promptLabel': 'سؤال مرحلهٔ دوم',
     'reviews.promptMissing': 'سؤال مرحلهٔ دوم برای این متقاضی موجود نیست.',
-    'reviews.showTranslation': 'نمایش ترجمه',
-    'reviews.hideTranslation': 'پنهان کردن ترجمه',
+    'reviews.showTranslation': 'نمایش ترجمهٔ سؤالات',
+    'reviews.hideTranslation': 'پنهان کردن ترجمهٔ سؤالات',
     'reviews.showPrompt': 'نمایش سؤال',
     'reviews.hidePrompt': 'پنهان کردن سؤال',
     'reviews.playVoice': 'پخش یادداشت صوتی',
@@ -787,10 +792,9 @@ const TRANSLATIONS = {
     'reviews.scoringAria': 'نمره‌دهی بررسی',
     'reviews.studentList': 'متقاضیان',
     'reviews.nextStudent': 'متقاضی بعدی',
-    'reviews.savePending': 'به‌زودی ذخیره می‌شود…',
-    'reviews.saveSaving': 'در حال ذخیره…',
-    'reviews.saveSavedJustNow': 'همین الان ذخیره شد',
-    'reviews.saveSavedSecondsAgo': '{{seconds}} ثانیه پیش ذخیره شد',
+    'reviews.savePending': 'به‌زودی ذخیره می‌شود (هر ۳۰ ثانیه)',
+    'reviews.saveSaving': 'در حال ذخیره...',
+    'reviews.saveSavedRecently': 'کمتر از ۱ دقیقه پیش ذخیره شد',
     'reviews.saveSavedMinutesAgo': '{{minutes}} دقیقه پیش ذخیره شد',
     'reviews.saveSavedMinutesAgoPlural': '{{minutes}} دقیقه پیش ذخیره شد',
     'reviews.saveStatusError': 'ذخیره نشد — دوباره تلاش می‌شود',

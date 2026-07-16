@@ -1,4 +1,5 @@
 import React, { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { createRoot } from 'react-dom/client';
 import {
   isValidAfghanistanPhoneNumber,
@@ -15,6 +16,17 @@ import { paragraphDirection } from '../shared/emailTextDirection.js';
 import { hasNonLatinLetters, stripNonLatinLetters } from '../shared/latinText.js';
 import { countWords } from '../shared/countWords.js';
 import { REVIEWER_ESSAY_PROMPT } from '../shared/reviewerPrompts.js';
+import {
+  REVIEW_INSTRUCTIONS,
+  ENGLISH_LEVEL_RUBRIC,
+  AI_WARNING_SIGNS,
+  AI_ESSAY_EXAMPLES,
+  TRAINING_ESSAY_EXAMPLES,
+  FITNESS_CRITERIA_RUBRIC,
+  EXEMPLAR_ESSAYS,
+  PRACTICE_ESSAYS,
+  PRACTICE_SCORE_NOTES,
+} from '../shared/reviewInstructions.js';
 import { voiceMemoExtensionFromFileName } from '../../utils/voiceMemoExtensions.js';
 import {
   getStoredPortalLocale,
@@ -8614,18 +8626,32 @@ function PortalReviewScaleSelect({
   );
 }
 
-function PortalReviewRubricHelp({ rubricKey, t, variant = 'fitness' }) {
-  const [open, setOpen] = useState(false);
-  const wrapRef = useRef(null);
+const REVIEW_HELP_POPOVER_GAP_PX = 8;
+const REVIEW_HELP_POPOVER_VIEWPORT_PADDING_PX = 16;
 
+function shouldKeepReviewHelpOpen(relatedTarget, anchorRef, popoverRef) {
+  if (!relatedTarget || typeof relatedTarget !== 'object') {
+    return false;
+  }
+  return (
+    anchorRef.current?.contains(relatedTarget) === true ||
+    popoverRef.current?.contains(relatedTarget) === true
+  );
+}
+
+function useReviewHelpPopoverDismiss({ open, setOpen, anchorRef, popoverRef }) {
   useEffect(() => {
     if (!open) {
       return undefined;
     }
     const onDocumentPointerDown = (event) => {
-      if (!wrapRef.current?.contains(event.target)) {
-        setOpen(false);
+      if (
+        anchorRef.current?.contains(event.target) ||
+        popoverRef.current?.contains(event.target)
+      ) {
+        return;
       }
+      setOpen(false);
     };
     const onEscape = (event) => {
       if (event.key === 'Escape') {
@@ -8638,19 +8664,135 @@ function PortalReviewRubricHelp({ rubricKey, t, variant = 'fitness' }) {
       document.removeEventListener('mousedown', onDocumentPointerDown);
       document.removeEventListener('keydown', onEscape);
     };
-  }, [open]);
+  }, [open, setOpen, anchorRef, popoverRef]);
+}
+
+function useAnchoredReviewPopover(open, anchorRef, widthPx) {
+  const popoverRef = useRef(null);
+  const [position, setPosition] = useState(null);
+
+  const updatePosition = useCallback(() => {
+    if (!anchorRef.current) {
+      setPosition(null);
+      return;
+    }
+    const rect = anchorRef.current.getBoundingClientRect();
+    const maxWidth = Math.min(
+      widthPx,
+      window.innerWidth - REVIEW_HELP_POPOVER_VIEWPORT_PADDING_PX * 2,
+    );
+    let left = rect.left;
+    if (left + maxWidth > window.innerWidth - REVIEW_HELP_POPOVER_VIEWPORT_PADDING_PX) {
+      left = window.innerWidth - REVIEW_HELP_POPOVER_VIEWPORT_PADDING_PX - maxWidth;
+    }
+    left = Math.max(REVIEW_HELP_POPOVER_VIEWPORT_PADDING_PX, left);
+    setPosition({
+      top: rect.bottom + REVIEW_HELP_POPOVER_GAP_PX,
+      left,
+      width: maxWidth,
+      arrowLeft: Math.min(Math.max(rect.left + rect.width / 2 - left - 5, 10), maxWidth - 20),
+    });
+  }, [anchorRef, widthPx]);
+
+  useEffect(() => {
+    if (!open) {
+      setPosition(null);
+      return undefined;
+    }
+    updatePosition();
+    window.addEventListener('resize', updatePosition);
+    window.addEventListener('scroll', updatePosition, true);
+    return () => {
+      window.removeEventListener('resize', updatePosition);
+      window.removeEventListener('scroll', updatePosition, true);
+    };
+  }, [open, updatePosition]);
+
+  return { popoverRef, position };
+}
+
+function PortalReviewAnchoredPopover({
+  open,
+  setOpen,
+  anchorRef,
+  popoverRef: externalPopoverRef,
+  className,
+  children,
+  widthPx = 288,
+  maxHeight,
+  onMouseEnter,
+  onMouseLeave,
+}) {
+  const { popoverRef, position } = useAnchoredReviewPopover(open, anchorRef, widthPx);
+
+  useReviewHelpPopoverDismiss({ open, setOpen, anchorRef, popoverRef });
+
+  const setPopoverNode = useCallback(
+    (node) => {
+      popoverRef.current = node;
+      if (externalPopoverRef) {
+        externalPopoverRef.current = node;
+      }
+    },
+    [popoverRef, externalPopoverRef],
+  );
+
+  if (!open || !position) {
+    return null;
+  }
+
+  return createPortal(
+    <div
+      ref={setPopoverNode}
+      className={className}
+      role="tooltip"
+      style={{
+        top: `${position.top}px`,
+        left: `${position.left}px`,
+        width: `${position.width}px`,
+        ...(maxHeight ? { maxHeight } : {}),
+        '--portal-review-popover-arrow-left': `${position.arrowLeft}px`,
+      }}
+      onMouseEnter={onMouseEnter}
+      onMouseLeave={onMouseLeave}
+    >
+      {children}
+    </div>,
+    document.body,
+  );
+}
+
+function PortalReviewRubricHelp({ rubricKey, t, variant = 'fitness' }) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef(null);
+  const popoverRef = useRef(null);
+  const hoverEnabled = variant !== 'english';
 
   const title =
     variant === 'english'
       ? t('reviews.rubric.englishLevel.title')
       : t(`reviews.rubric.${rubricKey}.title`);
 
+  const popoverClassName = `portal-review-rubric-popover portal-review-rubric-popover--anchored${
+    variant === 'english' ? ' portal-review-rubric-popover--english' : ''
+  }`;
+
+  const handleMouseLeave = (event) => {
+    if (!hoverEnabled) {
+      return;
+    }
+    if (shouldKeepReviewHelpOpen(event.relatedTarget, wrapRef, popoverRef)) {
+      return;
+    }
+    setOpen(false);
+  };
+
   return (
     <span
       ref={wrapRef}
       className="portal-review-rubric-help"
-      onMouseEnter={variant === 'english' ? undefined : () => setOpen(true)}
-      onMouseLeave={variant === 'english' ? undefined : () => setOpen(false)}
+      onMouseEnter={hoverEnabled ? () => setOpen(true) : undefined}
+      onMouseLeave={hoverEnabled ? handleMouseLeave : undefined}
     >
       <button
         type="button"
@@ -8668,46 +8810,49 @@ function PortalReviewRubricHelp({ rubricKey, t, variant = 'fitness' }) {
           <path fill="currentColor" d="M7.1 6.8h1.4V5.4H7.1v1.4zm0 3.8h1.4V7.8H7.1v2.8z" />
         </svg>
       </button>
-      {open ? (
-        <div
-          className={`portal-review-rubric-popover${
-            variant === 'english' ? ' portal-review-rubric-popover--english' : ''
-          }`}
-          role="tooltip"
-        >
-          <p className="portal-review-rubric-popover-title">{title}</p>
-          {variant === 'english' ? (
-            <div className="portal-review-rubric-popover-scroll">
-              <ul className="portal-review-rubric-list">
-                {SCALE_0_TO_10_DESC.map((score) => (
-                  <li key={score} className="portal-review-rubric-item">
-                    <div className="portal-review-rubric-item-head">
-                      <span className="portal-review-rubric-tier-score">{score}</span>
-                    </div>
-                    <p className="portal-review-rubric-item-text">
-                      {t(`reviews.rubric.englishLevel.${score}`)}
-                    </p>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ) : (
+      <PortalReviewAnchoredPopover
+        open={open}
+        setOpen={setOpen}
+        anchorRef={wrapRef}
+        popoverRef={popoverRef}
+        className={popoverClassName}
+        widthPx={variant === 'english' ? 416 : 288}
+        maxHeight={variant === 'english' ? 'min(60vh, 22rem)' : undefined}
+        onMouseEnter={hoverEnabled ? () => setOpen(true) : undefined}
+        onMouseLeave={hoverEnabled ? handleMouseLeave : undefined}
+      >
+        <p className="portal-review-rubric-popover-title">{title}</p>
+        {variant === 'english' ? (
+          <div className="portal-review-rubric-popover-scroll">
             <ul className="portal-review-rubric-list">
-              {REVIEW_RUBRIC_TIERS.map((tier) => (
-                <li key={tier.tierKey} className="portal-review-rubric-item">
+              {SCALE_0_TO_10_DESC.map((score) => (
+                <li key={score} className="portal-review-rubric-item">
                   <div className="portal-review-rubric-item-head">
-                    <span className="portal-review-rubric-tier-label">{t(tier.labelKey)}</span>
-                    <span className="portal-review-rubric-tier-score">{tier.score}</span>
+                    <span className="portal-review-rubric-tier-score">{score}</span>
                   </div>
                   <p className="portal-review-rubric-item-text">
-                    {t(`reviews.rubric.${rubricKey}.${tier.tierKey}`)}
+                    {t(`reviews.rubric.englishLevel.${score}`)}
                   </p>
                 </li>
               ))}
             </ul>
-          )}
-        </div>
-      ) : null}
+          </div>
+        ) : (
+          <ul className="portal-review-rubric-list">
+            {REVIEW_RUBRIC_TIERS.map((tier) => (
+              <li key={tier.tierKey} className="portal-review-rubric-item">
+                <div className="portal-review-rubric-item-head">
+                  <span className="portal-review-rubric-tier-label">{t(tier.labelKey)}</span>
+                  <span className="portal-review-rubric-tier-score">{tier.score}</span>
+                </div>
+                <p className="portal-review-rubric-item-text">
+                  {t(`reviews.rubric.${rubricKey}.${tier.tierKey}`)}
+                </p>
+              </li>
+            ))}
+          </ul>
+        )}
+      </PortalReviewAnchoredPopover>
     </span>
   );
 }
@@ -8715,28 +8860,6 @@ function PortalReviewRubricHelp({ rubricKey, t, variant = 'fitness' }) {
 function PortalReviewSectionHelp({ title, helpText, t }) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef(null);
-
-  useEffect(() => {
-    if (!open) {
-      return undefined;
-    }
-    const onDocumentPointerDown = (event) => {
-      if (!wrapRef.current?.contains(event.target)) {
-        setOpen(false);
-      }
-    };
-    const onEscape = (event) => {
-      if (event.key === 'Escape') {
-        setOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', onDocumentPointerDown);
-    document.addEventListener('keydown', onEscape);
-    return () => {
-      document.removeEventListener('mousedown', onDocumentPointerDown);
-      document.removeEventListener('keydown', onEscape);
-    };
-  }, [open]);
 
   return (
     <span ref={wrapRef} className="portal-review-rubric-help">
@@ -8756,11 +8879,15 @@ function PortalReviewSectionHelp({ title, helpText, t }) {
           <path fill="currentColor" d="M7.1 6.8h1.4V5.4H7.1v1.4zm0 3.8h1.4V7.8H7.1v2.8z" />
         </svg>
       </button>
-      {open ? (
-        <div className="portal-review-rubric-popover portal-review-section-help-popover" role="tooltip">
-          <p className="portal-review-section-help-text">{helpText}</p>
-        </div>
-      ) : null}
+      <PortalReviewAnchoredPopover
+        open={open}
+        setOpen={setOpen}
+        anchorRef={wrapRef}
+        className="portal-review-rubric-popover portal-review-rubric-popover--anchored portal-review-section-help-popover"
+        widthPx={288}
+      >
+        <p className="portal-review-section-help-text">{helpText}</p>
+      </PortalReviewAnchoredPopover>
     </span>
   );
 }
@@ -8820,11 +8947,8 @@ function formatReviewSaveStatusLabel({ saveStatus, lastSavedAt, nowMs, t }) {
   }
   if (saveStatus === 'saved' && lastSavedAt) {
     const elapsedSeconds = Math.max(0, Math.floor((nowMs - lastSavedAt) / 1000));
-    if (elapsedSeconds < 5) {
-      return t('reviews.saveSavedJustNow');
-    }
     if (elapsedSeconds < 60) {
-      return t('reviews.saveSavedSecondsAgo', { seconds: elapsedSeconds });
+      return t('reviews.saveSavedRecently');
     }
     const elapsedMinutes = Math.floor(elapsedSeconds / 60);
     if (elapsedMinutes === 1) {
@@ -8935,26 +9059,14 @@ function useReviewAutoSave({ drafts, onSaveOne }) {
       const timerId = window.setTimeout(() => {
         debounceTimersRef.current.delete(applicantId);
         flushApplicant(applicantId);
-      }, 1500);
+      }, 30000);
       debounceTimersRef.current.set(applicantId, timerId);
     },
     [flushApplicant],
   );
 
   useEffect(() => {
-    const intervalId = window.setInterval(() => {
-      for (const applicantId of Array.from(dirtyRef.current)) {
-        const timer = debounceTimersRef.current.get(applicantId);
-        if (timer) {
-          window.clearTimeout(timer);
-          debounceTimersRef.current.delete(applicantId);
-        }
-        flushApplicant(applicantId);
-      }
-    }, 30000);
-
     return () => {
-      window.clearInterval(intervalId);
       for (const timer of debounceTimersRef.current.values()) {
         window.clearTimeout(timer);
       }
@@ -9156,35 +9268,9 @@ function PortalReviewEssayWordCount({ essay, t }) {
   const countLabel =
     wordCount === 1 ? t('reviews.essayWordCountOne') : t('reviews.essayWordCount', { count: wordCount });
 
-  useEffect(() => {
-    if (!hintOpen) {
-      return undefined;
-    }
-    const onDocumentPointerDown = (event) => {
-      if (!wrapRef.current?.contains(event.target)) {
-        setHintOpen(false);
-      }
-    };
-    const onEscape = (event) => {
-      if (event.key === 'Escape') {
-        setHintOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', onDocumentPointerDown);
-    document.addEventListener('keydown', onEscape);
-    return () => {
-      document.removeEventListener('mousedown', onDocumentPointerDown);
-      document.removeEventListener('keydown', onEscape);
-    };
-  }, [hintOpen]);
-
   return (
     <div className="portal-review-essay-word-count">
       <span className="portal-review-essay-word-count-value">{countLabel}</span>
-      <span className="portal-review-essay-word-count-sep" aria-hidden="true">
-        ·
-      </span>
-      <span className="portal-review-essay-word-count-hint-text">{t('reviews.essayWordCountShortHint')}</span>
       <span ref={wrapRef} className="portal-review-rubric-help portal-review-essay-word-count-help">
         <button
           type="button"
@@ -9202,13 +9288,76 @@ function PortalReviewEssayWordCount({ essay, t }) {
             <path fill="currentColor" d="M7.1 6.8h1.4V5.4H7.1v1.4zm0 3.8h1.4V7.8H7.1v2.8z" />
           </svg>
         </button>
-        {hintOpen ? (
-          <div className="portal-review-rubric-popover portal-review-essay-word-count-popover" role="tooltip">
-            <p className="portal-review-essay-word-count-popover-text">{t('reviews.essayWordCountHint')}</p>
-          </div>
-        ) : null}
+        <PortalReviewAnchoredPopover
+          open={hintOpen}
+          setOpen={setHintOpen}
+          anchorRef={wrapRef}
+          className="portal-review-rubric-popover portal-review-rubric-popover--anchored portal-review-essay-word-count-popover"
+          widthPx={280}
+        >
+          <p className="portal-review-essay-word-count-popover-text">{t('reviews.essayWordCountHint')}</p>
+        </PortalReviewAnchoredPopover>
       </span>
     </div>
+  );
+}
+
+function PortalReviewCopyAesopIdButton({ aesopId, t }) {
+  const [copied, setCopied] = useState(false);
+  const copyResetTimerRef = useRef(null);
+  const idText = String(aesopId || '').trim();
+
+  useEffect(() => {
+    return () => {
+      if (copyResetTimerRef.current) {
+        clearTimeout(copyResetTimerRef.current);
+      }
+    };
+  }, []);
+
+  const copyAesopId = useCallback(async () => {
+    if (!idText) {
+      return;
+    }
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(idText);
+      } else {
+        const textarea = document.createElement('textarea');
+        textarea.value = idText;
+        textarea.setAttribute('readonly', '');
+        textarea.style.position = 'fixed';
+        textarea.style.left = '-9999px';
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textarea);
+      }
+      setCopied(true);
+      if (copyResetTimerRef.current) {
+        clearTimeout(copyResetTimerRef.current);
+      }
+      copyResetTimerRef.current = setTimeout(() => {
+        setCopied(false);
+        copyResetTimerRef.current = null;
+      }, 2000);
+    } catch (err) {
+      console.warn('Failed to copy AESOP ID', err);
+    }
+  }, [idText]);
+
+  if (!idText) {
+    return null;
+  }
+
+  return (
+    <button
+      type="button"
+      className="portal-review-copy-aesop-id-btn"
+      onClick={copyAesopId}
+    >
+      {copied ? t('reviews.copiedAesopId') : t('reviews.copyAesopId')}
+    </button>
   );
 }
 
@@ -9244,6 +9393,7 @@ function PortalReviewCard({
           <span className="portal-review-card-age">
             {t('reviews.age')}: {ageDisplay}
           </span>
+          <PortalReviewCopyAesopIdButton aesopId={assignment.applicantId} t={t} />
           <div className="portal-review-card-header-actions">
             <button
               type="button"
@@ -9398,6 +9548,212 @@ function PortalReviewCard({
   );
 }
 
+function PortalReviewInstructionsEnglishDetail({ detail }) {
+  if (!detail) {
+    return null;
+  }
+  return (
+    <ul className="portal-review-instructions-detail-list">
+      {detail.ideas ? (
+        <li>
+          <strong>Level of ideas expressed:</strong> {detail.ideas}
+        </li>
+      ) : null}
+      {detail.sentences ? (
+        <li>
+          <strong>Sentences:</strong> {detail.sentences}
+        </li>
+      ) : null}
+      {detail.vocabulary ? (
+        <li>
+          <strong>Vocabulary:</strong> {detail.vocabulary}
+        </li>
+      ) : null}
+      {detail.usage?.length ? (
+        <li>
+          <strong>Usage of:</strong>
+          <ul>
+            {detail.usage.map((item) => (
+              <li key={item}>{item}</li>
+            ))}
+          </ul>
+        </li>
+      ) : null}
+    </ul>
+  );
+}
+
+function PortalReviewInstructionsEssay({ text, className = '' }) {
+  return (
+    <div className={`portal-review-instructions-essay${className ? ` ${className}` : ''}`} dir="auto">
+      {text}
+    </div>
+  );
+}
+
+function PortalReviewInstructionsPanel() {
+  return (
+    <article className="portal-review-instructions" aria-label={REVIEW_INSTRUCTIONS.title}>
+      <header className="portal-review-instructions-header">
+        <h3 className="portal-review-instructions-title">{REVIEW_INSTRUCTIONS.title}</h3>
+        <p className="portal-review-instructions-note">{REVIEW_INSTRUCTIONS.scaleNote}</p>
+      </header>
+
+      <section className="portal-review-instructions-section">
+        <h4 className="portal-review-instructions-section-title">English Level</h4>
+        <div className="portal-review-instructions-table-wrap">
+          <table className="portal-review-instructions-table">
+            <thead>
+              <tr>
+                <th scope="col">Score</th>
+                <th scope="col">Definition</th>
+              </tr>
+            </thead>
+            <tbody>
+              {ENGLISH_LEVEL_RUBRIC.map((row) => (
+                <tr key={row.score}>
+                  <th scope="row">{row.score}</th>
+                  <td>
+                    {row.summary ? <p>{row.summary}</p> : null}
+                    <PortalReviewInstructionsEnglishDetail detail={row.detail} />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section className="portal-review-instructions-section">
+        <h4 className="portal-review-instructions-section-title">Signs of possible AI use</h4>
+        <ul className="portal-review-instructions-list">
+          {AI_WARNING_SIGNS.map((sign) => (
+            <li key={sign}>{sign}</li>
+          ))}
+        </ul>
+        <p className="portal-review-instructions-callout">
+          If multiple signs are present, consider flagging the essay for AI.
+        </p>
+      </section>
+
+      <section className="portal-review-instructions-section">
+        <h4 className="portal-review-instructions-section-title">Some examples of AI-generated essays</h4>
+        {AI_ESSAY_EXAMPLES.map((essay, index) => (
+          <PortalReviewInstructionsEssay key={`ai-${index}`} text={essay} />
+        ))}
+      </section>
+
+      <section className="portal-review-instructions-section">
+        <h4 className="portal-review-instructions-section-title">Training examples</h4>
+        {TRAINING_ESSAY_EXAMPLES.map((example) => (
+          <div key={example.label} className="portal-review-instructions-example">
+            <h5 className="portal-review-instructions-example-title">
+              {example.label}
+              <span className="portal-review-instructions-example-score">
+                Portal score {example.score}
+              </span>
+            </h5>
+            <PortalReviewInstructionsEssay text={example.text} />
+          </div>
+        ))}
+      </section>
+
+      <section className="portal-review-instructions-section">
+        <h4 className="portal-review-instructions-section-title">Applicant evaluation</h4>
+        <p className="portal-review-instructions-subtitle">
+          Applicant evaluation (based on essay and voice note)
+        </p>
+        {FITNESS_CRITERIA_RUBRIC.map((criterion) => (
+          <div key={criterion.id} className="portal-review-instructions-criterion">
+            <h5 className="portal-review-instructions-criterion-title">{criterion.title}</h5>
+            <div className="portal-review-instructions-table-wrap">
+              <table className="portal-review-instructions-table portal-review-instructions-table--compact">
+                <thead>
+                  <tr>
+                    <th scope="col">Criterion</th>
+                    <th scope="col">Highest (10)</th>
+                    <th scope="col">Adequate (5)</th>
+                    <th scope="col">Low (0)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <th scope="row">{criterion.title}</th>
+                    {criterion.tiers.map((tier) => (
+                      <td key={tier.score}>{tier.text}</td>
+                    ))}
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ))}
+      </section>
+
+      <section className="portal-review-instructions-section">
+        <h4 className="portal-review-instructions-section-title">Examples of scored essays</h4>
+        {EXEMPLAR_ESSAYS.map((example) => (
+          <div key={example.band} className="portal-review-instructions-example">
+            <h5 className="portal-review-instructions-example-title">{example.band}</h5>
+            {example.criteria.length ? (
+              <ul className="portal-review-instructions-list portal-review-instructions-list--compact">
+                {example.criteria.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
+            ) : null}
+            <PortalReviewInstructionsEssay text={example.text} />
+          </div>
+        ))}
+      </section>
+
+      <section className="portal-review-instructions-section">
+        <h4 className="portal-review-instructions-section-title">Further practice</h4>
+        <p className="portal-review-instructions-subtitle">
+          Read through these essays and think about how you would score them. Suggested scores follow
+          in the next section.
+        </p>
+        {PRACTICE_ESSAYS.map((essay) => (
+          <div key={essay.id} className="portal-review-instructions-example">
+            <h5 className="portal-review-instructions-example-title">Essay {essay.id}</h5>
+            <PortalReviewInstructionsEssay text={essay.text} />
+          </div>
+        ))}
+      </section>
+
+      <section className="portal-review-instructions-section">
+        <h4 className="portal-review-instructions-section-title">Suggested scores</h4>
+        {PRACTICE_SCORE_NOTES.map((note) => (
+          <div key={note.id} className="portal-review-instructions-score-note">
+            <h5 className="portal-review-instructions-example-title">Essay {note.id}</h5>
+            <dl className="portal-review-instructions-score-dl">
+              <div>
+                <dt>English Level</dt>
+                <dd>
+                  <strong>{note.englishLevel}</strong>
+                  <p>{note.englishNote}</p>
+                </dd>
+              </div>
+              <div>
+                <dt>Instruction Following</dt>
+                <dd>{note.instructionFollowing}</dd>
+              </div>
+              <div>
+                <dt>Independent / Original Thinking</dt>
+                <dd>{note.originalThinking}</dd>
+              </div>
+              <div>
+                <dt>Demonstration of Character</dt>
+                <dd>{note.character}</dd>
+              </div>
+            </dl>
+          </div>
+        ))}
+      </section>
+    </article>
+  );
+}
+
 function PortalReviewStudentList({ assignments, drafts, selectedApplicantId, onSelect, saveStatus, lastSavedAt, t }) {
   return (
     <aside className="portal-review-sidebar" aria-label={t('reviews.studentList')}>
@@ -9451,7 +9807,17 @@ function PortalReviewApplicationsPage() {
   const [drafts, setDrafts] = useState({});
   const [selectedApplicantId, setSelectedApplicantId] = useState('');
   const [promptHidden, setPromptHidden] = useState(false);
+  const [instructionsOpen, setInstructionsOpen] = useState(false);
   const reviewDetailRef = useRef(null);
+
+  const toggleInstructionsOpen = useCallback(() => {
+    setInstructionsOpen((current) => !current);
+  }, []);
+
+  const handleSelectApplicant = useCallback((applicantId) => {
+    setSelectedApplicantId(applicantId);
+    setInstructionsOpen(false);
+  }, []);
 
   const togglePromptHidden = useCallback(() => {
     setPromptHidden((current) => !current);
@@ -9528,9 +9894,8 @@ function PortalReviewApplicationsPage() {
           };
         }
         setDrafts(nextDrafts);
-        const firstId = rows[0]?.applicantId ? String(rows[0].applicantId) : '';
         setSelectedApplicantId((current) =>
-          current && rows.some((row) => row.applicantId === current) ? current : firstId,
+          current && rows.some((row) => row.applicantId === current) ? current : '',
         );
       })
       .catch((err) => {
@@ -9582,6 +9947,7 @@ function PortalReviewApplicationsPage() {
       return;
     }
     setSelectedApplicantId(assignments[selectedIndex + 1].applicantId);
+    setInstructionsOpen(false);
   }, [assignments, selectedIndex]);
 
   useEffect(() => {
@@ -9593,6 +9959,7 @@ function PortalReviewApplicationsPage() {
     reviewDraftIsSaveable(selectedDraft) &&
     selectedIndex >= 0 &&
     selectedIndex < assignments.length - 1;
+  const showInstructions = !selectedAssignment || instructionsOpen;
 
   return (
     <PortalLayout>
@@ -9604,8 +9971,21 @@ function PortalReviewApplicationsPage() {
           showEditDingLink={!readPortalIsApplied()}
         />
 
-        <h2 className="portal-page-title">{t('reviews.pageTitle')}</h2>
-        <p className="portal-page-lead">{t('reviews.pageLead')}</p>
+        <div className="portal-review-page-header">
+          <div className="portal-review-page-header-text">
+            <h2 className="portal-page-title">{t('reviews.pageTitle')}</h2>
+          </div>
+          {signedIn && isReviewer && !loading && !error && assignments.length > 0 && selectedAssignment ? (
+            <button
+              type="button"
+              className="portal-review-instructions-toggle"
+              onClick={toggleInstructionsOpen}
+              aria-pressed={instructionsOpen}
+            >
+              {instructionsOpen ? t('reviews.hideInstructions') : t('reviews.showInstructions')}
+            </button>
+          ) : null}
+        </div>
 
         {!signedIn ? (
           <div className="portal-session-banner" role="status">
@@ -9642,13 +10022,15 @@ function PortalReviewApplicationsPage() {
                   assignments={assignments}
                   drafts={drafts}
                   selectedApplicantId={selectedApplicantId}
-                  onSelect={setSelectedApplicantId}
+                  onSelect={handleSelectApplicant}
                   saveStatus={saveStatus}
                   lastSavedAt={lastSavedAt}
                   t={t}
                 />
                 <div className="portal-review-detail" ref={reviewDetailRef}>
-                  {selectedAssignment ? (
+                  {showInstructions ? (
+                    <PortalReviewInstructionsPanel />
+                  ) : selectedAssignment ? (
                     <PortalReviewCard
                       key={selectedApplicantId}
                       assignment={selectedAssignment}
