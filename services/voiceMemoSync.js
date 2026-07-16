@@ -4,7 +4,6 @@ const { formatEasternSheetTimestamp } = require("../utils/dingSheetTime");
 const {
   VOICE_MEMO_MIN_DURATION_SEC,
   VOICE_MEMO_MAX_DURATION_SEC,
-  VOICE_MEMO_OVERACHIEVE_SHEET_SECONDS,
   classifyVoiceMemoDuration,
   formatVoiceMemoDurationLabel,
   sheetVoiceMemoLengthSeconds,
@@ -977,15 +976,18 @@ async function runVoiceMemoRound2Sync(options = {}) {
   const acceptedValue = sheetCfg.acceptedValue.toLowerCase();
   const submittedValue = sheetCfg.submittedValue;
 
-  // Known lengths from Postgres (previous probes + browser-corrected values) let us
-  // fill the sheet without re-downloading files from Drive.
+  // Refresh sheet lengths from Postgres first (mirror + browser-corrected values),
+  // then probe Drive only for memos that have not been cached yet.
   /** @type {Map<string, number>} */
   let cachedDurationByFileId = new Map();
+  /** @type {Map<string, { fileId: string|null, durationSeconds: number }>} */
+  let cachedDurationByAesopId = new Map();
   if (lengthEnabled && isDatabaseEnabled()) {
     try {
       const cached = await getApplicantVoiceMemoDurationsMapFromDb();
       if (cached) {
         cachedDurationByFileId = cached.byFileId;
+        cachedDurationByAesopId = cached.byAesopId;
       }
     } catch (error) {
       console.warn(
@@ -1056,34 +1058,26 @@ async function runVoiceMemoRound2Sync(options = {}) {
       currentLinks !== desiredLinks ||
       currentDate !== desiredDate;
 
-    // Keep the sheet length only while its Voice note link still points at the same
-    // Drive file; a changed file id means the recording was replaced, so recompute.
     let needsLength = false;
     let lengthSeconds = null;
     let lengthFromProbe = false;
     let currentLengthRaw = "";
     if (lengthEnabled) {
       currentLengthRaw = String(rowData[lengthColIdx] ?? "").trim();
-      const sheetLengthSeconds = parseVoiceMemoSheetLengthSeconds(currentLengthRaw);
-      const sheetLinkFileId = extractDriveFileIdFromLink(currentLinks);
-      const sheetLengthIsCurrent =
-        sheetLengthSeconds != null && sheetLinkFileId === memo.fileId;
-      if (!sheetLengthIsCurrent) {
-        needsLength = true;
-        const cached = cachedDurationByFileId.get(memo.fileId);
-        if (isTrustedVoiceMemoCachedDurationSeconds(cached)) {
-          lengthSeconds = Math.round(cached);
-        } else {
-          probeFileIds.add(memo.fileId);
-          lengthFromProbe = true;
-        }
+      needsLength = true;
+      const cached = cachedDurationByFileId.get(memo.fileId);
+      const cachedByApplicant = cachedDurationByAesopId.get(aesopId.trim().toLowerCase());
+      if (isTrustedVoiceMemoCachedDurationSeconds(cached)) {
+        lengthSeconds = Math.round(cached);
       } else if (
-        classifyVoiceMemoDuration(sheetLengthSeconds, durationLimits) === "too_long" &&
-        sheetLengthSeconds !== VOICE_MEMO_OVERACHIEVE_SHEET_SECONDS
+        cachedByApplicant &&
+        cachedByApplicant.fileId === memo.fileId &&
+        isTrustedVoiceMemoCachedDurationSeconds(cachedByApplicant.durationSeconds)
       ) {
-        // Normalize legacy over-max lengths to the fixed sheet sentinel (300).
-        needsLength = true;
-        lengthSeconds = VOICE_MEMO_OVERACHIEVE_SHEET_SECONDS;
+        lengthSeconds = Math.round(cachedByApplicant.durationSeconds);
+      } else {
+        probeFileIds.add(memo.fileId);
+        lengthFromProbe = true;
       }
     }
 
@@ -1110,6 +1104,7 @@ async function runVoiceMemoRound2Sync(options = {}) {
   // Release the full sheet values payload before Drive downloads / Sheets writes.
   dataRows = [];
   cachedDurationByFileId = new Map();
+  cachedDurationByAesopId = new Map();
   applicantIds.clear();
 
   /** @type {Map<string, number|null>} */

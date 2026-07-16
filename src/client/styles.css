@@ -2592,6 +2592,15 @@ html[dir='rtl'] .portal-voice-memo-substeps {
   white-space: nowrap;
 }
 
+.portal-voice-memo-metadata-preload {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
 .portal-voice-memo-play-btn {
   display: inline-flex;
   align-items: center;
@@ -5781,6 +5790,18 @@ html[dir='rtl'] .portal-voice-memo-substeps {
   font-size: 0.72rem;
   line-height: 1.45;
   color: var(--aesop-muted, #5c5c5c);
+}
+
+.portal-review-english-level-lines {
+  margin: 0;
+}
+
+.portal-review-english-level-line {
+  margin: 0 0 0.35em;
+}
+
+.portal-review-english-level-line:last-child {
+  margin-bottom: 0;
 }
 
 @media (max-width: 820px) {

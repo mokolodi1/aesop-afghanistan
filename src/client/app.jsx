@@ -19,6 +19,8 @@ import { REVIEWER_ESSAY_PROMPT } from '../shared/reviewerPrompts.js';
 import {
   REVIEW_INSTRUCTIONS,
   ENGLISH_LEVEL_RUBRIC,
+  parseEnglishLevelRubricText,
+  englishLevelDetailToLines,
   AI_WARNING_SIGNS,
   AI_ESSAY_EXAMPLES,
   TRAINING_ESSAY_EXAMPLES,
@@ -42,6 +44,7 @@ import {
 } from './voiceMemoPlaybackErrors.js';
 import { getPortalApplicationCalendarEntries } from './portalApplicationCalendar.js';
 import {
+  VOICE_MEMO_OVERACHIEVE_SHEET_SECONDS,
   classifyVoiceMemoDuration,
   formatVoiceMemoDurationLabel,
   voiceMemoDurationsDiffer,
@@ -3144,10 +3147,32 @@ function PortalVoiceMemoSection({ studentUserId, studentEmail, enabled }) {
   // Duration labels and issue state come from the server mirror only. Browser
   // measurement during playback is used to backfill the cache, not to re-render
   // status or submission UI while the student listens.
-  const displayDurationSeconds =
-    voiceMemoStatus?.durationSeconds != null && Number.isFinite(Number(voiceMemoStatus.durationSeconds))
-      ? Number(voiceMemoStatus.durationSeconds)
-      : null;
+  const displayDurationSeconds = (() => {
+    const serverSeconds =
+      voiceMemoStatus?.durationSeconds != null && Number.isFinite(Number(voiceMemoStatus.durationSeconds))
+        ? Number(voiceMemoStatus.durationSeconds)
+        : null;
+    const status = voiceMemoStatus?.durationStatus || 'unknown';
+    if (
+      status === 'too_long' &&
+      serverSeconds === VOICE_MEMO_OVERACHIEVE_SHEET_SECONDS &&
+      measuredDurationSeconds != null &&
+      Number.isFinite(measuredDurationSeconds)
+    ) {
+      return Math.round(measuredDurationSeconds);
+    }
+    if (serverSeconds != null) {
+      return serverSeconds;
+    }
+    if (
+      status === 'too_long' &&
+      measuredDurationSeconds != null &&
+      Number.isFinite(measuredDurationSeconds)
+    ) {
+      return Math.round(measuredDurationSeconds);
+    }
+    return null;
+  })();
   const displayDurationLabel =
     formatVoiceMemoDurationLabel(displayDurationSeconds) || voiceMemoStatus?.durationLabel || null;
   const displayDurationStatus = voiceMemoStatus?.durationStatus || 'unknown';
@@ -3328,22 +3353,43 @@ function PortalVoiceMemoSection({ studentUserId, studentEmail, enabled }) {
               </p>
             ) : null}
             <PortalVoiceMemoPrompt prompt={activeVoiceMemoStatus.round2Prompt} />
-            {displayDurationStatus === 'too_long' ? (
+            {displayDurationLabel || displayDurationStatus === 'too_long' || displayDurationStatus === 'valid' ? (
               <p className="portal-field-hint">
-                <span className="portal-voice-memo-duration-ok">
-                  {t('voiceMemo.durationExceeding')}
-                </span>
-              </p>
-            ) : displayDurationLabel ? (
-              <p className="portal-field-hint">
-                {t('voiceMemo.recordingLength')}: <strong>{displayDurationLabel}</strong>
+                {displayDurationLabel ? (
+                  <>
+                    {t('voiceMemo.recordingLength')}: <strong>{displayDurationLabel}</strong>
+                  </>
+                ) : null}
                 {displayDurationStatus === 'valid' ? (
                   <span className="portal-voice-memo-duration-ok">
-                    {' '}
+                    {displayDurationLabel ? ' ' : ''}
                     {t('voiceMemo.durationWithin')}
+                  </span>
+                ) : displayDurationStatus === 'too_long' ? (
+                  <span className="portal-voice-memo-duration-ok">
+                    {displayDurationLabel ? ' ' : ''}
+                    {t('voiceMemo.durationExceeding')}
                   </span>
                 ) : null}
               </p>
+            ) : null}
+            {activeVoiceMemoStatus.hasRecording &&
+            voiceMemoStreamSrc &&
+            displayDurationStatus === 'too_long' &&
+            !displayDurationLabel ? (
+              <audio
+                preload="metadata"
+                src={voiceMemoStreamSrc}
+                aria-hidden="true"
+                tabIndex={-1}
+                className="portal-voice-memo-metadata-preload"
+                onLoadedMetadata={(event) => {
+                  const duration = event.currentTarget?.duration;
+                  if (Number.isFinite(duration) && duration > 0) {
+                    setMeasuredDurationSeconds(duration);
+                  }
+                }}
+              />
             ) : null}
             {activeVoiceMemoStatus.hasRecording ? (
               <>
@@ -8926,9 +8972,10 @@ function PortalReviewRubricHelp({ rubricKey, t, variant = 'fitness' }) {
                   <div className="portal-review-rubric-item-head">
                     <span className="portal-review-rubric-tier-score">{score}</span>
                   </div>
-                  <p className="portal-review-rubric-item-text">
-                    {t(`reviews.rubric.englishLevel.${score}`)}
-                  </p>
+                  <PortalReviewEnglishLevelRubricText
+                    text={t(`reviews.rubric.englishLevel.${score}`)}
+                    className="portal-review-rubric-item-text"
+                  />
                 </li>
               ))}
             </ul>
@@ -9554,9 +9601,10 @@ function PortalReviewCard({
                 }}
               />
               {ENGLISH_LEVEL_SCORES.includes(String(draft.englishLevel ?? '').trim()) ? (
-                <p className="portal-review-scale-field-hint">
-                  {t(`reviews.rubric.englishLevel.${draft.englishLevel}`)}
-                </p>
+                <PortalReviewEnglishLevelRubricText
+                  text={t(`reviews.rubric.englishLevel.${draft.englishLevel}`)}
+                  className="portal-review-scale-field-hint"
+                />
               ) : null}
             </label>
             <PortalReviewSuspectedAiToggle
@@ -9649,38 +9697,38 @@ function PortalReviewCard({
   );
 }
 
+function PortalReviewEnglishLevelRubricLines({ lines, className = '' }) {
+  if (!lines?.length) {
+    return null;
+  }
+  return (
+    <div className={`portal-review-english-level-lines${className ? ` ${className}` : ''}`}>
+      {lines.map(({ label, text }) => (
+        <p key={label} className="portal-review-english-level-line">
+          <strong>{label}:</strong> {text}
+        </p>
+      ))}
+    </div>
+  );
+}
+
+function PortalReviewEnglishLevelRubricText({ text, className = '' }) {
+  const lines = parseEnglishLevelRubricText(text);
+  if (!lines) {
+    return <p className={className}>{text}</p>;
+  }
+  return <PortalReviewEnglishLevelRubricLines lines={lines} className={className} />;
+}
+
 function PortalReviewInstructionsEnglishDetail({ detail }) {
   if (!detail) {
     return null;
   }
   return (
-    <ul className="portal-review-instructions-detail-list">
-      {detail.ideas ? (
-        <li>
-          <strong>Level of ideas expressed:</strong> {detail.ideas}
-        </li>
-      ) : null}
-      {detail.sentences ? (
-        <li>
-          <strong>Sentences:</strong> {detail.sentences}
-        </li>
-      ) : null}
-      {detail.vocabulary ? (
-        <li>
-          <strong>Vocabulary:</strong> {detail.vocabulary}
-        </li>
-      ) : null}
-      {detail.usage?.length ? (
-        <li>
-          <strong>Usage of:</strong>
-          <ul>
-            {detail.usage.map((item) => (
-              <li key={item}>{item}</li>
-            ))}
-          </ul>
-        </li>
-      ) : null}
-    </ul>
+    <PortalReviewEnglishLevelRubricLines
+      lines={englishLevelDetailToLines(detail)}
+      className="portal-review-instructions-english-detail"
+    />
   );
 }
 

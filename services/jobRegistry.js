@@ -179,12 +179,14 @@ const JOB_DEFINITIONS = {
   },
 
   /**
-   * Google Drive voice memos → Applicants sheet (Round 2, link, date, length). Postgres is hourly-cache only.
+   * Google Drive voice memos → Applicants sheet (Round 2, link, date, length).
+   * Lengths come from Postgres cache first, then Drive when not mirrored yet.
    */
   "voice-memo-sync": {
     label: "Voice memo sync",
     description:
       "Scans Google Drive and writes Round 2, link, date, and length to the Applicants sheet. " +
+      "Lengths are refreshed from the Postgres cache first, then Drive when not mirrored yet. " +
       "Does not update Postgres; mirror and audio cache are handled by hourly-cache.",
     schedule: "Daily at 2:00 AM Afghanistan time",
     exclusiveGroup: "driveHeavy",

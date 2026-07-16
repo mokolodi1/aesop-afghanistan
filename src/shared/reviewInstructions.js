@@ -2,6 +2,58 @@
 
 /** @typedef {{ ideas?: string, sentences?: string, vocabulary?: string, usage?: string[] }} EnglishLevelDetail */
 
+const ENGLISH_LEVEL_RUBRIC_SECTION_SPLIT =
+  /\.\s+(?=(?:Sentences|Vocabulary|Usage|جملات|واژگان|کاربرد):)/;
+
+const ENGLISH_LEVEL_RUBRIC_LINE =
+  /^(Ideas|Sentences|Vocabulary|Usage|ایده‌ها|جملات|واژگان|کاربرد):\s*(.+?)\.?$/s;
+
+/**
+ * @param {string} text
+ * @returns {Array<{ label: string, text: string }> | null}
+ */
+function parseEnglishLevelRubricText(text) {
+  const trimmed = String(text ?? '').trim();
+  if (!/^(Ideas|ایده‌ها):/i.test(trimmed)) {
+    return null;
+  }
+
+  const lines = trimmed
+    .split(ENGLISH_LEVEL_RUBRIC_SECTION_SPLIT)
+    .map((part) => {
+      const match = part.match(ENGLISH_LEVEL_RUBRIC_LINE);
+      if (!match) {
+        return null;
+      }
+      return { label: match[1], text: match[2].trim() };
+    })
+    .filter(Boolean);
+
+  return lines.length >= 2 ? lines : null;
+}
+
+/**
+ * @param {EnglishLevelDetail} detail
+ * @returns {Array<{ label: string, text: string }>}
+ */
+function englishLevelDetailToLines(detail) {
+  /** @type {Array<{ label: string, text: string }>} */
+  const lines = [];
+  if (detail.ideas) {
+    lines.push({ label: 'Ideas', text: detail.ideas });
+  }
+  if (detail.sentences) {
+    lines.push({ label: 'Sentences', text: detail.sentences });
+  }
+  if (detail.vocabulary) {
+    lines.push({ label: 'Vocabulary', text: detail.vocabulary });
+  }
+  if (detail.usage?.length) {
+    lines.push({ label: 'Usage', text: detail.usage.join('; ') });
+  }
+  return lines;
+}
+
 /** @type {Array<{ score: string, summary?: string, detail?: EnglishLevelDetail }>} */
 const ENGLISH_LEVEL_RUBRIC = [
   {
@@ -404,6 +456,8 @@ const REVIEW_INSTRUCTIONS = {
 module.exports = {
   REVIEW_INSTRUCTIONS,
   ENGLISH_LEVEL_RUBRIC,
+  parseEnglishLevelRubricText,
+  englishLevelDetailToLines,
   AI_WARNING_SIGNS,
   AI_ESSAY_EXAMPLES,
   TRAINING_ESSAY_EXAMPLES,

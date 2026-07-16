@@ -82,7 +82,7 @@ Other hourly mirrors:
 
 Google Classroom is **not** included in the hourly job by default (too heavy). Keep Classroom on a daily schedule (below). To also run Classroom hourly, set `HOURLY_CACHE_INCLUDE_CLASSROOM=true` in `fly.toml` `[env]`.
 
-**Daily jobs** (see `crontab`) — voice memo sync at **2:00 AM** Afghanistan time; Classroom sync (rosters, grades, enrollments + sheet dual-write + backup export, and **Ding change history**) at **4:00 AM** Afghanistan time:
+**Daily jobs** (see `crontab`) — voice memo sync at **2:00 AM** Afghanistan time (Applicants sheet Round 2/link/date/length; lengths read from Postgres `drive_duration_seconds` first, then Drive when not mirrored yet); Classroom sync (rosters, grades, enrollments + sheet dual-write + backup export, and **Ding change history**) at **4:00 AM** Afghanistan time:
 
 ```bash
 npm run sync:classroom
