@@ -6,7 +6,6 @@ const {
   upsertApplicantFromMirror,
   upsertApplicantReviewFromMirror,
   getApplicantVoiceMemoDurationsMapFromDb,
-  updateApplicantDriveDurationSeconds,
 } = require("./classroomDb");
 const {
   loadAllPeopleRowsFromSheets,
@@ -687,83 +686,28 @@ async function loadVoiceMemoDriveScanMap(options = {}) {
 
   const folderId = String(cfg.voiceMemo?.driveFolderId || "").trim();
   if (!folderId) {
-    return { memoById: new Map(), driveFiles: 0 };
+    return { memoById: new Map(), driveFiles: 0, driveScan: null };
   }
 
   const scanOptions = getVoiceMemoDriveScanOptions(cfg.voiceMemo);
   const driveScan = await scanVoiceMemoFolder(folderId, { ...scanOptions, deadlineAt });
-  return { memoById: driveScan.memosById, driveFiles: driveScan.memosById.size };
+  return { memoById: driveScan.memosById, driveFiles: driveScan.memosById.size, driveScan };
 }
 
 /**
- * Mirror Applicants sheet fields plus Drive file ids/links (metadata scan only).
+ * Mirror Applicants sheet + Drive metadata (ids, links, durations) — no audio download.
  * @param {{ deadlineAt?: number }} [options]
  */
 async function mirrorApplicantsFromSheetsOnly(options = {}) {
   if (!isDatabaseEnabled()) {
-    return { mirrored: 0, driveFiles: 0 };
+    return { mirrored: 0, driveFiles: 0, driveScan: null };
   }
 
   const deadlineAt = options.deadlineAt ?? Date.now() + MIRROR_DRIVE_TIME_BUDGET_MS;
   const { dataRows, columns, cfg } = await loadApplicantsDataForStats({ deadlineAt });
-  const { memoById, driveFiles } = await loadVoiceMemoDriveScanMap({ deadlineAt, cfg });
+  const { memoById, driveFiles, driveScan } = await loadVoiceMemoDriveScanMap({ deadlineAt, cfg });
   if (driveFiles > 0) {
     console.info(`[mirror] Drive folder scan: driveFiles=${driveFiles}`);
-  }
-
-  const { entries } = await collectApplicantMirrorEntriesFromSheet({
-    deadlineAt,
-    dataRows,
-    columns,
-    cfg,
-    memoById,
-    useDriveScan: true,
-    probeDriveDurations: false,
-  });
-
-  let mirrored = 0;
-  for (const entry of entries) {
-    const row = await upsertApplicantFromMirror(entry);
-    if (row) {
-      mirrored += 1;
-    }
-  }
-
-  return { mirrored, driveFiles };
-}
-
-/**
- * Phase 2 of hourly mirror: download/transcode voice memo audio and probe missing durations.
- * Drive file ids/links are populated in phase 1 via loadVoiceMemoDriveScanMap.
- * @param {{ deadlineAt?: number }} [options]
- */
-async function syncApplicantVoiceMemoDriveData(options = {}) {
-  if (!isDatabaseEnabled()) {
-    return { updated: 0, driveFiles: 0, downloaded: 0, pruned: 0 };
-  }
-
-  const deadlineAt = options.deadlineAt ?? Date.now() + MIRROR_DRIVE_TIME_BUDGET_MS;
-  const { dataRows, columns, cfg } = await loadApplicantsDataForStats({ deadlineAt });
-  const folderId = String(cfg.voiceMemo?.driveFolderId || "").trim();
-  /** @type {Map<string, { aesopId: string, fileId: string, fileName: string }>} */
-  let memoById = new Map();
-  let driveFiles = 0;
-  let audioResult = { driveFiles: 0, downloaded: 0, pruned: 0 };
-
-  if (folderId) {
-    const scanOptions = getVoiceMemoDriveScanOptions(cfg.voiceMemo);
-    const driveScan = await scanVoiceMemoFolder(folderId, { ...scanOptions, deadlineAt });
-    memoById = driveScan.memosById;
-    driveFiles = memoById.size;
-    try {
-      audioResult = await syncVoiceMemoAudioFromScan(driveScan, { deadlineAt });
-      console.info(
-        `[mirror] voice memo audio cache: driveFiles=${audioResult.driveFiles}, ` +
-          `downloaded=${audioResult.downloaded}, pruned=${audioResult.pruned}`,
-      );
-    } catch (error) {
-      console.warn("[mirror] voice memo audio cache failed:", error.message || error);
-    }
   }
 
   const { entries } = await collectApplicantMirrorEntriesFromSheet({
@@ -776,35 +720,78 @@ async function syncApplicantVoiceMemoDriveData(options = {}) {
     probeDriveDurations: true,
   });
 
-  let updated = 0;
+  let mirrored = 0;
   for (const entry of entries) {
-    if (entry.driveDurationSeconds == null) {
-      continue;
-    }
-    const ok = await updateApplicantDriveDurationSeconds(entry.aesopId, {
-      driveDurationSeconds: entry.driveDurationSeconds,
-    });
-    if (ok) {
-      updated += 1;
+    const row = await upsertApplicantFromMirror(entry);
+    if (row) {
+      mirrored += 1;
     }
   }
 
+  return { mirrored, driveFiles, driveScan };
+}
+
+/**
+ * Phase 2 of hourly mirror: download/transcode voice memo audio only.
+ * All Drive metadata (file ids, links, durations) is handled in phase 1.
+ * @param {{ deadlineAt?: number, driveScan?: object|null }} [options]
+ */
+async function syncApplicantVoiceMemoAudioCache(options = {}) {
+  if (!isDatabaseEnabled()) {
+    return { downloaded: 0, pruned: 0, driveFiles: 0 };
+  }
+
+  const deadlineAt = options.deadlineAt ?? Date.now() + MIRROR_DRIVE_TIME_BUDGET_MS;
+  let driveScan = options.driveScan ?? null;
+  let driveFiles = 0;
+
+  if (!driveScan) {
+    const { driveScan: scanned, driveFiles: count } = await loadVoiceMemoDriveScanMap({ deadlineAt });
+    driveScan = scanned;
+    driveFiles = count;
+  } else {
+    driveFiles = driveScan.memosById?.size ?? 0;
+  }
+
+  if (!driveScan || driveFiles === 0) {
+    return { downloaded: 0, pruned: 0, driveFiles: 0 };
+  }
+
+  let audioResult = { driveFiles: 0, downloaded: 0, pruned: 0 };
+  try {
+    audioResult = await syncVoiceMemoAudioFromScan(driveScan, { deadlineAt });
+    console.info(
+      `[mirror] voice memo audio cache: driveFiles=${audioResult.driveFiles}, ` +
+        `downloaded=${audioResult.downloaded}, pruned=${audioResult.pruned}`,
+    );
+  } catch (error) {
+    console.warn("[mirror] voice memo audio cache failed:", error.message || error);
+  }
+
   return {
-    updated,
-    driveFiles,
     downloaded: audioResult.downloaded ?? 0,
     pruned: audioResult.pruned ?? 0,
+    driveFiles,
   };
+}
+
+/** @deprecated Use syncApplicantVoiceMemoAudioCache */
+async function syncApplicantVoiceMemoDriveData(options = {}) {
+  return syncApplicantVoiceMemoAudioCache(options);
 }
 
 async function mirrorApplicantsAndDriveFromSheets(options = {}) {
   const deadlineAt = options.deadlineAt ?? Date.now() + MIRROR_DRIVE_TIME_BUDGET_MS;
   const sheetResult = await mirrorApplicantsFromSheetsOnly({ deadlineAt });
-  const driveResult = await syncApplicantVoiceMemoDriveData({ deadlineAt });
+  const audioResult = await syncApplicantVoiceMemoAudioCache({
+    deadlineAt,
+    driveScan: sheetResult.driveScan,
+  });
   return {
     mirrored: sheetResult.mirrored,
-    driveFiles: driveResult.driveFiles,
-    voiceMemoUpdated: driveResult.updated,
+    driveFiles: sheetResult.driveFiles,
+    downloaded: audioResult.downloaded,
+    pruned: audioResult.pruned,
   };
 }
 
@@ -896,14 +883,14 @@ async function mirrorPeopleAndDingFromSheets(options = {}) {
     historyResult = await mirrorDingHistoryFromSheets({}, applicantIdSet);
   }
 
-  let applicantsResult = { mirrored: 0 };
+  let applicantsResult = { mirrored: 0, driveFiles: 0, driveScan: null };
   try {
     applicantsResult = await mirrorApplicantsFromSheetsOnly({ deadlineAt });
     console.log(
       `[people-mirror] Applicants: mirrored=${applicantsResult.mirrored}, driveFiles=${applicantsResult.driveFiles}`,
     );
   } catch (error) {
-    console.warn("[people-mirror] Applicants sheet mirror failed:", error.message);
+    console.warn("[people-mirror] Applicants mirror failed:", error.message);
   }
 
   let reviewsResult = { mirrored: 0 };
@@ -914,12 +901,15 @@ async function mirrorPeopleAndDingFromSheets(options = {}) {
     console.warn("[people-mirror] ApplicantReviews mirror failed:", error.message);
   }
 
-  let voiceMemoResult = { updated: 0, driveFiles: 0 };
+  let voiceMemoResult = { downloaded: 0, pruned: 0, driveFiles: 0 };
   try {
     console.log("[people-mirror] Phase 2: syncing voice memo audio cache...");
-    voiceMemoResult = await syncApplicantVoiceMemoDriveData({ deadlineAt });
+    voiceMemoResult = await syncApplicantVoiceMemoAudioCache({
+      deadlineAt,
+      driveScan: applicantsResult.driveScan,
+    });
     console.log(
-      `[people-mirror] Voice memo audio: durationsUpdated=${voiceMemoResult.updated}, driveFiles=${voiceMemoResult.driveFiles}`,
+      `[people-mirror] Voice memo audio: downloaded=${voiceMemoResult.downloaded}, pruned=${voiceMemoResult.pruned}`,
     );
   } catch (error) {
     console.warn("[people-mirror] Voice memo audio sync failed:", error.message);
@@ -931,9 +921,10 @@ async function mirrorPeopleAndDingFromSheets(options = {}) {
     dingNumbers: dingResult.mirrored,
     dingHistory: historyResult.mirrored,
     applicants: applicantsResult.mirrored,
-    driveFiles: voiceMemoResult.driveFiles,
+    driveFiles: applicantsResult.driveFiles,
     applicantReviews: reviewsResult.mirrored,
-    voiceMemoUpdated: voiceMemoResult.updated,
+    voiceMemoDownloaded: voiceMemoResult.downloaded,
+    voiceMemoPruned: voiceMemoResult.pruned,
   };
 }
 
@@ -949,19 +940,25 @@ async function mirrorPeopleAndApplicantsFromSheets() {
 
   const deadlineAt = Date.now() + MIRROR_DRIVE_TIME_BUDGET_MS;
   const applicantsResult = await mirrorApplicantsFromSheetsOnly({ deadlineAt });
-  console.log(`[people-mirror] Applicants sheet: mirrored=${applicantsResult.mirrored}`);
-
-  const voiceMemoResult = await syncApplicantVoiceMemoDriveData({ deadlineAt });
   console.log(
-    `[people-mirror] Voice memo Drive: updated=${voiceMemoResult.updated}, driveFiles=${voiceMemoResult.driveFiles}`,
+    `[people-mirror] Applicants: mirrored=${applicantsResult.mirrored}, driveFiles=${applicantsResult.driveFiles}`,
+  );
+
+  const voiceMemoResult = await syncApplicantVoiceMemoAudioCache({
+    deadlineAt,
+    driveScan: applicantsResult.driveScan,
+  });
+  console.log(
+    `[people-mirror] Voice memo audio: downloaded=${voiceMemoResult.downloaded}, pruned=${voiceMemoResult.pruned}`,
   );
 
   return {
     people: peopleResult.mirrored,
     peoplePruned: peopleResult.pruned,
     applicants: applicantsResult.mirrored,
-    driveFiles: voiceMemoResult.driveFiles,
-    voiceMemoUpdated: voiceMemoResult.updated,
+    driveFiles: applicantsResult.driveFiles,
+    voiceMemoDownloaded: voiceMemoResult.downloaded,
+    voiceMemoPruned: voiceMemoResult.pruned,
   };
 }
 
@@ -992,6 +989,7 @@ module.exports = {
   mirrorDingHistoryFromSheets,
   loadVoiceMemoDriveScanMap,
   mirrorApplicantsFromSheetsOnly,
+  syncApplicantVoiceMemoAudioCache,
   syncApplicantVoiceMemoDriveData,
   collectApplicantMirrorEntriesFromSheet,
   mirrorApplicantsAndDriveFromSheets,
