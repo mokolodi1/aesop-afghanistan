@@ -74,9 +74,8 @@ const JOB_DEFINITIONS = {
     label: "Hourly cache refresh",
     description:
       "Mirrors People, Ding numbers, Applicants, ApplicantReviews, and Drive metadata into Postgres, " +
-      "then caches voice memo audio (Drive → Postgres only). Voice memo sync updates the sheet only.",
-    schedule: "Hourly on the hour (AFT), except 2:00 AM and 4:00 AM",
-    // Shares the cron VM with voice-memo-sync; audio transcode runs last.
+      "then caches voice memo audio (Drive → Postgres only).",
+    schedule: "Hourly on the hour (AFT), except 4:00 AM when classroom-sync runs",
     exclusiveGroup: "driveHeavy",
     async run(payload = {}) {
       const { refreshPortalCaches } = require("./portalCacheRefresh");
@@ -175,33 +174,6 @@ const JOB_DEFINITIONS = {
       }
 
       return { classroom, dingHistory };
-    },
-  },
-
-  /**
-   * Google Drive voice memos → Applicants sheet (Round 2, link, date, length).
-   * Lengths come from Postgres cache first, then Drive when not mirrored yet.
-   */
-  "voice-memo-sync": {
-    label: "Voice memo sync",
-    description:
-      "Scans Google Drive and writes Round 2, link, date, and length to the Applicants sheet. " +
-      "When a fresh length is needed, Drive metadata is used when available; otherwise " +
-      "cached Postgres audio is parsed when the sheet Voice note link already points at " +
-      "that Drive file, then Drive is downloaded as a fallback. " +
-      "Does not update Postgres; mirror and audio cache are handled by hourly-cache.",
-    schedule: "Daily at 2:00 AM Afghanistan time",
-    exclusiveGroup: "driveHeavy",
-    async run() {
-      const { syncVoiceMemoRound2Status } = require("./voiceMemoSync");
-      const result = await syncVoiceMemoRound2Status();
-      console.log(
-        `[voice-memo-sync] updated=${result.updated} upToDate=${result.skippedUpToDate} ` +
-          `noFile=${result.skippedNoFile} notAccepted=${result.skippedNotAccepted} ` +
-          `noId=${result.skippedNoId} driveFiles=${result.driveFileCount} ` +
-          `lengthsWritten=${result.lengthsWritten} lengthsUnknown=${result.lengthsUnknown}`,
-      );
-      return result;
     },
   },
 };
