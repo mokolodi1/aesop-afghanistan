@@ -765,6 +765,182 @@ function isPeopleLastLoginSyncEnabled() {
   return resolvePeopleLastLoginColumnIndex() !== null;
 }
 
+const PEOPLE_LAST_LOGIN_FLUSH_INTERVAL_MS = 60_000;
+const PEOPLE_LAST_LOGIN_WRITE_CHUNK_SIZE = 100;
+const PEOPLE_LAST_LOGIN_WRITE_MAX_ROW_SPAN = 500;
+
+/** @type {Map<string, { userId: string, loginAt: Date }>} */
+const pendingPeopleLastLogins = new Map();
+let peopleLastLoginFlushTimer = null;
+let peopleLastLoginFlusherStarted = false;
+/** @type {Promise<{ updated: number, skipped: number }>|null} */
+let peopleLastLoginFlushPromise = null;
+
+/**
+ * @param {Array<{ gridRowIdx: number }>} pendingSorted
+ * @returns {typeof pendingSorted[]}
+ */
+function chunkPeopleLastLoginWrites(pendingSorted) {
+  /** @type {typeof pendingSorted[]} */
+  const chunks = [];
+  /** @type {typeof pendingSorted} */
+  let current = [];
+  for (const entry of pendingSorted) {
+    if (current.length === 0) {
+      current.push(entry);
+      continue;
+    }
+    const rowSpan = entry.gridRowIdx - current[0].gridRowIdx + 1;
+    if (
+      current.length >= PEOPLE_LAST_LOGIN_WRITE_CHUNK_SIZE ||
+      rowSpan > PEOPLE_LAST_LOGIN_WRITE_MAX_ROW_SPAN
+    ) {
+      chunks.push(current);
+      current = [entry];
+      continue;
+    }
+    current.push(entry);
+  }
+  if (current.length > 0) {
+    chunks.push(current);
+  }
+  return chunks;
+}
+
+/**
+ * @param {Map<string, { userId: string, loginAt: Date }>} batch
+ * @returns {Promise<{ updated: number, skipped: number }>}
+ */
+async function writePeopleLastLoginBatch(batch) {
+  if (!isPeopleLastLoginSyncEnabled() || batch.size === 0) {
+    return { updated: 0, skipped: batch.size };
+  }
+
+  let lastLoginColIdx;
+  try {
+    lastLoginColIdx = resolvePeopleLastLoginColumnIndex();
+    if (lastLoginColIdx === null) {
+      return { updated: 0, skipped: batch.size };
+    }
+  } catch (error) {
+    console.warn("flushPeopleLastLogin: invalid column config:", error.message);
+    return { updated: 0, skipped: batch.size };
+  }
+
+  const doc = await initGoogleSheets();
+  const peopleName = config.googleSheets.sheetName || "People";
+  const peopleSheet = doc.sheetsByTitle[peopleName];
+  if (!peopleSheet) {
+    throw new Error(`Sheet "${peopleName}" not found.`);
+  }
+
+  await preparePeopleWorksheet(peopleSheet);
+  const idColIdx = resolveColumnIndex(config.googleSheets.idColumn || "B");
+  const rows = await peopleSheet.getRows();
+
+  /** @type {Map<string, number>} */
+  const rowById = new Map();
+  for (const row of rows) {
+    const rowData = Array.isArray(row._rawData) ? row._rawData : [];
+    const rowId = String(rowData[idColIdx] || "").trim().toLowerCase();
+    if (rowId) {
+      rowById.set(rowId, row.rowNumber - 1);
+    }
+  }
+
+  /** @type {{ gridRowIdx: number, displayValue: string, userId: string }[]} */
+  const pending = [];
+  let skipped = 0;
+
+  for (const [nid, { userId, loginAt }] of batch) {
+    const gridRowIdx = rowById.get(nid);
+    if (gridRowIdx == null) {
+      console.warn("flushPeopleLastLogin: no People row matched id", userId);
+      skipped += 1;
+      continue;
+    }
+    const displayValue = formatEasternSheetTimestamp(loginAt);
+    if (!displayValue) {
+      skipped += 1;
+      continue;
+    }
+    pending.push({ gridRowIdx, displayValue, userId });
+  }
+
+  if (pending.length === 0) {
+    return { updated: 0, skipped };
+  }
+
+  pending.sort((a, b) => a.gridRowIdx - b.gridRowIdx);
+  const chunks = chunkPeopleLastLoginWrites(pending);
+
+  for (const chunk of chunks) {
+    const minIdx = chunk[0].gridRowIdx;
+    const maxIdx = chunk[chunk.length - 1].gridRowIdx;
+    await peopleSheet.loadCells({
+      startRowIndex: minIdx,
+      endRowIndex: maxIdx + 1,
+      startColumnIndex: lastLoginColIdx,
+      endColumnIndex: lastLoginColIdx + 1,
+    });
+    for (const entry of chunk) {
+      peopleSheet.getCell(entry.gridRowIdx, lastLoginColIdx).value = entry.displayValue;
+    }
+    await peopleSheet.saveUpdatedCells();
+  }
+
+  return { updated: pending.length, skipped };
+}
+
+/**
+ * Flush queued portal sign-ins to the People sheet.
+ * @returns {Promise<{ updated: number, skipped: number }>}
+ */
+async function flushPendingPeopleLastLogins() {
+  if (peopleLastLoginFlushPromise) {
+    return peopleLastLoginFlushPromise;
+  }
+  if (pendingPeopleLastLogins.size === 0) {
+    return { updated: 0, skipped: 0 };
+  }
+
+  const batch = new Map(pendingPeopleLastLogins);
+  pendingPeopleLastLogins.clear();
+
+  peopleLastLoginFlushPromise = (async () => {
+    try {
+      return await writePeopleLastLoginBatch(batch);
+    } catch (error) {
+      for (const [nid, entry] of batch) {
+        const existing = pendingPeopleLastLogins.get(nid);
+        if (!existing || entry.loginAt >= existing.loginAt) {
+          pendingPeopleLastLogins.set(nid, entry);
+        }
+      }
+      throw error;
+    } finally {
+      peopleLastLoginFlushPromise = null;
+    }
+  })();
+
+  return peopleLastLoginFlushPromise;
+}
+
+function startPeopleLastLoginFlusher() {
+  if (peopleLastLoginFlusherStarted || !isPeopleLastLoginSyncEnabled()) {
+    return;
+  }
+  peopleLastLoginFlusherStarted = true;
+  peopleLastLoginFlushTimer = setInterval(() => {
+    flushPendingPeopleLastLogins().catch((error) => {
+      console.warn("People last login flush failed:", error.message || error);
+    });
+  }, PEOPLE_LAST_LOGIN_FLUSH_INTERVAL_MS);
+  if (typeof peopleLastLoginFlushTimer.unref === "function") {
+    peopleLastLoginFlushTimer.unref();
+  }
+}
+
 function resolvePeoplePastDingColumnIndex() {
   const columnRef = config.googleSheets.peoplePastDingColumn;
   if (columnRef == null || String(columnRef).trim() === "" || String(columnRef).trim().toUpperCase() === "OFF") {
@@ -1664,7 +1840,8 @@ async function syncPastDingNumbersToPeople(userId) {
 }
 
 /**
- * Record a successful portal sign-in on the People sheet (column U by default).
+ * Queue a successful portal sign-in for the People sheet (column U by default).
+ * Updates are flushed once per minute in a single batched Sheets write.
  * Stores Eastern (America/New_York) date/time text, e.g. `6/23/2026, 2:15:30 PM EDT`.
  * @param {string} userId - AESOP ID (People id column)
  * @param {Date} [loginAt]
@@ -1680,62 +1857,18 @@ async function recordPeopleLastLogin(userId, loginAt = new Date()) {
     return false;
   }
 
-  let lastLoginColIdx;
-  try {
-    lastLoginColIdx = resolvePeopleLastLoginColumnIndex();
-    if (lastLoginColIdx === null) {
-      return false;
-    }
-  } catch (error) {
-    console.warn("recordPeopleLastLogin: invalid column config:", error.message);
-    return false;
-  }
-
   const when = loginAt instanceof Date ? loginAt : new Date(loginAt);
-  const displayValue = formatEasternSheetTimestamp(when);
-  if (!displayValue) {
+  if (!formatEasternSheetTimestamp(when)) {
     return false;
   }
 
-  const doc = await initGoogleSheets();
-  const peopleName = config.googleSheets.sheetName || "People";
-  const peopleSheet = doc.sheetsByTitle[peopleName];
-  if (!peopleSheet) {
-    throw new Error(`Sheet "${peopleName}" not found.`);
-  }
+  startPeopleLastLoginFlusher();
 
-  await preparePeopleWorksheet(peopleSheet);
-  const idColIdx = resolveColumnIndex(config.googleSheets.idColumn || "B");
-  const rows = await peopleSheet.getRows();
   const nid = idKey.toLowerCase();
-  let targetRowNum = null;
-
-  for (const row of rows) {
-    const rowData = Array.isArray(row._rawData) ? row._rawData : [];
-    const rowId = String(rowData[idColIdx] || "").trim().toLowerCase();
-    if (rowId !== nid) {
-      continue;
-    }
-    targetRowNum = row.rowNumber;
-    break;
+  const existing = pendingPeopleLastLogins.get(nid);
+  if (!existing || when >= existing.loginAt) {
+    pendingPeopleLastLogins.set(nid, { userId: idKey, loginAt: when });
   }
-
-  if (targetRowNum == null) {
-    console.warn("recordPeopleLastLogin: no People row matched id", idKey);
-    return false;
-  }
-
-  const gridRowIdx = targetRowNum - 1;
-  await peopleSheet.loadCells({
-    startRowIndex: gridRowIdx,
-    endRowIndex: gridRowIdx + 1,
-    startColumnIndex: lastLoginColIdx,
-    endColumnIndex: lastLoginColIdx + 1,
-  });
-
-  const cell = peopleSheet.getCell(gridRowIdx, lastLoginColIdx);
-  cell.value = displayValue;
-  await peopleSheet.saveUpdatedCells();
 
   return true;
 }
@@ -3189,6 +3322,8 @@ module.exports = {
   findLatestDingNumberById,
   findProfileById,
   recordPeopleLastLogin,
+  flushPendingPeopleLastLogins,
+  startPeopleLastLoginFlusher,
   getClassroomTabStats,
   loadAllPeopleRowsFromSheets,
   loadEmailToPeopleProfileMap,

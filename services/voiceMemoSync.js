@@ -451,6 +451,9 @@ async function getRound1ApplicationStats() {
   let unknownDuration = 0;
   /** @type {Set<string>} */
   const memoFileIdsNeedingProbe = new Set();
+  /** Sheet Voice note link matches this Drive file id — safe to parse Postgres audio cache. */
+  /** @type {Set<string>} */
+  const postgresCacheFileIds = new Set();
   /** @type {Array<{ person: ApplicationStatPerson, memo: { fileId: string, fileName: string }, cachedDurationSeconds: number|null }>} */
   const memoEntries = [];
 
@@ -524,11 +527,16 @@ async function getRound1ApplicationStats() {
     });
     if (cachedDurationSeconds == null) {
       memoFileIdsNeedingProbe.add(entry.memo.fileId);
+      if (entry.sheetLinkFileId === entry.memo.fileId) {
+        postgresCacheFileIds.add(entry.memo.fileId);
+      }
     }
   }
 
   const durationStartedAt = Date.now();
-  const durationByFileId = await resolveVoiceMemoDurationsMap([...memoFileIdsNeedingProbe]);
+  const durationByFileId = await resolveVoiceMemoDurationsMap([...memoFileIdsNeedingProbe], {
+    postgresCacheFileIds,
+  });
   console.info(
     `[application-stats] probed ${memoFileIdsNeedingProbe.size} missing duration(s) in ${Date.now() - durationStartedAt}ms`,
   );
@@ -858,8 +866,10 @@ let voiceMemoSyncInFlight = false;
  * from Google Drive voice memos into the Applicants sheet only (no Postgres writes).
  *
  * Lengths are only computed for rows whose sheet length is blank/invalid or whose
- * Drive file changed since the last sync (detected via the Voice note link file id);
- * known lengths are reused from the sheet or Postgres read cache before probing Drive.
+ * Drive file changed since the last sync (detected via the Voice note link file id).
+ * When a fresh length is needed, Drive metadata is used when available; otherwise
+ * cached Postgres audio is parsed when the sheet Voice note link already points at
+ * that Drive file, then Drive is downloaded as a fallback.
  * Postgres mirror and audio playback cache are owned by the hourly-cache job.
  * Drive/Sheets throttling (429s) is retried with backoff, so a run may take up to 6 hours.
  *
@@ -998,33 +1008,6 @@ async function runVoiceMemoRound2Sync(options = {}) {
   const acceptedValue = sheetCfg.acceptedValue.toLowerCase();
   const submittedValue = sheetCfg.submittedValue;
 
-  // Prefer existing sheet lengths when the Voice note link still points at the same
-  // Drive file. Otherwise refresh from Postgres, then probe Drive only as needed.
-  /** @type {Map<string, number>} */
-  let cachedDurationByFileId = new Map();
-  /** @type {Map<string, { fileId: string|null, durationSeconds: number }>} */
-  let cachedDurationByAesopId = new Map();
-  if (lengthEnabled && isDatabaseEnabled()) {
-    try {
-      console.info("[sync-voice-memos] loading cached voice memo durations from Postgres...");
-      const cacheStartedAt = Date.now();
-      const cached = await getApplicantVoiceMemoDurationsMapFromDb();
-      if (cached) {
-        cachedDurationByFileId = cached.byFileId;
-        cachedDurationByAesopId = cached.byAesopId;
-      }
-      console.info(
-        `[sync-voice-memos] duration cache loaded: byFileId=${cachedDurationByFileId.size}, ` +
-          `byAesopId=${cachedDurationByAesopId.size} in ${Date.now() - cacheStartedAt}ms`,
-      );
-    } catch (error) {
-      console.warn(
-        "[sync-voice-memos] could not load cached voice memo durations:",
-        error.message || error,
-      );
-    }
-  }
-
   const applicantIds = new Set();
   for (const rowData of dataRows) {
     const aesopId = String(rowData[sheetCfg.idColumnIndex] ?? "").trim();
@@ -1044,6 +1027,9 @@ async function runVoiceMemoRound2Sync(options = {}) {
   const candidates = [];
   /** @type {Set<string>} */
   const probeFileIds = new Set();
+  /** Sheet Voice note link matches this Drive file id — safe to parse Postgres audio cache. */
+  /** @type {Set<string>} */
+  const postgresCacheFileIds = new Set();
   let skippedUpToDate = 0;
   let skippedNoFile = 0;
   let skippedNotAccepted = 0;
@@ -1100,19 +1086,10 @@ async function runVoiceMemoRound2Sync(options = {}) {
         sheetLengthSeconds != null && sheetLinkFileId === memo.fileId;
       if (!sheetLengthIsCurrent) {
         needsLength = true;
-        const cached = cachedDurationByFileId.get(memo.fileId);
-        const cachedByApplicant = cachedDurationByAesopId.get(aesopId.trim().toLowerCase());
-        if (isTrustedVoiceMemoCachedDurationSeconds(cached)) {
-          lengthSeconds = Math.round(cached);
-        } else if (
-          cachedByApplicant &&
-          cachedByApplicant.fileId === memo.fileId &&
-          isTrustedVoiceMemoCachedDurationSeconds(cachedByApplicant.durationSeconds)
-        ) {
-          lengthSeconds = Math.round(cachedByApplicant.durationSeconds);
-        } else {
-          probeFileIds.add(memo.fileId);
-          lengthFromProbe = true;
+        probeFileIds.add(memo.fileId);
+        lengthFromProbe = true;
+        if (sheetLinkFileId === memo.fileId) {
+          postgresCacheFileIds.add(memo.fileId);
         }
       } else if (
         classifyVoiceMemoDuration(sheetLengthSeconds, durationLimits) === "too_long" &&
@@ -1146,8 +1123,6 @@ async function runVoiceMemoRound2Sync(options = {}) {
 
   // Release the full sheet values payload before Drive downloads / Sheets writes.
   dataRows = [];
-  cachedDurationByFileId = new Map();
-  cachedDurationByAesopId = new Map();
   applicantIds.clear();
 
   /** @type {Map<string, number|null>} */
@@ -1166,6 +1141,7 @@ async function runVoiceMemoRound2Sync(options = {}) {
       const chunkMap = await resolveVoiceMemoDurationsMap(chunk, {
         concurrency: 4,
         deadlineAt,
+        postgresCacheFileIds,
       });
       for (const [fileId, duration] of chunkMap) {
         durationByFileId.set(fileId, duration);

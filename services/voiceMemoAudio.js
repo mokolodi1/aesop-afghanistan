@@ -244,6 +244,51 @@ function sliceBufferToStream(buffer, start, end) {
 }
 
 /**
+ * Parse recording length from Postgres playback cache (no Drive download).
+ * Used when Drive file metadata does not include a duration.
+ * @param {string} fileId
+ * @returns {Promise<number|null>}
+ */
+async function readVoiceMemoDurationFromPostgresCache(fileId) {
+  if (!isDatabaseEnabled()) {
+    return null;
+  }
+  const normalizedFileId = String(fileId || "").trim();
+  if (!normalizedFileId) {
+    return null;
+  }
+
+  const row = await getVoiceMemoAudioRow(normalizedFileId);
+  if (!row?.content || String(row.driveFileId || "").trim() !== normalizedFileId) {
+    return null;
+  }
+
+  let buffer = row.content instanceof Buffer ? row.content : Buffer.from(row.content);
+  try {
+    const { parseDurationFromAudioBuffer } = require("./googleDrive");
+    const duration = await parseDurationFromAudioBuffer(buffer, {
+      fileName: row.fileName,
+      driveMimeType: row.mimeType,
+      size: row.sizeBytes || buffer.length,
+    });
+    if (duration != null) {
+      console.info(
+        `[voice-memo-audio] parsed duration ${Math.round(duration)}s from Postgres cache for ${normalizedFileId}`,
+      );
+    }
+    return duration;
+  } catch (error) {
+    console.warn(
+      `[voice-memo-audio] could not parse cached duration for ${normalizedFileId}:`,
+      error.message || error,
+    );
+    return null;
+  } finally {
+    buffer = null;
+  }
+}
+
+/**
  * @param {string} driveFileId
  * @returns {Promise<{ driveFileId: string, fileName: string, mimeType: string, sizeBytes: number, content: Buffer }|null>}
  */
@@ -1046,6 +1091,7 @@ module.exports = {
   streamVoiceMemoFromCache,
   streamVoiceMemoForPlayback,
   getVoiceMemoAudioRow,
+  readVoiceMemoDurationFromPostgresCache,
   listCachedVoiceMemoFileIds,
   clearAllVoiceMemoAudioCache,
   logVoiceMemoAudioTranscodeFailures,

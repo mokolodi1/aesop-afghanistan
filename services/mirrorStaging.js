@@ -209,7 +209,11 @@ async function insertApplicantMirrorEntriesToStaging(pool, entries) {
          submitted_at = EXCLUDED.submitted_at,
          drive_file_id = EXCLUDED.drive_file_id,
          drive_file_name = EXCLUDED.drive_file_name,
-         drive_duration_seconds = EXCLUDED.drive_duration_seconds
+         drive_duration_seconds = CASE
+           WHEN applicants_staging.drive_file_id IS NOT DISTINCT FROM EXCLUDED.drive_file_id
+           THEN COALESCE(applicants_staging.drive_duration_seconds, EXCLUDED.drive_duration_seconds)
+           ELSE EXCLUDED.drive_duration_seconds
+         END
        RETURNING aesop_id`,
       [
         entry.aesopId,

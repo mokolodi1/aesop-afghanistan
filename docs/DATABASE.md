@@ -78,11 +78,11 @@ Other hourly mirrors:
 | Ding changes tab (current values only) | `ding_numbers` |
 | Applicants tab | `applicants` |
 | ApplicantReviews tab | `applicant_reviews` |
-| Google Drive folder | `applicants.drive_file_id`, `drive_file_name`, `drive_duration_seconds` (length is read from the sheet's `Voice memo length (secs)` column when its Voice note link matches the current Drive file; Drive is only probed for missing/changed files) |
+| Google Drive folder | `applicants.drive_file_id`, `drive_file_name`, `drive_duration_seconds` (length is read from the sheet's `Voice memo length (secs)` column when its Voice note link matches the current Drive file; when a fresh length is needed, Drive metadata is used when available, otherwise cached Postgres audio is parsed only when the sheet link already points at that Drive file, and Drive is downloaded as a fallback) |
 
 Google Classroom is **not** included in the hourly job by default (too heavy). Keep Classroom on a daily schedule (below). To also run Classroom hourly, set `HOURLY_CACHE_INCLUDE_CLASSROOM=true` in `fly.toml` `[env]`.
 
-**Daily jobs** (see `crontab`) — voice memo sync at **2:00 AM** Afghanistan time (Applicants sheet Round 2/link/date/length; lengths read from Postgres `drive_duration_seconds` first, then Drive when not mirrored yet); Classroom sync (rosters, grades, enrollments + sheet dual-write + backup export, and **Ding change history**) at **4:00 AM** Afghanistan time:
+**Daily jobs** (see `crontab`) — voice memo sync at **2:00 AM** Afghanistan time (Applicants sheet Round 2/link/date/length; when a fresh length is needed, cached Postgres audio is parsed before Drive is downloaded); Classroom sync (rosters, grades, enrollments + sheet dual-write + backup export, and **Ding change history**) at **4:00 AM** Afghanistan time:
 
 ```bash
 npm run sync:classroom

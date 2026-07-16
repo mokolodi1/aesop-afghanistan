@@ -186,7 +186,9 @@ const JOB_DEFINITIONS = {
     label: "Voice memo sync",
     description:
       "Scans Google Drive and writes Round 2, link, date, and length to the Applicants sheet. " +
-      "Lengths are refreshed from the Postgres cache first, then Drive when not mirrored yet. " +
+      "When a fresh length is needed, Drive metadata is used when available; otherwise " +
+      "cached Postgres audio is parsed when the sheet Voice note link already points at " +
+      "that Drive file, then Drive is downloaded as a fallback. " +
       "Does not update Postgres; mirror and audio cache are handled by hourly-cache.",
     schedule: "Daily at 2:00 AM Afghanistan time",
     exclusiveGroup: "driveHeavy",

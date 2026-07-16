@@ -559,6 +559,9 @@ async function collectApplicantMirrorEntriesFromSheet(options = {}) {
   const entries = [];
   /** @type {Set<string>} */
   const probeFileIds = new Set();
+  /** Sheet Voice note link matches this Drive file id — safe to parse Postgres audio cache. */
+  /** @type {Set<string>} */
+  const postgresCacheFileIds = new Set();
   let durationsFromSheet = 0;
   let durationsFromDb = 0;
 
@@ -607,6 +610,9 @@ async function collectApplicantMirrorEntriesFromSheet(options = {}) {
         durationsFromDb += 1;
       } else if (probeDriveDurations) {
         probeFileIds.add(driveFileId);
+        if (sheetLinkFileId === driveFileId) {
+          postgresCacheFileIds.add(driveFileId);
+        }
       }
     }
 
@@ -636,6 +642,7 @@ async function collectApplicantMirrorEntriesFromSheet(options = {}) {
     probedDurations = await resolveVoiceMemoDurationsMap([...probeFileIds], {
       concurrency: 4,
       deadlineAt,
+      postgresCacheFileIds,
     });
     console.info(
       `[mirror] probed ${probeFileIds.size} missing voice memo duration(s) from Drive in ${Date.now() - probeStartedAt}ms`,

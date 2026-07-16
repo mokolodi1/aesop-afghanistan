@@ -904,7 +904,7 @@ async function probeVoiceMemoDurationFromMedia(drive, fileId, meta, retryOptions
 
 /**
  * @param {string} fileId
- * @param {{ deadlineAt?: number, metadata?: import('googleapis').drive_v3.Schema$File, drive?: ReturnType<typeof google.drive> }} [options]
+ * @param {{ deadlineAt?: number, metadata?: import('googleapis').drive_v3.Schema$File, drive?: ReturnType<typeof google.drive>, postgresCacheFileIds?: Set<string> }} [options]
  * @returns {Promise<number|null>}
  */
 async function readVoiceMemoDurationSeconds(fileId, options = {}) {
@@ -938,12 +938,59 @@ async function readVoiceMemoDurationSeconds(fileId, options = {}) {
     return fromMetadata;
   }
 
+  return probeVoiceMemoDurationFromCacheOrDrive(drive, fileId, meta, retryOptions, options);
+}
+
+/**
+ * @param {string} fileId
+ * @param {Set<string>|undefined} postgresCacheFileIds
+ * @returns {boolean}
+ */
+function isVoiceMemoPostgresCacheAllowed(fileId, postgresCacheFileIds) {
+  const normalizedFileId = String(fileId || "").trim();
+  if (!normalizedFileId || !postgresCacheFileIds) {
+    return false;
+  }
+  return postgresCacheFileIds.has(normalizedFileId);
+}
+
+/**
+ * When Drive metadata has no duration, parse cached Postgres audio before downloading from Drive.
+ * Postgres cache is only used when the caller confirms the sheet link matches this file id.
+ * @param {ReturnType<typeof google.drive>} drive
+ * @param {string} fileId
+ * @param {import('googleapis').drive_v3.Schema$File|{ data?: import('googleapis').drive_v3.Schema$File }} meta
+ * @param {{ deadlineAt?: number }} [retryOptions]
+ * @param {{ postgresCacheFileIds?: Set<string> }} [options]
+ * @returns {Promise<number|null>}
+ */
+async function probeVoiceMemoDurationFromCacheOrDrive(
+  drive,
+  fileId,
+  meta,
+  retryOptions = {},
+  options = {},
+) {
+  const normalizedFileId = String(fileId || "").trim();
+  if (
+    normalizedFileId &&
+    isVoiceMemoPostgresCacheAllowed(normalizedFileId, options.postgresCacheFileIds)
+  ) {
+    const { isDatabaseEnabled } = require("../db/index");
+    if (isDatabaseEnabled()) {
+      const { readVoiceMemoDurationFromPostgresCache } = require("./voiceMemoAudio");
+      const fromPostgres = await readVoiceMemoDurationFromPostgresCache(normalizedFileId);
+      if (fromPostgres != null) {
+        return fromPostgres;
+      }
+    }
+  }
   return probeVoiceMemoDurationFromMedia(drive, fileId, meta, retryOptions);
 }
 
 /**
  * @param {string[]} fileIds
- * @param {{ concurrency?: number, timeoutMs?: number, deadlineAt?: number }} [options]
+ * @param {{ concurrency?: number, timeoutMs?: number, deadlineAt?: number, postgresCacheFileIds?: Set<string> }} [options]
  * @returns {Promise<Map<string, number|null>>}
  */
 async function resolveVoiceMemoDurationsMap(fileIds, options = {}) {
@@ -981,7 +1028,13 @@ async function resolveVoiceMemoDurationsMap(fileIds, options = {}) {
       if (prefetched) {
         duration = durationSecondsFromDriveFileMetadata(prefetched);
         if (duration == null) {
-          duration = await probeVoiceMemoDurationFromMedia(drive, fileId, prefetched, retryOptions);
+          duration = await probeVoiceMemoDurationFromCacheOrDrive(
+            drive,
+            fileId,
+            prefetched,
+            retryOptions,
+            { postgresCacheFileIds: options.postgresCacheFileIds },
+          );
         }
         // Drop metadata once used so the batch map can shrink during long probes.
         metadataByFileId.delete(fileId);
@@ -989,6 +1042,7 @@ async function resolveVoiceMemoDurationsMap(fileIds, options = {}) {
         duration = await readVoiceMemoDurationSeconds(fileId, {
           deadlineAt: options.deadlineAt,
           drive,
+          postgresCacheFileIds: options.postgresCacheFileIds,
         });
       }
       map.set(fileId, duration);
@@ -1077,4 +1131,5 @@ module.exports = {
   downloadVoiceMemoFile,
   getVoiceMemoDurationSeconds,
   resolveVoiceMemoDurationsMap,
+  parseDurationFromAudioBuffer,
 };

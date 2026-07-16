@@ -7,6 +7,7 @@ const {
   findProfileById,
   findLatestDingNumberById,
   recordPeopleLastLogin,
+  startPeopleLastLoginFlusher,
   appendDingChangeRow,
   syncPastDingNumbersToPeople,
   getPortalDingChangeHistory,
@@ -2133,6 +2134,7 @@ app.post('/api/postmark/webhook', postmarkWebhookRateLimiter, async (req, res) =
 app.listen(PORT, '0.0.0.0', async () => {
   console.log(`Server running on port ${PORT}`);
   startPortalMetricsFlusher();
+  startPeopleLastLoginFlusher();
   if (process.env.DATABASE_AUTO_MIGRATE === 'true' && isDatabaseEnabled()) {
     try {
       const { runMigrations } = require('./db/migrate');

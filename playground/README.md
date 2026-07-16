@@ -1,0 +1,1 @@
+This folder is for playing around with scripts inside the repo without worrying about them inadvertently being committed. 

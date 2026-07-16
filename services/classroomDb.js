@@ -1210,7 +1210,11 @@ async function upsertApplicantFromMirror(fields) {
        submitted_at = EXCLUDED.submitted_at,
        drive_file_id = EXCLUDED.drive_file_id,
        drive_file_name = EXCLUDED.drive_file_name,
-       drive_duration_seconds = EXCLUDED.drive_duration_seconds,
+       drive_duration_seconds = CASE
+         WHEN applicants.drive_file_id IS NOT DISTINCT FROM EXCLUDED.drive_file_id
+         THEN COALESCE(applicants.drive_duration_seconds, EXCLUDED.drive_duration_seconds)
+         ELSE EXCLUDED.drive_duration_seconds
+       END,
        synced_at = EXCLUDED.synced_at
      RETURNING id`,
     [
