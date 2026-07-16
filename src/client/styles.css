@@ -4953,9 +4953,9 @@ html[dir='rtl'] .portal-voice-memo-substeps {
 
 .portal-review-sidebar-head {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
   margin-bottom: 10px;
   min-width: 0;
 }
@@ -4979,21 +4979,20 @@ html[dir='rtl'] .portal-voice-memo-substeps {
 .portal-review-save-indicator {
   display: inline-flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: flex-start;
   gap: 5px;
   flex: 0 1 auto;
-  margin-left: auto;
-  max-width: 72%;
+  max-width: 100%;
   font-size: 0.65rem;
   line-height: 1.2;
   color: var(--aesop-muted, #5c5c5c);
-  text-align: right;
+  text-align: left;
 }
 
 .portal-review-save-indicator-stack {
   display: flex;
   flex-direction: column;
-  align-items: flex-end;
+  align-items: flex-start;
   gap: 2px;
   min-width: 0;
 }
@@ -5001,12 +5000,12 @@ html[dir='rtl'] .portal-voice-memo-substeps {
 .portal-review-save-indicator-line {
   display: inline-flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: flex-start;
   gap: 5px;
 }
 
 .portal-review-save-indicator-label {
-  text-align: right;
+  text-align: left;
   line-height: 1.15;
 }
 
@@ -5021,7 +5020,7 @@ html[dir='rtl'] .portal-voice-memo-substeps {
   font-size: inherit;
   font-weight: 600;
   line-height: inherit;
-  text-align: right;
+  text-align: left;
   text-decoration: underline;
   text-underline-offset: 2px;
   cursor: pointer;
@@ -5044,12 +5043,17 @@ html[dir='rtl'] .portal-voice-memo-substeps {
   text-decoration: none;
 }
 
+.portal-review-save-indicator--pending,
 .portal-review-save-indicator--saving {
   color: var(--aesop-ink-soft, #454545);
 }
 
 .portal-review-save-indicator--saving .portal-review-save-indicator-icon {
   animation: portal-review-save-spin 0.9s linear infinite;
+}
+
+.portal-review-save-indicator--idle {
+  color: var(--aesop-muted, #5c5c5c);
 }
 
 .portal-review-save-indicator--saved {

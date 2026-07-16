@@ -9098,14 +9098,14 @@ function PortalReviewSaveStatus({ saveStatus, lastSavedAt, hasUnsavedChanges, on
   const [nowMs, setNowMs] = useState(() => Date.now());
 
   useEffect(() => {
-    if (!lastSavedAt) {
+    if (!lastSavedAt || hasUnsavedChanges) {
       return undefined;
     }
     const intervalId = window.setInterval(() => {
       setNowMs(Date.now());
     }, 1000);
     return () => window.clearInterval(intervalId);
-  }, [lastSavedAt]);
+  }, [lastSavedAt, hasUnsavedChanges]);
 
   const savedLabel = formatReviewSavedAgoLabel({ lastSavedAt, nowMs, t });
   const statusLabel =
@@ -9113,11 +9113,21 @@ function PortalReviewSaveStatus({ saveStatus, lastSavedAt, hasUnsavedChanges, on
       ? t('reviews.saveSaving')
       : saveStatus === 'error'
         ? t('reviews.saveStatusError')
-        : savedLabel;
+        : hasUnsavedChanges
+          ? t('reviews.savePending')
+          : savedLabel || t('reviews.saveNoChangesYet');
   const isSaving = saveStatus === 'saving';
 
   const indicatorStatus =
-    saveStatus === 'saving' ? 'saving' : saveStatus === 'error' ? 'error' : 'saved';
+    saveStatus === 'saving'
+      ? 'saving'
+      : saveStatus === 'error'
+        ? 'error'
+        : hasUnsavedChanges
+          ? 'pending'
+          : lastSavedAt
+            ? 'saved'
+            : 'idle';
 
   return (
     <span
@@ -9128,39 +9138,37 @@ function PortalReviewSaveStatus({ saveStatus, lastSavedAt, hasUnsavedChanges, on
       aria-live="polite"
     >
       <span className="portal-review-save-indicator-stack">
-        {statusLabel ? (
-          <span className="portal-review-save-indicator-line">
-            <span className="portal-review-save-indicator-icon" aria-hidden="true">
-              {indicatorStatus === 'saving' ? (
-                <svg viewBox="0 0 16 16" width="14" height="14" focusable="false">
-                  <circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" strokeWidth="1.5" opacity="0.25" />
-                  <path
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.5"
-                    strokeLinecap="round"
-                    d="M8 2a6 6 0 0 1 6 6"
-                  />
-                </svg>
-              ) : indicatorStatus === 'error' ? (
-                <svg viewBox="0 0 16 16" width="14" height="14" focusable="false">
-                  <path
-                    fill="currentColor"
-                    d="M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13zm.75 3.5a.75.75 0 0 0-1.5 0v4a.75.75 0 0 0 1.5 0v-4zm-.75 6.25a.875.875 0 1 0 0-1.75.875.875 0 0 0 0 1.75z"
-                  />
-                </svg>
-              ) : (
-                <svg viewBox="0 0 16 16" width="14" height="14" focusable="false">
-                  <path
-                    fill="currentColor"
-                    d="M11.5 1.5 14 4v8.25A1.75 1.75 0 0 1 12.25 14H3.75A1.75 1.75 0 0 1 2 12.25V3.75A1.75 1.75 0 0 1 3.75 2h5.8l1.95-1.95zm-.2 1.05-1.3 1.3H12v7.9H4V4h7.3z"
-                  />
-                </svg>
-              )}
-            </span>
-            <span>{statusLabel}</span>
+        <span className="portal-review-save-indicator-line">
+          <span className="portal-review-save-indicator-icon" aria-hidden="true">
+            {indicatorStatus === 'saving' ? (
+              <svg viewBox="0 0 16 16" width="14" height="14" focusable="false">
+                <circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" strokeWidth="1.5" opacity="0.25" />
+                <path
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                  d="M8 2a6 6 0 0 1 6 6"
+                />
+              </svg>
+            ) : indicatorStatus === 'error' ? (
+              <svg viewBox="0 0 16 16" width="14" height="14" focusable="false">
+                <path
+                  fill="currentColor"
+                  d="M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13zm.75 3.5a.75.75 0 0 0-1.5 0v4a.75.75 0 0 0 1.5 0v-4zm-.75 6.25a.875.875 0 1 0 0-1.75.875.875 0 0 0 0 1.75z"
+                />
+              </svg>
+            ) : (
+              <svg viewBox="0 0 16 16" width="14" height="14" focusable="false">
+                <path
+                  fill="currentColor"
+                  d="M11.5 1.5 14 4v8.25A1.75 1.75 0 0 1 12.25 14H3.75A1.75 1.75 0 0 1 2 12.25V3.75A1.75 1.75 0 0 1 3.75 2h5.8l1.95-1.95zm-.2 1.05-1.3 1.3H12v7.9H4V4h7.3z"
+                />
+              </svg>
+            )}
           </span>
-        ) : null}
+          <span>{statusLabel}</span>
+        </span>
         <button
           type="button"
           className="portal-review-save-now-link"
@@ -9173,7 +9181,7 @@ function PortalReviewSaveStatus({ saveStatus, lastSavedAt, hasUnsavedChanges, on
             onSaveNow?.();
           }}
         >
-          {t('reviews.saveNowWithAutoSave')}
+          {t('reviews.saveNow')}
         </button>
       </span>
     </span>
