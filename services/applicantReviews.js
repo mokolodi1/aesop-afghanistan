@@ -23,7 +23,7 @@ const {
 const { extractDriveFileIdFromLink } = require("./googleDrive");
 
 const ENGLISH_LEVELS = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"];
-const FITNESS_SCORES = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"];
+const FITNESS_SCORES = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"];
 const FITNESS_CRITERIA = ["instructionFollowing", "originalThinking", "character"];
 const SUSPECTED_AI_SHEET_VALUE = "Suspected AI";
 const UNABLE_TO_GRADE_SHEET_VALUE = "Unable to Grade";
@@ -116,11 +116,14 @@ function normalizeTechnicalFlag(value) {
  */
 function normalizeFitnessScore(value) {
   const trimmed = String(value ?? "").trim();
+  if (trimmed === "0") {
+    return "1";
+  }
   if (FITNESS_SCORES.includes(trimmed)) {
     return trimmed;
   }
   const asNumber = Number.parseInt(trimmed, 10);
-  if (Number.isFinite(asNumber) && asNumber >= 0 && asNumber <= 10) {
+  if (Number.isFinite(asNumber) && asNumber >= 1 && asNumber <= 10) {
     return String(asNumber);
   }
   return "";

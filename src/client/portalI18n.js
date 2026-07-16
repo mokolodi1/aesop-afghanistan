@@ -368,26 +368,25 @@ const TRANSLATIONS = {
     'reviews.rubric.character.low':
       "There is no real evidence of a strong personal character. You don't feel that this person would add anything to the AESOP community.",
     'reviews.rubric.englishLevel.title': 'English Level',
-    'reviews.rubric.englishLevel.0': 'No English. Essay is written in Dari.',
-    'reviews.rubric.englishLevel.1':
-      'Very limited English. Essay is written in a combination of Dari and English or is extremely short, consisting of broken or very basic English sentences.',
+    'reviews.rubric.englishLevel.1': 'No English. Essay is written in Dari.',
     'reviews.rubric.englishLevel.2':
-      'Ideas: very simple. Sentences: short but readable. Vocabulary: limited. Usage: plurals, possessives, subject–verb agreement.',
+      'Very limited English. Essay is written in a combination of Dari and English or is extremely short, consisting of broken or very basic English sentences.',
     'reviews.rubric.englishLevel.3':
-      'Ideas: simple. Sentences: longer, but not extremely complex. Vocabulary: limited. Usage: past, present progressive, and future tenses; can/could or other modal verbs, with some errors.',
+      'Ideas: very simple. Sentences: short but readable. Vocabulary: limited. Usage: plurals, possessives, subject–verb agreement.',
     'reviews.rubric.englishLevel.4':
-      'Ideas: slightly more complex. Sentences: complex, but with errors. Vocabulary: developing. Usage: comparatives and superlatives; adverbs.',
+      'Ideas: simple. Sentences: longer, but not extremely complex. Vocabulary: limited. Usage: past, present progressive, and future tenses; can/could or other modal verbs, with some errors.',
     'reviews.rubric.englishLevel.5':
-      'Ideas: more complex. Sentences: longer and more complex. Vocabulary: functional and flexible. Usage: perfect tenses and passive verbs, with few or no errors.',
+      'Ideas: slightly more complex. Sentences: complex, but with errors. Vocabulary: developing. Usage: comparatives and superlatives; adverbs.',
     'reviews.rubric.englishLevel.6':
-      'Ideas: sophisticated. Sentences: complex but sometimes formulaic. Vocabulary: functional and flexible. Usage: conditionals; relative clauses.',
+      'Ideas: more complex. Sentences: longer and more complex. Vocabulary: functional and flexible. Usage: perfect tenses and passive verbs, with few or no errors.',
     'reviews.rubric.englishLevel.7':
-      'Ideas: sophisticated. Sentences: complex and varied. Vocabulary: wide and varied. Usage: metaphors, similes, and idioms.',
+      'Ideas: sophisticated. Sentences: complex but sometimes formulaic. Vocabulary: functional and flexible. Usage: conditionals; relative clauses.',
     'reviews.rubric.englishLevel.8':
-      'Ideas: sophisticated. Sentences: complex and varied. Vocabulary: exceptionally rich. Usage: full range of grammatical constructions, with few errors; colloquialisms.',
+      'Ideas: sophisticated. Sentences: complex and varied. Vocabulary: wide and varied. Usage: metaphors, similes, and idioms.',
     'reviews.rubric.englishLevel.9':
-      'Approaching native-level fluency; very few noticeable errors.',
-    'reviews.rubric.englishLevel.10': 'Could be mistaken for a native English speaker.',
+      'Ideas: sophisticated. Sentences: complex and varied. Vocabulary: exceptionally rich. Usage: full range of grammatical constructions, with few errors; colloquialisms.',
+    'reviews.rubric.englishLevel.10':
+      'Approaching native-level fluency; very few noticeable errors. Could be mistaken for a native English speaker.',
     'reviews.scalePlaceholder': 'Select score…',
     'reviews.scalePlaceholderFor': 'Select {{field}} score',
     'reviews.scale.lowest': 'Lowest',
@@ -398,6 +397,7 @@ const TRANSLATIONS = {
     'reviews.studentList': 'Applicants',
     'reviews.nextStudent': 'Next student',
     'reviews.savePending': 'Saving soon (every 30 secs)',
+    'reviews.saveNow': 'Save now',
     'reviews.saveSaving': 'Saving...',
     'reviews.saveSavedRecently': 'Saved <1 min ago',
     'reviews.saveSavedMinutesAgo': 'Saved {{minutes}} minute ago',
@@ -769,17 +769,15 @@ const TRANSLATIONS = {
     'reviews.rubric.character.low':
       'نشانه واقعی از شخصیت قوی نیست. حس نمی‌کنید این فرد به جامعه AESOP چیزی اضافه کند.',
     'reviews.rubric.englishLevel.title': 'سطح انگلیسی',
-    'reviews.rubric.englishLevel.0': 'بدون انگلیسی. انشا به دری نوشته شده است.',
-    'reviews.rubric.englishLevel.1':
-      'انگلیسی بسیار محدود. انشا ترکیبی از دری و انگلیسی است یا بسیار کوتاه با جملات شکسته یا خیلی ساده.',
+    'reviews.rubric.englishLevel.1': 'بدون انگلیسی. انشا به دری نوشته شده است.',
     'reviews.rubric.englishLevel.2':
-      'ایده‌ها: خیلی ساده. جملات: کوتاه اما خوانا. واژگان: محدود. کاربرد: جمع، ملکی، تطابق فاعل و فعل.',
+      'انگلیسی بسیار محدود. انشا ترکیبی از دری و انگلیسی است یا بسیار کوتاه با جملات شکسته یا خیلی ساده.',
     'reviews.rubric.englishLevel.3':
-      'ایده‌ها: ساده. جملات: بلندتر اما نه پیچیده. واژگان: محدود. کاربرد: زمان‌های گذشته، حال استمراری و آینده؛ can/could یا افعال وجهی دیگر با کمی خطا.',
+      'ایده‌ها: خیلی ساده. جملات: کوتاه اما خوانا. واژگان: محدود. کاربرد: جمع، ملکی، تطابق فاعل و فعل.',
     'reviews.rubric.englishLevel.4':
-      'ایده‌ها: کمی پیچیده‌تر. جملات: پیچیده اما با خطا. واژگان: در حال رشد. کاربرد: صفت تفضیلی و عالی؛ قیدها.',
+      'ایده‌ها: ساده. جملات: بلندتر اما نه پیچیده. واژگان: محدود. کاربرد: زمان‌های گذشته، حال استمراری و آینده؛ can/could یا افعال وجهی دیگر با کمی خطا.',
     'reviews.rubric.englishLevel.5':
-      'ایده‌ها: پیچیده‌تر. جملات: بلندتر و پیچیده‌تر. واژگان: محدود. کاربرد: زمان‌های کامل و افعال مجهول، با کمی خطا.',
+      'ایده‌ها: کمی پیچیده‌تر. جملات: پیچیده اما با خطا. واژگان: در حال رشد. کاربرد: صفت تفضیلی و عالی؛ قیدها.',
     'reviews.rubric.englishLevel.6':
       'ایده‌ها: پیچیده‌تر. جملات: بلندتر و پیچیده‌تر. واژگان: کاربردی و انعطاف‌پذیر. کاربرد: زمان‌های کامل و افعال مجهول، با خطای کم یا بدون خطا.',
     'reviews.rubric.englishLevel.7':
@@ -788,7 +786,8 @@ const TRANSLATIONS = {
       'ایده‌ها: پیچیده/پیشرفته. جملات: پیچیده و متنوع. واژگان: گسترده و متنوع. کاربرد: استعاره، تشبیه و اصطلاحات.',
     'reviews.rubric.englishLevel.9':
       'ایده‌ها: پیچیده/پیشرفته. جملات: پیچیده و متنوع. واژگان: بسیار غنی. کاربرد: طیف کامل ساخت‌های دستوری با خطای کم؛ زبان محاوره‌ای.',
-    'reviews.rubric.englishLevel.10': 'می‌توان آن را با نوشتهٔ یک گویشور بومی انگلیسی اشتباه گرفت.',
+    'reviews.rubric.englishLevel.10':
+      'نزدیک به روانی سطح بومی؛ خطاهای بسیار کم. می‌توان آن را با نوشتهٔ یک گویشور بومی انگلیسی اشتباه گرفت.',
     'reviews.scalePlaceholder': 'نمره را انتخاب کنید…',
     'reviews.scalePlaceholderFor': 'نمره {{field}} را انتخاب کنید',
     'reviews.scale.lowest': 'پایین‌ترین',
@@ -799,6 +798,7 @@ const TRANSLATIONS = {
     'reviews.studentList': 'متقاضیان',
     'reviews.nextStudent': 'متقاضی بعدی',
     'reviews.savePending': 'به‌زودی ذخیره می‌شود (هر ۳۰ ثانیه)',
+    'reviews.saveNow': 'همین حالا ذخیره کن',
     'reviews.saveSaving': 'در حال ذخیره...',
     'reviews.saveSavedRecently': 'کمتر از ۱ دقیقه پیش ذخیره شد',
     'reviews.saveSavedMinutesAgo': '{{minutes}} دقیقه پیش ذخیره شد',

@@ -8656,8 +8656,6 @@ function PortalAdminEmailsPage() {
   );
 }
 
-const SCALE_0_TO_10 = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '10'];
-const SCALE_0_TO_10_DESC = [...SCALE_0_TO_10].reverse();
 const SCALE_1_TO_10 = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10'];
 const SCALE_1_TO_10_DESC = [...SCALE_1_TO_10].reverse();
 const ENGLISH_LEVEL_SCORES = SCALE_1_TO_10;
@@ -8674,7 +8672,7 @@ const FITNESS_CRITERIA = [
 const REVIEW_RUBRIC_TIERS = [
   { tierKey: 'highest', score: '10', labelKey: 'reviews.rubric.highestLabel' },
   { tierKey: 'adequate', score: '5', labelKey: 'reviews.rubric.adequateLabel' },
-  { tierKey: 'low', score: '0', labelKey: 'reviews.rubric.lowLabel' },
+  { tierKey: 'low', score: '1', labelKey: 'reviews.rubric.lowLabel' },
 ];
 
 const EMPTY_REVIEW_DRAFT = {
@@ -8721,13 +8719,15 @@ function reviewDraftIsSaveable(draft) {
     return false;
   }
   return FITNESS_CRITERIA.every((criterion) =>
-    SCALE_0_TO_10.includes(String(draft[criterion.id] ?? '').trim()),
+    SCALE_1_TO_10.includes(String(draft[criterion.id] ?? '').trim()),
   );
 }
 
-function reviewScaleOptionLabel(score, t) {
-  if (score === '0') {
-    return `0 — ${t('reviews.scale.lowest')}`;
+function reviewScaleOptionLabel(score, t, { englishLevel = false } = {}) {
+  if (score === '1') {
+    return englishLevel
+      ? `1 — ${t('reviews.scale.none')}`
+      : `1 — ${t('reviews.scale.lowest')}`;
   }
   if (score === '5') {
     return `5 — ${t('reviews.scale.midpoint')}`;
@@ -8745,7 +8745,8 @@ function PortalReviewScaleSelect({
   fieldLabel,
   t,
   wide = false,
-  scores = SCALE_0_TO_10_DESC,
+  englishLevel = false,
+  scores = SCALE_1_TO_10_DESC,
 }) {
   const placeholder = fieldLabel
     ? t('reviews.scalePlaceholderFor', { field: fieldLabel })
@@ -8761,7 +8762,7 @@ function PortalReviewScaleSelect({
       <option value="">{placeholder}</option>
       {scores.map((score) => (
         <option key={score} value={score}>
-          {reviewScaleOptionLabel(score, t)}
+          {reviewScaleOptionLabel(score, t, { englishLevel })}
         </option>
       ))}
     </select>
@@ -9102,7 +9103,7 @@ function formatReviewSaveStatusLabel({ saveStatus, lastSavedAt, nowMs, t }) {
   return '';
 }
 
-function PortalReviewSaveStatus({ saveStatus, lastSavedAt, t }) {
+function PortalReviewSaveStatus({ saveStatus, lastSavedAt, onSaveNow, t }) {
   const [nowMs, setNowMs] = useState(() => Date.now());
 
   useEffect(() => {
@@ -9116,7 +9117,7 @@ function PortalReviewSaveStatus({ saveStatus, lastSavedAt, t }) {
   }, [saveStatus, lastSavedAt]);
 
   const label = formatReviewSaveStatusLabel({ saveStatus, lastSavedAt, nowMs, t });
-  if (!label) {
+  if (!label && saveStatus !== 'pending') {
     return null;
   }
 
@@ -9154,7 +9155,18 @@ function PortalReviewSaveStatus({ saveStatus, lastSavedAt, t }) {
           </svg>
         )}
       </span>
-      <span className="portal-review-save-indicator-label">{label}</span>
+      <span className="portal-review-save-indicator-label">
+        {saveStatus === 'pending' ? (
+          <>
+            {t('reviews.savePending')}{' '}
+            <button type="button" className="portal-review-save-now-link" onClick={onSaveNow}>
+              {t('reviews.saveNow')}
+            </button>
+          </>
+        ) : (
+          label
+        )}
+      </span>
     </span>
   );
 }
@@ -9208,6 +9220,35 @@ function useReviewAutoSave({ drafts, onSaveOne }) {
     [flushApplicant],
   );
 
+  const saveNow = useCallback(async () => {
+    for (const timer of debounceTimersRef.current.values()) {
+      window.clearTimeout(timer);
+    }
+    debounceTimersRef.current.clear();
+
+    const applicantIds = Array.from(dirtyRef.current);
+    if (applicantIds.length === 0) {
+      return;
+    }
+
+    setSaveStatus('saving');
+    try {
+      for (const applicantId of applicantIds) {
+        const draft = draftsRef.current[applicantId];
+        if (!reviewDraftCanPersist(draft)) {
+          dirtyRef.current.delete(applicantId);
+          continue;
+        }
+        await onSaveOneRef.current(applicantId, draft);
+        dirtyRef.current.delete(applicantId);
+      }
+      setLastSavedAt(Date.now());
+      setSaveStatus('saved');
+    } catch {
+      setSaveStatus('error');
+    }
+  }, []);
+
   useEffect(() => {
     return () => {
       for (const timer of debounceTimersRef.current.values()) {
@@ -9220,7 +9261,7 @@ function useReviewAutoSave({ drafts, onSaveOne }) {
     };
   }, [flushApplicant]);
 
-  return { markDirty, saveStatus, lastSavedAt };
+  return { markDirty, saveNow, saveStatus, lastSavedAt };
 }
 
 function getReviewPromptDisplayText(text, showTranslation) {
@@ -9589,6 +9630,7 @@ function PortalReviewCard({
               <span className="portal-review-visually-hidden">{t('reviews.levelLabel')}</span>
               <PortalReviewScaleSelect
                 wide
+                englishLevel
                 t={t}
                 fieldLabel={t('reviews.levelLabel')}
                 value={draft.englishLevel}
@@ -9740,12 +9782,77 @@ function PortalReviewInstructionsEssay({ text, className = '' }) {
   );
 }
 
+function PortalReviewPracticeScoreNote({ note }) {
+  if (!note) {
+    return null;
+  }
+  return (
+    <dl className="portal-review-instructions-score-dl">
+      <div>
+        <dt>English Level</dt>
+        <dd>
+          <strong>{note.englishLevel}</strong>
+          <p>{note.englishNote}</p>
+        </dd>
+      </div>
+      <div>
+        <dt>Instruction Following</dt>
+        <dd>{note.instructionFollowing}</dd>
+      </div>
+      <div>
+        <dt>Independent / Original Thinking</dt>
+        <dd>{note.originalThinking}</dd>
+      </div>
+      <div>
+        <dt>Demonstration of Character</dt>
+        <dd>{note.character}</dd>
+      </div>
+    </dl>
+  );
+}
+
+const PRACTICE_SCORE_NOTES_BY_ID = new Map(
+  PRACTICE_SCORE_NOTES.map((note) => [note.id, note]),
+);
+
+function practiceScoreNoteForEssayId(essayId) {
+  return (
+    PRACTICE_SCORE_NOTES_BY_ID.get(essayId) ??
+    PRACTICE_SCORE_NOTES_BY_ID.get(String(essayId).replace(/a$/, '')) ??
+    null
+  );
+}
+
+function PortalReviewPracticeEssay({ essay }) {
+  const [scoresOpen, setScoresOpen] = useState(false);
+  const scoreNote = practiceScoreNoteForEssayId(essay.id);
+
+  return (
+    <div className="portal-review-instructions-example">
+      <h5 className="portal-review-instructions-example-title">Essay {essay.id}</h5>
+      <PortalReviewInstructionsEssay text={essay.text} />
+      {scoreNote ? (
+        <div className="portal-review-instructions-practice-scores">
+          <button
+            type="button"
+            className="portal-review-instructions-scores-toggle"
+            aria-expanded={scoresOpen}
+            onClick={() => setScoresOpen((current) => !current)}
+          >
+            {scoresOpen ? 'Hide suggested scores' : 'Show suggested scores'}
+          </button>
+          {scoresOpen ? <PortalReviewPracticeScoreNote note={scoreNote} /> : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function PortalReviewInstructionsPanel() {
   return (
     <article className="portal-review-instructions" aria-label={REVIEW_INSTRUCTIONS.title}>
       <header className="portal-review-instructions-header">
         <h3 className="portal-review-instructions-title">{REVIEW_INSTRUCTIONS.title}</h3>
-        <p className="portal-review-instructions-note">{REVIEW_INSTRUCTIONS.scaleNote}</p>
       </header>
 
       <section className="portal-review-instructions-section">
@@ -9822,7 +9929,7 @@ function PortalReviewInstructionsPanel() {
                     <th scope="col">Criterion</th>
                     <th scope="col">Highest (10)</th>
                     <th scope="col">Adequate (5)</th>
-                    <th scope="col">Low (0)</th>
+                    <th scope="col">Low (1)</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -9859,56 +9966,22 @@ function PortalReviewInstructionsPanel() {
       <section className="portal-review-instructions-section">
         <h4 className="portal-review-instructions-section-title">Further practice</h4>
         <p className="portal-review-instructions-subtitle">
-          Read through these essays and think about how you would score them. Suggested scores follow
-          in the next section.
+          Read through these essays and think about how you would score them.
         </p>
         {PRACTICE_ESSAYS.map((essay) => (
-          <div key={essay.id} className="portal-review-instructions-example">
-            <h5 className="portal-review-instructions-example-title">Essay {essay.id}</h5>
-            <PortalReviewInstructionsEssay text={essay.text} />
-          </div>
-        ))}
-      </section>
-
-      <section className="portal-review-instructions-section">
-        <h4 className="portal-review-instructions-section-title">Suggested scores</h4>
-        {PRACTICE_SCORE_NOTES.map((note) => (
-          <div key={note.id} className="portal-review-instructions-score-note">
-            <h5 className="portal-review-instructions-example-title">Essay {note.id}</h5>
-            <dl className="portal-review-instructions-score-dl">
-              <div>
-                <dt>English Level</dt>
-                <dd>
-                  <strong>{note.englishLevel}</strong>
-                  <p>{note.englishNote}</p>
-                </dd>
-              </div>
-              <div>
-                <dt>Instruction Following</dt>
-                <dd>{note.instructionFollowing}</dd>
-              </div>
-              <div>
-                <dt>Independent / Original Thinking</dt>
-                <dd>{note.originalThinking}</dd>
-              </div>
-              <div>
-                <dt>Demonstration of Character</dt>
-                <dd>{note.character}</dd>
-              </div>
-            </dl>
-          </div>
+          <PortalReviewPracticeEssay key={essay.id} essay={essay} />
         ))}
       </section>
     </article>
   );
 }
 
-function PortalReviewStudentList({ assignments, drafts, selectedApplicantId, onSelect, saveStatus, lastSavedAt, t }) {
+function PortalReviewStudentList({ assignments, drafts, selectedApplicantId, onSelect, saveStatus, lastSavedAt, onSaveNow, t }) {
   return (
     <aside className="portal-review-sidebar" aria-label={t('reviews.studentList')}>
       <div className="portal-review-sidebar-head">
         <h3 className="portal-review-sidebar-title">{t('reviews.studentList')}</h3>
-        <PortalReviewSaveStatus saveStatus={saveStatus} lastSavedAt={lastSavedAt} t={t} />
+        <PortalReviewSaveStatus saveStatus={saveStatus} lastSavedAt={lastSavedAt} onSaveNow={onSaveNow} t={t} />
       </div>
       <ul className="portal-review-student-list">
         {assignments.map((assignment) => {
@@ -9985,7 +10058,7 @@ function PortalReviewApplicationsPage() {
     });
   }, []);
 
-  const { markDirty, saveStatus, lastSavedAt } = useReviewAutoSave({ drafts, onSaveOne: saveOne });
+  const { markDirty, saveNow, saveStatus, lastSavedAt } = useReviewAutoSave({ drafts, onSaveOne: saveOne });
 
   const refreshStreamTokens = useCallback(async () => {
     const data = await portalApiPost('/api/portal-reviews/list', {}, { timeoutMs: 45000 });
@@ -10033,7 +10106,10 @@ function PortalReviewApplicationsPage() {
           };
           const normalizeFitnessScale = (value) => {
             const trimmed = String(value ?? '').trim();
-            return SCALE_0_TO_10.includes(trimmed) ? trimmed : '';
+            if (trimmed === '0') {
+              return '1';
+            }
+            return SCALE_1_TO_10.includes(trimmed) ? trimmed : '';
           };
           const englishFromApi = String(row.englishLevel ?? row.recommendedLevel ?? '').trim();
           nextDrafts[row.applicantId] = {
@@ -10178,6 +10254,7 @@ function PortalReviewApplicationsPage() {
                   onSelect={handleSelectApplicant}
                   saveStatus={saveStatus}
                   lastSavedAt={lastSavedAt}
+                  onSaveNow={saveNow}
                   t={t}
                 />
                 <div className="portal-review-detail" ref={reviewDetailRef}>

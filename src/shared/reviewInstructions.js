@@ -58,11 +58,15 @@ function englishLevelDetailToLines(detail) {
 const ENGLISH_LEVEL_RUBRIC = [
   {
     score: '1',
+    summary: 'No English. Essay is written in Dari.',
+  },
+  {
+    score: '2',
     summary:
       'Very limited English. Essay is written in a combination of Dari and English or is extremely short, consisting of broken or very basic English sentences.',
   },
   {
-    score: '2',
+    score: '3',
     detail: {
       ideas: 'Very simple',
       sentences: 'Short but readable.',
@@ -71,7 +75,7 @@ const ENGLISH_LEVEL_RUBRIC = [
     },
   },
   {
-    score: '3',
+    score: '4',
     detail: {
       ideas: 'Simple',
       sentences: 'Longer, but not extremely complex',
@@ -83,7 +87,7 @@ const ENGLISH_LEVEL_RUBRIC = [
     },
   },
   {
-    score: '4',
+    score: '5',
     detail: {
       ideas: 'Slightly more complex',
       sentences: 'Complex, but with errors',
@@ -92,7 +96,7 @@ const ENGLISH_LEVEL_RUBRIC = [
     },
   },
   {
-    score: '5',
+    score: '6',
     detail: {
       ideas: 'More complex',
       sentences: 'Longer and more complex',
@@ -101,7 +105,7 @@ const ENGLISH_LEVEL_RUBRIC = [
     },
   },
   {
-    score: '6',
+    score: '7',
     detail: {
       ideas: 'Sophisticated',
       sentences: 'Complex but sometimes formulaic',
@@ -110,7 +114,7 @@ const ENGLISH_LEVEL_RUBRIC = [
     },
   },
   {
-    score: '7',
+    score: '8',
     detail: {
       ideas: 'Sophisticated',
       sentences: 'Complex and varied.',
@@ -119,7 +123,7 @@ const ENGLISH_LEVEL_RUBRIC = [
     },
   },
   {
-    score: '8',
+    score: '9',
     detail: {
       ideas: 'Sophisticated',
       sentences: 'Complex and varied',
@@ -131,12 +135,9 @@ const ENGLISH_LEVEL_RUBRIC = [
     },
   },
   {
-    score: '9',
-    summary: 'Approaching native-level fluency; very few noticeable errors.',
-  },
-  {
     score: '10',
-    summary: 'Could be mistaken for a native English speaker.',
+    summary:
+      'Approaching native-level fluency; very few noticeable errors. Could be mistaken for a native English speaker.',
   },
 ];
 
@@ -157,23 +158,23 @@ const AI_ESSAY_EXAMPLES = [
 /** @type {Array<{ score: string, label: string, text: string }>} */
 const TRAINING_ESSAY_EXAMPLES = [
   {
-    score: '0',
+    score: '1',
     label: 'English Level 1',
     text: `من یک روز از دروازه بیرون شدم و به سوی کورس میرفتم و در پیش روی دروازه یک زن بود که بسیار خسته مانده نشسته بود و سودهای زیادی در دستش بود سوال کردم چی شده آن زن جوابم را داد گفت خیلی مانده شدم و توان ای سوداها را ندارم من هم دلم به حال او زن سوخت گفتم مشگل نداره من تا خانه تان مبرم بی آنگه فکر کنم کورس ام نا وقت شده یا دیگر به خانه آن زن رساندم و پس برگشتم تا کورس بروم خیلی نا وقت شده بود خیلی به عجله رفتم دیدم ده دقیقه گذشته و استاد در داخل صنف اجازه نداد با خودم گفتم مشگل نداره توانستم امروز یکی را خوشحال کنم و خلاصه خود را اینطور تعریف میکنم بسیار مهربان دلسوز هستم وبه مردم ناتوان کمک میکنم هر چند چیز مهم را از دست بدهم`,
   },
   {
-    score: '1',
+    score: '2',
     label: 'English Level 2',
     text: `hi my iam Zahra and when i was 16 Iget married and  i have a baby even i am very interest English language and after learn English i will apply for a schol arship and complete my education
 سلام مه سمیه استم 16 سالم بود  که ازدواج کردم یک طفل دارم از همو اول دوست داشتم انگلیسی را وقتی انگلیسی ره یادم گرفتم باز بخیر ده اسکالرشیپ بخاطر تکمیل تحصیلم اپلایی میکنم "`,
   },
   {
-    score: '2',
+    score: '3',
     label: 'English Level 3',
     text: `my name is Talia and I am 15 year old I live in a small city in Badakhshan I have many friend in my school One day my classmate was very sad because she no understand math she always feel bad when teacher ask her question. I say her dont worry I help you I go to her home and we doing study together she is try hard and now she can do math very good I feel very happy because I help her she also is happy and now she help other students too I think help people is very good thing I want be a teacher in future and help more girls in my city for learn and become strong`,
   },
   {
-    score: '3',
+    score: '4',
     label: 'English Level 4',
     text: `I'm Fatima an Afghan girl , who is simple and dreamy , like i want go abroad for counting my education but for this, I have to learn English and , we don't have allow to get out home to learn something, for this reason I want to learn online,
 I think when receive my goals I not only I think but also I believe I can live like other women in the world, who can drive, can say no, can be taken out of the house alone.and full of positive energy.
@@ -181,7 +182,7 @@ And then I can help others girls to learn English language and skills.
 When I was 4 grades in school, one day my teacher asked me to write something in English but I can not and she slapped me.and I ashamed it was just a simple thing for her but she destroyed my mood , andafter that I never give up and try to learn English .`,
   },
   {
-    score: '4',
+    score: '5',
     label: 'English Level 5',
     text: `In the name of Allah.
 My name is Maria.
@@ -189,14 +190,14 @@ When I was student at school I was teaching to my village childrens; now also I 
 Thanks a lot.`,
   },
   {
-    score: '5',
+    score: '6',
     label: 'English Level 6',
     text: `Through my leadership skill ,I run a club of 10 girls working collaboratively to build  our capacities, accomplishing activities like painting pictures  ,displaying them in exhibition like TIKA to promote independence for myself and club members by selling pictures .Even though, I help them with academic studies too ,since they find studying online difficult due to financial problems. Their growth always fills me with pride for creating a safe space despite of education ban.Also ,i am currently teaching english language for the elementary level in my home for the project of JRS. I have always witnessed my people suffering from pain , financial problems even finding hard to pay tuition of their children classes and school or witnessing the bsn of classes and schools for girls always inspires me to serve and 
 Help them by the step i have gotten .I have started teaching english volunteerly for my people childrens and girls to find the path of efucatiin more support.
 One of my sweetest memory from my teaching was that I had a student named Nazanin who hated studying English and never tried to participate in class activities. But I helped her by dedicating extra time, leading and livening up her motivation  through, using innovative and fun methods of instruction .One day ,her mother came visited me to thank me by bringing gifts a scarf, perfume, and socks, which made me realize how a step of mine brought smiles and made her proud of herself and her family abd promote me to take more bigger steps and not stop to transfer this sensation of pride for individuals and every family .However ,I have student named fatima who is gifted at singing songs especially turkush song but she cannot display her talent for her family and society because of traditional belief they have.Her family thinks a girl mustn't be a singer in our family .Thus what i want to do for Afghan girls is to offer apportunities for indivuduals to find and display their talents with enough support of raising their voices and growth`,
   },
   {
-    score: '6',
+    score: '7',
     label: 'English Level 7',
     text: `"At first I would like to say thank you for this opportunity for afghan girl.
 I am an afghan girl who live in Kabul ,Afghanistan. I was studying economic at Kabul university but because of some circumstances I couldn't continue the study.
@@ -210,7 +211,7 @@ Once again I would like to say if I finish English this time successfully I will
 So I hope this program help me to come true all my dreams and find myself once again. I need others help to find my own way."`,
   },
   {
-    score: '7',
+    score: '8',
     label: 'English Level 8',
     text: `My name is Sairah, and I live in Herat province. I was a medical student, but after the Taliban regime came , I could not continue my lessons, Due to the challenges the  girls face in Afghanistan ,  I am unable to continue my education. Even if I try to study online, I often face internet problems.
 
@@ -226,7 +227,7 @@ My father is  a role model for. Even with many challenges, he was able to become
 Unfortunately, because of the current situation in Afghanistan, it is not possible for me to continue my medical education in our country, and That is why I want to learn English. If I can speak English well, I will have the chance to study in another country where I can follow my dreams and become a doctor.`,
   },
   {
-    score: '8',
+    score: '9',
     label: 'English Level 9',
     text: `My father was a professional engineer who built houses for people so that we could earn enough to support our lives. After some years, his bosses wanted him to make plans for houses in the computer and explain all the parts of the building in English to the project managers. Since he was not educated and more importantly “didn’t know English”, it was difficult for him to find job and this was one of the most important challenges he was faced during his career. That’s why I was sent to English centers since childhood, he didn’t want me to be like him. My father was always appreciating me to learn English and do my best. I started learning English language since I was a child and continued it consistently till now. I love speaking English, watching English movies, communicating with foreign people, more important than everything else I love understanding a new language because I feel like I can have a new citizenship, culture, and group of friends. I want to continue learning this language and take TOEFL test, Duolingo test, and do my best to be an expert in English language. I hope I can do it.`,
   },
@@ -248,7 +249,7 @@ const FITNESS_CRITERIA_RUBRIC = [
         text: 'There is some misunderstanding of the instructions or prompts.',
       },
       {
-        score: '0',
+        score: '1',
         label: 'Low',
         text: 'The student has not understood or followed the instructions, or does not discuss the prompt.',
       },
@@ -269,7 +270,7 @@ const FITNESS_CRITERIA_RUBRIC = [
         text: 'The student shows some evidence of original thinking.',
       },
       {
-        score: '0',
+        score: '1',
         label: 'Low',
         text: "The student's ideas are very basic or clichéd. You've heard this a lot before.",
       },
@@ -290,7 +291,7 @@ const FITNESS_CRITERIA_RUBRIC = [
         text: 'There is some evidence of a strong personal character. They might add something to the community.',
       },
       {
-        score: '0',
+        score: '1',
         label: 'Low',
         text: 'There is no real evidence of a strong personal character. You don’t feel that this person would add anything to the AESOP community.',
       },
@@ -396,7 +397,7 @@ He was a hardworking, dedicated, wise and motivated individual who was always ea
 const PRACTICE_SCORE_NOTES = [
   {
     id: '1',
-    englishLevel: '6–7',
+    englishLevel: '7–8',
     englishNote:
       'While there are a lot of mistakes here, the use of English is quite complex. The applicant is using passive verbs and modal verbs as well as colloquialisms (“Like OMG is it me?”). It’s not surprising to me that this is someone who learns English from YouTube.',
     instructionFollowing: '10 — Responds to the prompt.',
@@ -407,7 +408,7 @@ const PRACTICE_SCORE_NOTES = [
   },
   {
     id: '2',
-    englishLevel: '3',
+    englishLevel: '4',
     englishNote:
       'Very simple sentences, mostly in the present tense in spite of relating a past event. The applicant is clearly stretching the limits of her English to tell this story.',
     instructionFollowing: '10 — Responds to a prompt',
@@ -418,7 +419,7 @@ const PRACTICE_SCORE_NOTES = [
   },
   {
     id: '3',
-    englishLevel: '2',
+    englishLevel: '3',
     englishNote: 'This is the most simple, basic level of English communication.',
     instructionFollowing: '10 — Responds to the prompt— this is a story that tells us about the applicant.',
     originalThinking:
@@ -428,7 +429,7 @@ const PRACTICE_SCORE_NOTES = [
   },
   {
     id: '4',
-    englishLevel: '4',
+    englishLevel: '5',
     englishNote:
       'While the English is basic with many errors, the applicant is successfully using multiple verb tenses.',
     instructionFollowing: '5 — The applicant appears to be responding to multiple essay prompts.',
@@ -438,7 +439,7 @@ const PRACTICE_SCORE_NOTES = [
   },
   {
     id: '5',
-    englishLevel: '8',
+    englishLevel: '9',
     englishNote: 'There’s not much to judge, but it seems quite advanced.',
     instructionFollowing: '2 — Doesn’t respond to any of the prompts.',
     originalThinking:
@@ -450,7 +451,6 @@ const PRACTICE_SCORE_NOTES = [
 
 const REVIEW_INSTRUCTIONS = {
   title: '2026–2027 Rubric for Applications',
-  scaleNote: 'Portal dropdowns use scores 1–10.',
 };
 
 module.exports = {

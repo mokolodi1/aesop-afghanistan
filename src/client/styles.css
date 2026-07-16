@@ -4836,6 +4836,50 @@ html[dir='rtl'] .portal-voice-memo-substeps {
   margin-top: 10px;
 }
 
+.portal-review-instructions-practice-scores {
+  margin-top: 10px;
+}
+
+.portal-review-instructions-scores-toggle {
+  display: inline-flex;
+  align-items: center;
+  margin: 0;
+  padding: 6px 12px;
+  border: 1px solid var(--aesop-line, #e7e7e7);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--aesop-ink-soft, #454545);
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 600;
+  line-height: 1.2;
+  cursor: pointer;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease,
+    color 0.15s ease;
+}
+
+.portal-review-instructions-scores-toggle:hover {
+  border-color: #c5cdd8;
+  background: #fafafa;
+}
+
+.portal-review-instructions-scores-toggle[aria-expanded='true'] {
+  border-color: var(--aesop-teal-dark, hsl(11.73, 82.49%, 47%));
+  background: var(--aesop-sky-tint, hsl(11.73, 38%, 96%));
+  color: var(--aesop-teal-dark, hsl(11.73, 82.49%, 47%));
+}
+
+.portal-review-instructions-scores-toggle:focus-visible {
+  outline: 2px solid var(--aesop-teal-dark, #006b6f);
+  outline-offset: 2px;
+}
+
+.portal-review-instructions-practice-scores .portal-review-instructions-score-dl {
+  margin-top: 10px;
+}
+
 .portal-review-instructions-score-dl {
   margin: 0;
   display: grid;
@@ -4946,6 +4990,32 @@ html[dir='rtl'] .portal-voice-memo-substeps {
 .portal-review-save-indicator-label {
   text-align: end;
   line-height: 1.15;
+}
+
+.portal-review-save-now-link {
+  display: inline;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--aesop-teal-dark, hsl(11.73, 82.49%, 47%));
+  font: inherit;
+  font-size: inherit;
+  font-weight: 600;
+  line-height: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.portal-review-save-now-link:hover {
+  color: var(--aesop-teal, hsl(11.73, 82.49%, 57%));
+}
+
+.portal-review-save-now-link:focus-visible {
+  outline: 2px solid var(--aesop-teal-dark, #006b6f);
+  outline-offset: 2px;
+  border-radius: 2px;
 }
 
 .portal-review-save-indicator--pending,
