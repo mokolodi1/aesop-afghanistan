@@ -12,7 +12,7 @@ let initPromise = null;
 let sheetsMetricsHooked = false;
 const SHEETS_SCOPE = "https://www.googleapis.com/auth/spreadsheets";
 
-/** Cap Sheets traffic hard while sync scripts/jobs run (~20 req/min). */
+/** Cap Sheets traffic hard while internal sync scripts/jobs run (~20 req/min). */
 const SHEETS_SCRIPT_MAX_REQUESTS_PER_MINUTE = 20;
 const SHEETS_SCRIPT_RATE_WINDOW_MS = 60 * 1000;
 /** Portal/on-demand paths use a short budget; cron jobs pass a longer deadlineAt. */
@@ -23,13 +23,18 @@ const SHEETS_RETRY_AFTER_CAP_MS = 15 * 60 * 1000;
 /** Throttled calls keep retrying for at least this long even when the job deadline is near. */
 const SHEETS_THROTTLE_MIN_RETRY_MS = 10 * 60 * 1000;
 
+/** Max row updates per loadCells + saveUpdatedCells batch. */
+const SHEETS_BATCH_WRITE_MAX_ITEMS = 200;
+/** Max inclusive row span per batch when updates are sparse. */
+const SHEETS_BATCH_WRITE_MAX_ROW_SPAN = 200;
+
 /** @type {number[]} */
 let sheetsScriptRequestTimestamps = [];
 let sheetsScriptRateLimitEnabled = false;
 
 /**
- * Enable proactive Sheets throttling for cron scripts and other batch runners.
- * Portal on-demand paths leave this off.
+ * Enable proactive Sheets throttling for cron scripts and other batch runners only.
+ * Portal/customer on-demand paths must leave this off (see scripts/run-job.js).
  * @param {boolean} enabled
  */
 function setSheetsScriptRateLimit(enabled) {
@@ -44,16 +49,6 @@ function isSheetsScriptRateLimitEnabled() {
   return sheetsScriptRateLimitEnabled;
 }
 
-/**
- * Long-running syncs pass `deadlineAt`; treat that as script mode too.
- * @param {number|undefined|null} deadlineAt
- */
-function maybeEnableSheetsScriptRateLimit(deadlineAt) {
-  if (Number.isFinite(deadlineAt)) {
-    sheetsScriptRateLimitEnabled = true;
-  }
-}
-
 function sleep(ms) {
   const delay = Number.isFinite(ms) ? Math.max(0, ms) : 250;
   return new Promise((resolve) => setTimeout(resolve, delay));
@@ -61,6 +56,7 @@ function sleep(ms) {
 
 /**
  * Wait until the rolling minute window has room for `count` more Sheets calls.
+ * No-op when script throttling is disabled (customer/on-demand paths).
  * @param {number} [count]
  */
 async function acquireSheetsRequestSlots(count = 1) {
@@ -229,7 +225,6 @@ async function withSheetsRetry(label, fn, options = {}) {
  * @returns {Promise<T>}
  */
 async function sheetsApiCall(label, fn, options = {}) {
-  maybeEnableSheetsScriptRateLimit(options.deadlineAt);
   const requestSlots = options.requestSlots ?? 1;
   return withSheetsRetry(
     label,
@@ -766,8 +761,6 @@ function isPeopleLastLoginSyncEnabled() {
 }
 
 const PEOPLE_LAST_LOGIN_FLUSH_INTERVAL_MS = 60_000;
-const PEOPLE_LAST_LOGIN_WRITE_CHUNK_SIZE = 100;
-const PEOPLE_LAST_LOGIN_WRITE_MAX_ROW_SPAN = 500;
 
 /** @type {Map<string, { userId: string, loginAt: Date }>} */
 const pendingPeopleLastLogins = new Map();
@@ -777,10 +770,21 @@ let peopleLastLoginFlusherStarted = false;
 let peopleLastLoginFlushPromise = null;
 
 /**
+ * Group sorted row updates into loadCells-friendly batches.
+ * Caps both item count and row span so sparse rows don't allocate a giant cell grid.
  * @param {Array<{ gridRowIdx: number }>} pendingSorted
+ * @param {{ maxItems?: number, maxRowSpan?: number }} [options]
  * @returns {typeof pendingSorted[]}
  */
-function chunkPeopleLastLoginWrites(pendingSorted) {
+function chunkSheetRowWrites(pendingSorted, options = {}) {
+  const maxItems = Math.max(
+    1,
+    Math.floor(options.maxItems ?? SHEETS_BATCH_WRITE_MAX_ITEMS),
+  );
+  const maxRowSpan = Math.max(
+    1,
+    Math.floor(options.maxRowSpan ?? SHEETS_BATCH_WRITE_MAX_ROW_SPAN),
+  );
   /** @type {typeof pendingSorted[]} */
   const chunks = [];
   /** @type {typeof pendingSorted} */
@@ -791,10 +795,7 @@ function chunkPeopleLastLoginWrites(pendingSorted) {
       continue;
     }
     const rowSpan = entry.gridRowIdx - current[0].gridRowIdx + 1;
-    if (
-      current.length >= PEOPLE_LAST_LOGIN_WRITE_CHUNK_SIZE ||
-      rowSpan > PEOPLE_LAST_LOGIN_WRITE_MAX_ROW_SPAN
-    ) {
+    if (current.length >= maxItems || rowSpan > maxRowSpan) {
       chunks.push(current);
       current = [entry];
       continue;
@@ -805,6 +806,14 @@ function chunkPeopleLastLoginWrites(pendingSorted) {
     chunks.push(current);
   }
   return chunks;
+}
+
+/**
+ * @param {Array<{ gridRowIdx: number }>} pendingSorted
+ * @returns {typeof pendingSorted[]}
+ */
+function chunkPeopleLastLoginWrites(pendingSorted) {
+  return chunkSheetRowWrites(pendingSorted);
 }
 
 /**
@@ -1994,24 +2003,30 @@ async function syncAllPeoplePastDingColumns() {
   }
 
   pending.sort((a, b) => a.gridRowIdx - b.gridRowIdx);
-  const minIdx = pending[0].gridRowIdx;
-  const maxIdx = pending[pending.length - 1].gridRowIdx;
+  const writeChunks = chunkSheetRowWrites(pending);
+  let updated = 0;
 
-  await peopleSheet.loadCells({
-    startRowIndex: minIdx,
-    endRowIndex: maxIdx + 1,
-    startColumnIndex: pastColIdx,
-    endColumnIndex: pastColIdx + 1,
-  });
+  for (const chunk of writeChunks) {
+    const minIdx = chunk[0].gridRowIdx;
+    const maxIdx = chunk[chunk.length - 1].gridRowIdx;
 
-  for (const p of pending) {
-    peopleSheet.getCell(p.gridRowIdx, pastColIdx).value = p.summary;
+    await peopleSheet.loadCells({
+      startRowIndex: minIdx,
+      endRowIndex: maxIdx + 1,
+      startColumnIndex: pastColIdx,
+      endColumnIndex: pastColIdx + 1,
+    });
+
+    for (const p of chunk) {
+      peopleSheet.getCell(p.gridRowIdx, pastColIdx).value = p.summary;
+    }
+
+    await peopleSheet.saveUpdatedCells();
+    updated += chunk.length;
   }
 
-  await peopleSheet.saveUpdatedCells();
-
   return {
-    updated: pending.length,
+    updated,
     skippedNoPeople,
     idCount: byNormalizedId.size,
   };
@@ -2246,7 +2261,10 @@ async function replaceTabData(title, headerByIndex, indexedRows) {
 
   const rows = indexedRows.map((indexed) => buildIndexedRow(indexed));
   if (rows.length > 0) {
-    await worksheet.addRows(rows, { raw: false, insert: false });
+    for (let offset = 0; offset < rows.length; offset += SHEETS_BATCH_WRITE_MAX_ITEMS) {
+      const batch = rows.slice(offset, offset + SHEETS_BATCH_WRITE_MAX_ITEMS);
+      await worksheet.addRows(batch, { raw: false, insert: false });
+    }
   }
   return rows.length;
 }
@@ -2958,22 +2976,30 @@ async function syncPeopleStatusOnPeopleSheet(roleContext = {}) {
     return { updated: 0, skipped };
   }
 
-  const minRow = Math.min(...pending.map((entry) => entry.gridRowIdx));
-  const maxRow = Math.max(...pending.map((entry) => entry.gridRowIdx)) + 1;
-  await peopleSheet.loadCells({
-    startRowIndex: minRow,
-    endRowIndex: maxRow,
-    startColumnIndex: statusColIdx,
-    endColumnIndex: statusColIdx + 1,
-  });
+  pending.sort((a, b) => a.gridRowIdx - b.gridRowIdx);
+  const writeChunks = chunkSheetRowWrites(pending);
+  let updated = 0;
 
-  for (const entry of pending) {
-    const cell = peopleSheet.getCell(entry.gridRowIdx, statusColIdx);
-    cell.value = entry.value;
+  for (const chunk of writeChunks) {
+    const minRow = chunk[0].gridRowIdx;
+    const maxRow = chunk[chunk.length - 1].gridRowIdx + 1;
+    await peopleSheet.loadCells({
+      startRowIndex: minRow,
+      endRowIndex: maxRow,
+      startColumnIndex: statusColIdx,
+      endColumnIndex: statusColIdx + 1,
+    });
+
+    for (const entry of chunk) {
+      const cell = peopleSheet.getCell(entry.gridRowIdx, statusColIdx);
+      cell.value = entry.value;
+    }
+
+    await peopleSheet.saveUpdatedCells();
+    updated += chunk.length;
   }
 
-  await peopleSheet.saveUpdatedCells();
-  return { updated: pending.length, skipped };
+  return { updated, skipped };
 }
 
 /** @deprecated Use syncPeopleStatusOnPeopleSheet */
@@ -3364,6 +3390,9 @@ module.exports = {
   isSheetsThrottleError,
   withSheetsRetry,
   sheetsApiCall,
+  chunkSheetRowWrites,
+  SHEETS_BATCH_WRITE_MAX_ITEMS,
+  SHEETS_BATCH_WRITE_MAX_ROW_SPAN,
   replaceTabData,
   resolveColumnIndex,
   syncAllPeoplePastDingColumns,

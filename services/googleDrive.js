@@ -23,23 +23,30 @@ const DRIVE_RETRY_AFTER_CAP_MS = 15 * 60 * 1000;
 const DRIVE_TRY_AGAIN_LATER_MESSAGE =
   "Your voice note is safe and submitted. We are experiencing high traffic volume and cannot play your audio right now. You may try refreshing the stream later to try again.";
 
-/** Cap Drive traffic hard while sync scripts/jobs run (~20 req/min). */
+/** Cap Drive traffic hard while internal sync scripts/jobs run (~20 req/min). */
 const DRIVE_SCRIPT_MAX_REQUESTS_PER_MINUTE = 20;
 const DRIVE_SCRIPT_RATE_WINDOW_MS = 60 * 1000;
-/**
- * Google allows up to 100 sub-requests per HTTP batch.
- * Keep chunks at/under the script rate cap so acquireDriveRequestSlots can ever succeed
- * (requestSlots === chunk.length; wanting more than the cap spins forever).
- */
-const DRIVE_BATCH_MAX_SUBREQUESTS = DRIVE_SCRIPT_MAX_REQUESTS_PER_MINUTE;
+/** Google multipart batch endpoint allows up to 100 sub-requests per HTTP call. */
+const DRIVE_API_BATCH_MAX_SUBREQUESTS = 100;
 
 /** @type {number[]} */
 let driveScriptRequestTimestamps = [];
 let driveScriptRateLimitEnabled = false;
 
 /**
- * Enable proactive Drive throttling for cron scripts and other batch runners.
- * Portal on-demand paths leave this off.
+ * Batch chunk size for Drive metadata reads. Internal scripts use the 20/min cap;
+ * portal/on-demand paths use Google's full batch limit.
+ * @returns {number}
+ */
+function getDriveBatchMaxSubrequests() {
+  return driveScriptRateLimitEnabled
+    ? DRIVE_SCRIPT_MAX_REQUESTS_PER_MINUTE
+    : DRIVE_API_BATCH_MAX_SUBREQUESTS;
+}
+
+/**
+ * Enable proactive Drive throttling for cron scripts and other batch runners only.
+ * Portal/customer on-demand paths must leave this off (see scripts/run-job.js).
  * @param {boolean} enabled
  */
 function setDriveScriptRateLimit(enabled) {
@@ -55,17 +62,8 @@ function isDriveScriptRateLimitEnabled() {
 }
 
 /**
- * Long-running syncs pass `deadlineAt`; treat that as script mode too.
- * @param {number|undefined|null} deadlineAt
- */
-function maybeEnableDriveScriptRateLimit(deadlineAt) {
-  if (Number.isFinite(deadlineAt)) {
-    driveScriptRateLimitEnabled = true;
-  }
-}
-
-/**
  * Wait until the rolling minute window has room for `count` more Drive calls.
+ * No-op when script throttling is disabled (customer/on-demand paths).
  * @param {number} [count]
  */
 async function acquireDriveRequestSlots(count = 1) {
@@ -194,7 +192,6 @@ async function withDriveRetry(label, fn, options = {}) {
  * @returns {Promise<T>}
  */
 async function driveApiCall(label, fn, options = {}) {
-  maybeEnableDriveScriptRateLimit(options.deadlineAt);
   const requestSlots = options.requestSlots ?? 1;
   return withDriveRetry(
     label,
@@ -257,8 +254,9 @@ async function batchGetDriveFileMetadata(auth, fileIds, fields, retryOptions = {
   }
 
   const encodedFields = encodeURIComponent(fields);
-  for (let offset = 0; offset < uniqueIds.length; offset += DRIVE_BATCH_MAX_SUBREQUESTS) {
-    const chunk = uniqueIds.slice(offset, offset + DRIVE_BATCH_MAX_SUBREQUESTS);
+  const batchSize = getDriveBatchMaxSubrequests();
+  for (let offset = 0; offset < uniqueIds.length; offset += batchSize) {
+    const chunk = uniqueIds.slice(offset, offset + batchSize);
     const boundary = `batch_${Date.now().toString(36)}_${offset}`;
     let body = "";
     for (let index = 0; index < chunk.length; index += 1) {
@@ -313,7 +311,7 @@ async function batchGetDriveFileMetadata(auth, fileIds, fields, retryOptions = {
         }
         return chunkMap;
       },
-      { ...retryOptions, requestSlots: chunk.length },
+      { ...retryOptions, requestSlots: driveScriptRateLimitEnabled ? chunk.length : 1 },
     );
 
     for (const [fileId, data] of chunkResults.entries()) {
@@ -451,8 +449,6 @@ async function scanVoiceMemoFolder(folderId, options = {}) {
   const { extensions, submissionTimeSource } = normalizeVoiceMemoScanOptions(options);
   const filenamePattern = buildVoiceMemoFilenamePattern(extensions);
   const retryOptions = { deadlineAt: options.deadlineAt };
-  maybeEnableDriveScriptRateLimit(options.deadlineAt);
-
   const auth = await buildServiceAccountJwt([DRIVE_READONLY_SCOPE]);
   const drive = google.drive({ version: "v3", auth });
 
@@ -909,7 +905,6 @@ async function probeVoiceMemoDurationFromMedia(drive, fileId, meta, retryOptions
  */
 async function readVoiceMemoDurationSeconds(fileId, options = {}) {
   const retryOptions = { deadlineAt: options.deadlineAt };
-  maybeEnableDriveScriptRateLimit(options.deadlineAt);
 
   let meta = options.metadata;
   let drive = options.drive;
@@ -1000,7 +995,6 @@ async function resolveVoiceMemoDurationsMap(fileIds, options = {}) {
     return map;
   }
 
-  maybeEnableDriveScriptRateLimit(options.deadlineAt);
   const retryOptions = { deadlineAt: options.deadlineAt };
   const auth = await buildServiceAccountJwt([DRIVE_READONLY_SCOPE]);
   const drive = google.drive({ version: "v3", auth });
@@ -1008,7 +1002,7 @@ async function resolveVoiceMemoDurationsMap(fileIds, options = {}) {
 
   /** @type {Map<string, import('googleapis').drive_v3.Schema$File>} */
   let metadataByFileId = new Map();
-  if (driveScriptRateLimitEnabled && uniqueIds.length > 1) {
+  if (uniqueIds.length > 1) {
     metadataByFileId = await batchGetDriveFileMetadata(auth, uniqueIds, metadataFields, retryOptions);
   }
 
@@ -1067,7 +1061,6 @@ async function downloadVoiceMemoFile(fileId, options = {}) {
 
   try {
     const retryOptions = { deadlineAt: options.deadlineAt };
-    maybeEnableDriveScriptRateLimit(options.deadlineAt);
 
     let meta = options.metadata;
     const auth = await buildServiceAccountJwt([DRIVE_READONLY_SCOPE]);

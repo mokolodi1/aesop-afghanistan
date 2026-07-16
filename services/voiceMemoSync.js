@@ -25,6 +25,9 @@ const {
   getWorksheetByTitle,
   resolveColumnIndex,
   sheetsApiCall,
+  chunkSheetRowWrites,
+  SHEETS_BATCH_WRITE_MAX_ITEMS,
+  SHEETS_BATCH_WRITE_MAX_ROW_SPAN,
 } = require("./googleSheets");
 const { recordSheetsApiCall, recordSheetsApiError, recordSheetsApiThrottle } = require("./portalMetrics");
 const { isSheetsScriptRateLimitEnabled, isSheetsThrottleError } = require("./googleSheets");
@@ -44,10 +47,6 @@ const VOICE_NOTE_DATE_HEADERS = [
 ];
 /** Probe/cache Drive durations in chunks so progress survives OOM and GC can reclaim. */
 const VOICE_MEMO_DURATION_PROBE_CHUNK_SIZE = 25;
-/** Applicants sheet writes: keep loadCells ranges small (avoids huge in-memory cell grids). */
-const VOICE_MEMO_SHEET_WRITE_CHUNK_SIZE = 40;
-/** Max inclusive row span per loadCells call (sparse pending rows would otherwise inflate the grid). */
-const VOICE_MEMO_SHEET_WRITE_MAX_ROW_SPAN = 80;
 
 const VOICE_NOTE_LENGTH_HEADERS = [
   "Voice memo length (secs)",
@@ -909,39 +908,6 @@ function chunkArray(items, size) {
 }
 
 /**
- * Group sorted pending sheet updates into loadCells-friendly batches.
- * Caps both item count and row span so sparse Applicants rows don't allocate a giant cell grid.
- * @param {Array<{ gridRowIdx: number }>} pendingSorted
- * @param {{ maxItems?: number, maxRowSpan?: number }} [options]
- * @returns {typeof pendingSorted[]}
- */
-function chunkPendingSheetWrites(pendingSorted, options = {}) {
-  const maxItems = Math.max(1, Math.floor(options.maxItems || VOICE_MEMO_SHEET_WRITE_CHUNK_SIZE));
-  const maxRowSpan = Math.max(1, Math.floor(options.maxRowSpan || VOICE_MEMO_SHEET_WRITE_MAX_ROW_SPAN));
-  /** @type {typeof pendingSorted[]} */
-  const chunks = [];
-  /** @type {typeof pendingSorted} */
-  let current = [];
-  for (const entry of pendingSorted) {
-    if (current.length === 0) {
-      current.push(entry);
-      continue;
-    }
-    const rowSpan = entry.gridRowIdx - current[0].gridRowIdx + 1;
-    if (current.length >= maxItems || rowSpan > maxRowSpan) {
-      chunks.push(current);
-      current = [entry];
-      continue;
-    }
-    current.push(entry);
-  }
-  if (current.length > 0) {
-    chunks.push(current);
-  }
-  return chunks;
-}
-
-/**
  * @param {Array<{ aesopId: string, memo: { fileId: string, fileName: string }, lengthFromProbe: boolean, lengthSeconds: number|null }>} candidates
  * @param {Map<string, number|null>} durationByFileId
  * @param {Set<string>} fileIdsInChunk
@@ -1234,9 +1200,9 @@ async function runVoiceMemoRound2Sync(options = {}) {
     }
     const minCol = Math.min(...columnIndices);
     const maxCol = Math.max(...columnIndices) + 1;
-    const writeChunks = chunkPendingSheetWrites(pending, {
-      maxItems: VOICE_MEMO_SHEET_WRITE_CHUNK_SIZE,
-      maxRowSpan: VOICE_MEMO_SHEET_WRITE_MAX_ROW_SPAN,
+    const writeChunks = chunkSheetRowWrites(pending, {
+      maxItems: SHEETS_BATCH_WRITE_MAX_ITEMS,
+      maxRowSpan: SHEETS_BATCH_WRITE_MAX_ROW_SPAN,
     });
     console.info(
       `[sync-voice-memos] writing ${pending.length} Applicants row update(s) in ${writeChunks.length} chunk(s)...`,
