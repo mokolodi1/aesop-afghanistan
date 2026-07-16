@@ -5082,7 +5082,7 @@ function PortalAdminJobsTab({ mirrorCacheStatus }) {
                 {isExpanded ? 'Hide history' : 'View history'}
               </button>
             </div>
-            {job.name === 'voice-memo-sync' ? (
+            {job.name === 'hourly-cache' ? (
               <div className="portal-admin-voice-memo-cache-actions">
                 <p className="portal-admin-hint">
                   Clears all cached voice memo audio in Postgres. The next hourly cache run

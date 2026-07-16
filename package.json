@@ -14,7 +14,6 @@
     "sync:applicant-reviews": "node scripts/sync-applicant-reviews.js",
     "sync:applicants": "node scripts/sync-applicants.js",
     "sync:people-status": "node scripts/sync-people-status.js",
-    "sync:voice-memos": "node scripts/run-job.js voice-memo-sync",
     "db:migrate": "node db/migrate.js",
     "db:rebuild-people": "node scripts/rebuild-people-from-sheets.js",
     "db:mirror-people": "node scripts/mirror-people-ding.js",

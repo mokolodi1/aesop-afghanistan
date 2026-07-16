@@ -2089,7 +2089,7 @@ app.post('/api/portal-admin/jobs/clear-voice-memo-audio-cache', portalAdminRateL
       return res.status(503).json({ error: 'Postgres is required for the voice memo audio cache.' });
     }
 
-    const active = await findBlockingJobRun('voice-memo-sync');
+    const active = await findBlockingJobRun('hourly-cache');
     if (active) {
       return res.status(409).json({
         error:
