@@ -5,7 +5,7 @@ const { formatGoogleSheetsOperationError } = require("../utils/errorLogging");
 const { dateToGoogleSheetsSerial, formatEasternSheetTimestamp, sheetDatetimeCellTextToUtcMillis } = require("../utils/dingSheetTime");
 const { isDatabaseEnabled } = require("../db/index");
 const { getPersonByAesopId, isPeopleIdentityFresh, personRowToProfile, findLatestDingNumberByAesopIdFromDb } = require("./classroomDb");
-const { recordSheetsApiCall, recordSheetsApiError } = require("./portalMetrics");
+const { recordSheetsApiCall, recordSheetsApiError, recordSheetsApiThrottle } = require("./portalMetrics");
 
 let doc = null;
 let initPromise = null;
@@ -256,7 +256,11 @@ function attachSheetsApiMetrics(spreadsheet) {
   spreadsheet.sheetsApi.interceptors.response.use(
     (response) => response,
     (error) => {
-      recordSheetsApiError(1);
+      if (isSheetsScriptRateLimitEnabled() && isSheetsThrottleError(error)) {
+        recordSheetsApiThrottle(1);
+      } else {
+        recordSheetsApiError(1);
+      }
       return Promise.reject(error);
     },
   );

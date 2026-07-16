@@ -6641,7 +6641,34 @@ const STATS_INCIDENT_LABELS = {
   rateLimitHits: 'Rate-limit hits (429)',
   portalClassGradeFail: 'Class/grade failures',
   sheetsApiError: 'Sheets API errors',
+  sheetsApiThrottle: 'Sheets throttles (batch jobs)',
+  driveApiThrottle: 'Drive throttles (batch jobs)',
 };
+
+/** User-visible problems that affect portal visitors. */
+const STATS_USER_INCIDENT_KEYS = [
+  'rateLimitHits',
+  'portalClassGradeFail',
+  'magicLinkSendFailed',
+  'verifyError',
+  'sheetsApiError',
+];
+
+/** Operational noise we handle internally — shown separately, not in Problems KPI. */
+const STATS_INTERNAL_INCIDENT_KEYS = [
+  'sheetsApiThrottle',
+  'driveApiThrottle',
+  'magicLinkUnknownId',
+];
+
+/** Magic-link login activity — tracked on its own, not in error-rate totals. */
+const STATS_MAGIC_LINK_KEYS = [
+  'magicLinkRequest',
+  'verifySuccess',
+  'verifyExpired',
+  'verifyError',
+  'magicLinkSendFailed',
+];
 
 const STATS_CHART_COLORS = {
   successful: '#1f7a6c',
@@ -6666,6 +6693,8 @@ const STATS_CHART_COLORS = {
   rateLimitHits: '#9c36b5',
   portalClassGradeFail: '#364fc7',
   sheetsApiError: '#e03131',
+  sheetsApiThrottle: '#be4bdb',
+  driveApiThrottle: '#7950f2',
 };
 
 function formatStatsClockTime(iso) {
@@ -7043,21 +7072,24 @@ function PortalAdminStatsPage() {
 
   const byType = stats?.pages?.byType || {};
   const pageTypes = Object.keys(STATS_PAGE_TYPE_LABELS);
-  const incidentKeys = Object.keys(STATS_INCIDENT_LABELS);
   const incidentTotals = stats?.incidents?.totals || {};
   const loginOk = stats?.logins?.successful ?? 0;
   const loginFail = stats?.logins?.failed ?? 0;
-  const pageSuccessTotal = pageTypes.reduce((sum, type) => sum + (byType[type]?.success || 0), 0);
-  const pageErrorTotal = pageTypes.reduce((sum, type) => sum + (byType[type]?.error || 0), 0);
+  const userFacingPageTypes = pageTypes.filter((type) => type !== 'verify');
+  const pageSuccessTotal = userFacingPageTypes.reduce((sum, type) => sum + (byType[type]?.success || 0), 0);
+  const pageErrorTotal = userFacingPageTypes.reduce((sum, type) => sum + (byType[type]?.error || 0), 0);
   const pageTotal = pageSuccessTotal + pageErrorTotal;
   const overallErrorRate = pageTotal > 0 ? pageErrorTotal / pageTotal : 0;
-  const problemIncidentTotal =
-    (incidentTotals.magicLinkSendFailed || 0) +
-    (incidentTotals.verifyExpired || 0) +
-    (incidentTotals.verifyError || 0) +
-    (incidentTotals.rateLimitHits || 0) +
-    (incidentTotals.portalClassGradeFail || 0) +
-    (incidentTotals.sheetsApiError || 0);
+  const problemIncidentTotal = STATS_USER_INCIDENT_KEYS.reduce(
+    (sum, key) => sum + (incidentTotals[key] || 0),
+    0,
+  );
+  const internalIncidentTotal = STATS_INTERNAL_INCIDENT_KEYS.reduce(
+    (sum, key) => sum + (incidentTotals[key] || 0),
+    0,
+  );
+  const batchThrottleTotal =
+    (incidentTotals.sheetsApiThrottle || 0) + (incidentTotals.driveApiThrottle || 0);
   const latencyValues = pageTypes
     .map((type) => byType[type]?.avgLatencyMs)
     .filter((ms) => ms != null && Number.isFinite(ms));
@@ -7087,15 +7119,19 @@ function PortalAdminStatsPage() {
       color: STATS_CHART_COLORS[type] || STATS_CHART_COLORS.other,
       series: stats?.pages?.latencySeries?.[type] || [],
     }));
-  const incidentProblemKeys = [
-    'magicLinkSendFailed',
-    'verifyExpired',
-    'verifyError',
-    'rateLimitHits',
-    'portalClassGradeFail',
-    'sheetsApiError',
-  ];
-  const incidentLines = incidentProblemKeys.map((key) => ({
+  const incidentProblemLines = STATS_USER_INCIDENT_KEYS.map((key) => ({
+    id: key,
+    label: STATS_INCIDENT_LABELS[key],
+    color: STATS_CHART_COLORS[key] || STATS_CHART_COLORS.other,
+    series: stats?.incidents?.series?.[key] || [],
+  }));
+  const internalIncidentLines = STATS_INTERNAL_INCIDENT_KEYS.map((key) => ({
+    id: key,
+    label: STATS_INCIDENT_LABELS[key],
+    color: STATS_CHART_COLORS[key] || STATS_CHART_COLORS.other,
+    series: stats?.incidents?.series?.[key] || [],
+  }));
+  const magicLinkLines = STATS_MAGIC_LINK_KEYS.map((key) => ({
     id: key,
     label: STATS_INCIDENT_LABELS[key],
     color: STATS_CHART_COLORS[key] || STATS_CHART_COLORS.other,
@@ -7162,13 +7198,19 @@ function PortalAdminStatsPage() {
           <PortalStatsMetricCard
             label="Page serves"
             value={pageSuccessTotal}
-            hint={`${pageErrorTotal} errors · ${formatStatsPercent(overallErrorRate)} error rate`}
+            hint={`${pageErrorTotal} user-facing errors · ${formatStatsPercent(overallErrorRate)} error rate (excludes verify)`}
           />
           <PortalStatsMetricCard
-            label="Problems"
+            label="User problems"
             value={problemIncidentTotal}
-            hint="Send fails, 429s, verify errors, Sheets errors"
+            hint="Rate limits, send fails, class/grade, Sheets errors"
             tone={problemIncidentTotal > 0 ? 'bad' : 'good'}
+          />
+          <PortalStatsMetricCard
+            label="Batch throttles"
+            value={batchThrottleTotal}
+            hint={`${incidentTotals.sheetsApiThrottle ?? 0} Sheets · ${incidentTotals.driveApiThrottle ?? 0} Drive 429s`}
+            tone={batchThrottleTotal > 0 ? 'warn' : 'default'}
           />
           <PortalStatsMetricCard
             label="Avg serve time"
@@ -7184,15 +7226,15 @@ function PortalAdminStatsPage() {
 
         <div className="portal-stats-dashboard-grid">
           <PortalStatsPanel
-            title="Problems over time"
-            subtitle="Counts of login-critical incidents. Time on X, count on Y."
+            title="User problems over time"
+            subtitle="Issues that affect portal visitors. Excludes magic-link verify failures and batch-job throttling."
             wide
           >
             <div className="portal-stats-chip-row">
-              {incidentKeys.map((key) => (
+              {STATS_USER_INCIDENT_KEYS.map((key) => (
                 <span
                   key={key}
-                  className={`portal-stats-chip${(incidentTotals[key] || 0) > 0 && key !== 'magicLinkRequest' && key !== 'verifySuccess' ? ' is-hot' : ''}`}
+                  className={`portal-stats-chip${(incidentTotals[key] || 0) > 0 ? ' is-hot' : ''}`}
                 >
                   <span className="portal-stats-chip-label">{STATS_INCIDENT_LABELS[key]}</span>
                   <strong className="portal-stats-chip-value">{incidentTotals[key] ?? 0}</strong>
@@ -7200,40 +7242,62 @@ function PortalAdminStatsPage() {
               ))}
             </div>
             <PortalStatsMultiLineChart
-              lines={incidentLines}
+              lines={incidentProblemLines}
               formatY={(n) => String(Math.round(n))}
               windowKey={windowKey}
             />
           </PortalStatsPanel>
 
-          <PortalStatsPanel title="Logins" subtitle="Successful vs failed verifies">
+          <PortalStatsPanel
+            title="Magic-link activity"
+            subtitle="Login requests and verify outcomes. Failed/expired links are expected user behavior, not portal errors."
+          >
             <div className="portal-stats-mini-metrics">
               <PortalStatsMetricCard label="Successful" value={loginOk} tone="good" />
-              <PortalStatsMetricCard label="Failed" value={loginFail} tone={loginFail > 0 ? 'warn' : 'default'} />
+              <PortalStatsMetricCard label="Failed verify" value={loginFail} tone="default" />
+            </div>
+            <div className="portal-stats-chip-row portal-stats-chip-row--compact">
+              {STATS_MAGIC_LINK_KEYS.map((key) => (
+                <span key={key} className="portal-stats-chip">
+                  <span className="portal-stats-chip-label">{STATS_INCIDENT_LABELS[key]}</span>
+                  <strong className="portal-stats-chip-value">{incidentTotals[key] ?? 0}</strong>
+                </span>
+              ))}
             </div>
             <PortalStatsMultiLineChart
-              lines={[
-                {
-                  id: 'successful',
-                  label: 'Successful',
-                  color: STATS_CHART_COLORS.successful,
-                  series: stats?.logins?.series?.successful || [],
-                },
-                {
-                  id: 'failed',
-                  label: 'Failed',
-                  color: STATS_CHART_COLORS.failed,
-                  series: stats?.logins?.series?.failed || [],
-                },
-              ]}
+              lines={magicLinkLines}
               formatY={(n) => String(Math.round(n))}
               windowKey={windowKey}
             />
           </PortalStatsPanel>
 
-          <PortalStatsPanel title="Error rate" subtitle="Share of page responses that failed">
+          <PortalStatsPanel
+            title="Batch job throttling"
+            subtitle="Google API 429s from sync jobs. Retried automatically — operational, not user-facing."
+          >
+            <div className="portal-stats-mini-metrics">
+              <PortalStatsMetricCard
+                label="Sheets throttles"
+                value={incidentTotals.sheetsApiThrottle ?? 0}
+                tone={(incidentTotals.sheetsApiThrottle || 0) > 0 ? 'warn' : 'default'}
+              />
+              <PortalStatsMetricCard
+                label="Drive throttles"
+                value={incidentTotals.driveApiThrottle ?? 0}
+                tone={(incidentTotals.driveApiThrottle || 0) > 0 ? 'warn' : 'default'}
+              />
+              <PortalStatsMetricCard label="Other internal" value={internalIncidentTotal - batchThrottleTotal} />
+            </div>
+            <PortalStatsMultiLineChart
+              lines={internalIncidentLines}
+              formatY={(n) => String(Math.round(n))}
+              windowKey={windowKey}
+            />
+          </PortalStatsPanel>
+
+          <PortalStatsPanel title="Error rate" subtitle="Share of user-facing page responses that failed (excludes verify/login)">
             <PortalStatsLineChart
-              series={stats?.pages?.errorRateSeries || []}
+              series={stats?.pages?.userFacingErrorRateSeries || stats?.pages?.errorRateSeries || []}
               color={STATS_CHART_COLORS.errorRate}
               yMax={1}
               formatY={(n) => formatStatsPercent(n)}

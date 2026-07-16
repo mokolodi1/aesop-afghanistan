@@ -33,7 +33,12 @@ const INCIDENT_SERIES_KEYS = [
   "rateLimitHits",
   "portalClassGradeFail",
   "sheetsApiError",
+  "sheetsApiThrottle",
+  "driveApiThrottle",
 ];
+
+/** Page types excluded from user-facing HTTP error-rate totals (expected or login-specific noise). */
+const USER_FACING_ERROR_PAGE_TYPES = PAGE_TYPES.filter((pageType) => pageType !== "verify");
 
 /** @type {Map<string, number>} */
 const localBuckets = new Map();
@@ -196,6 +201,14 @@ function recordSheetsApiCall(count = 1) {
 
 function recordSheetsApiError(count = 1) {
   recordMetric("sheets.api_error", count);
+}
+
+function recordSheetsApiThrottle(count = 1) {
+  recordMetric("sheets.api_throttle", count);
+}
+
+function recordDriveApiThrottle(count = 1) {
+  recordMetric("drive.api_throttle", count);
 }
 
 /**
@@ -738,10 +751,38 @@ async function getPortalStats(windowKey = "5m") {
     (labels) => labels.statusClass === "5xx",
     chartBucketSeconds,
   );
+  const userFacing4xxMap = seriesMapForMetric(
+    allRows,
+    "page.serve",
+    (labels) =>
+      USER_FACING_ERROR_PAGE_TYPES.includes(labels.pageType) && labels.statusClass === "4xx",
+    chartBucketSeconds,
+  );
+  const userFacing5xxMap = seriesMapForMetric(
+    allRows,
+    "page.serve",
+    (labels) =>
+      USER_FACING_ERROR_PAGE_TYPES.includes(labels.pageType) && labels.statusClass === "5xx",
+    chartBucketSeconds,
+  );
+  const userFacingSuccessMap = seriesMapForMetric(
+    allRows,
+    "page.serve",
+    (labels) =>
+      USER_FACING_ERROR_PAGE_TYPES.includes(labels.pageType) && labels.statusClass === "2xx",
+    chartBucketSeconds,
+  );
   const errorRateSeries = timeline.map((bucket) => {
     const key = bucket.toISOString();
     const success = allSuccessMap.get(key) || 0;
     const error = (all4xxMap.get(key) || 0) + (all5xxMap.get(key) || 0);
+    const total = success + error;
+    return { t: key, v: total > 0 ? error / total : 0 };
+  });
+  const userFacingErrorRateSeries = timeline.map((bucket) => {
+    const key = bucket.toISOString();
+    const success = userFacingSuccessMap.get(key) || 0;
+    const error = (userFacing4xxMap.get(key) || 0) + (userFacing5xxMap.get(key) || 0);
     const total = success + error;
     return { t: key, v: total > 0 ? error / total : 0 };
   });
@@ -769,6 +810,8 @@ async function getPortalStats(windowKey = "5m") {
     rateLimitHits: "rate_limit.hit",
     portalClassGradeFail: "portal_class_grade.fail",
     sheetsApiError: "sheets.api_error",
+    sheetsApiThrottle: "sheets.api_throttle",
+    driveApiThrottle: "drive.api_throttle",
   };
 
   /** @type {Record<string, number>} */
@@ -811,6 +854,7 @@ async function getPortalStats(windowKey = "5m") {
       serveSeries,
       latencySeries,
       errorRateSeries,
+      userFacingErrorRateSeries,
     },
     drive: {
       filesList,
@@ -837,6 +881,7 @@ module.exports = {
   BUCKET_SECONDS,
   WINDOW_MS,
   PAGE_TYPES,
+  USER_FACING_ERROR_PAGE_TYPES,
   INCIDENT_SERIES_KEYS,
   RECENT_ERROR_LIMIT,
   recordMetric,
@@ -855,6 +900,8 @@ module.exports = {
   recordDriveFilesGet,
   recordSheetsApiCall,
   recordSheetsApiError,
+  recordSheetsApiThrottle,
+  recordDriveApiThrottle,
   classifyPageType,
   shouldSkipPath,
   isRequestLogEnabled,

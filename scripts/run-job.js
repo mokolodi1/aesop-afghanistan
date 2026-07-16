@@ -19,6 +19,7 @@ const util = require("util");
 const { formatErrorForLog } = require("../utils/errorLogging");
 const { setDriveScriptRateLimit } = require("../services/googleDrive");
 const { setSheetsScriptRateLimit } = require("../services/googleSheets");
+const { flushMetricsToDatabase } = require("../services/portalMetrics");
 const { isDatabaseEnabled, closeDatabase } = require("../db/index");
 const { getJobDefinition } = require("../services/jobRegistry");
 const {
@@ -183,6 +184,9 @@ async function main() {
     return 1;
   } finally {
     capture.restore();
+    if (recording) {
+      await flushMetricsToDatabase().catch(() => {});
+    }
   }
 }
 

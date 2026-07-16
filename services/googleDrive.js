@@ -7,7 +7,7 @@ const {
   isFfmpegAvailable,
   transcodeVoiceMemoToM4aStream,
 } = require("../utils/voiceMemoTranscode");
-const { recordDriveFilesList, recordDriveFilesGet } = require("./portalMetrics");
+const { recordDriveFilesList, recordDriveFilesGet, recordDriveApiThrottle } = require("./portalMetrics");
 const { mapVoiceMemoStreamError } = require("./voiceMemoStreamErrors");
 const { driveErrorStatus, isDriveThrottleError } = require("../utils/driveThrottle");
 
@@ -173,6 +173,9 @@ async function withDriveRetry(label, fn, options = {}) {
       const waitMs = Math.max(driveRetryAfterMs(error) ?? 0, jitteredMs);
       if (Date.now() + waitMs > deadlineAt) {
         throw error;
+      }
+      if (isDriveScriptRateLimitEnabled() && isDriveThrottleError(error)) {
+        recordDriveApiThrottle(1);
       }
       console.warn(
         `[drive] ${label} throttled (HTTP ${driveErrorStatus(error) ?? "?"}); retrying in ${Math.round(waitMs / 1000)}s (attempt ${attempt})`,

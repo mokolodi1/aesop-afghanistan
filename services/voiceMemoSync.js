@@ -26,7 +26,8 @@ const {
   resolveColumnIndex,
   sheetsApiCall,
 } = require("./googleSheets");
-const { recordSheetsApiCall, recordSheetsApiError } = require("./portalMetrics");
+const { recordSheetsApiCall, recordSheetsApiError, recordSheetsApiThrottle } = require("./portalMetrics");
+const { isSheetsScriptRateLimitEnabled, isSheetsThrottleError } = require("./googleSheets");
 const { isDatabaseEnabled } = require("../db/index");
 const {
   getApplicantRowByAesopIdFromDb,
@@ -218,7 +219,11 @@ async function loadApplicantsDataForStats(options = {}) {
         return result;
       } catch (error) {
         recordSheetsApiCall(1);
-        recordSheetsApiError(1);
+        if (isSheetsScriptRateLimitEnabled() && isSheetsThrottleError(error)) {
+          recordSheetsApiThrottle(1);
+        } else {
+          recordSheetsApiError(1);
+        }
         throw error;
       }
     },
