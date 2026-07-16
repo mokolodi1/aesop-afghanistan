@@ -4887,7 +4887,15 @@ html[dir='rtl'] .portal-voice-memo-substeps {
 }
 
 .portal-review-card-show-prompt {
+  margin-left: 0;
+}
+
+.portal-review-card-header-actions {
   margin-left: auto;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .portal-review-card-age {
@@ -5187,6 +5195,40 @@ html[dir='rtl'] .portal-voice-memo-substeps {
   flex-wrap: wrap;
   align-items: flex-end;
   gap: 12px 14px;
+}
+
+.portal-review-technical-subsection {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 4px;
+  border-top: 1px solid var(--aesop-line, #e7e7e7);
+}
+
+.portal-review-subsection-title {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+  line-height: 1.2;
+  color: var(--aesop-ink, #373737);
+}
+
+.portal-review-subsection-label {
+  margin: 0;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--aesop-muted, #5c5c5c);
+}
+
+.portal-review-section-help-popover {
+  max-width: 18rem;
+}
+
+.portal-review-section-help-text {
+  margin: 0;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  color: var(--aesop-ink, #373737);
 }
 
 .portal-review-scoring-divider {

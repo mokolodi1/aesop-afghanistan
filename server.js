@@ -1722,6 +1722,8 @@ app.post('/api/portal-reviews/save', portalReviewsRateLimiter, async (req, res) 
       typeof req.body.applicantId === 'string' ? req.body.applicantId.trim() : '';
     const level = typeof req.body.englishLevel === 'string' ? req.body.englishLevel.trim() : '';
     const suspectedAi = req.body.suspectedAi === true;
+    const unableToGrade = req.body.unableToGrade === true;
+    const technicalFlag = req.body.technicalFlag === true;
     const instructionFollowing =
       typeof req.body.instructionFollowing === 'string' ? req.body.instructionFollowing.trim() : '';
     const originalThinking =
@@ -1737,6 +1739,8 @@ app.post('/api/portal-reviews/save', portalReviewsRateLimiter, async (req, res) 
       applicantAesopId: applicantId,
       englishLevel: level,
       suspectedAi,
+      unableToGrade,
+      technicalFlag,
       instructionFollowing,
       originalThinking,
       character,

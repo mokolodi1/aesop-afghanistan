@@ -8526,10 +8526,35 @@ const REVIEW_RUBRIC_TIERS = [
 const EMPTY_REVIEW_DRAFT = {
   englishLevel: '',
   suspectedAi: false,
+  unableToGrade: false,
+  technicalFlag: false,
   instructionFollowing: '',
   originalThinking: '',
   character: '',
 };
+
+function reviewDraftIsEmpty(draft) {
+  if (!draft) {
+    return true;
+  }
+  return (
+    !String(draft.englishLevel ?? '').trim() &&
+    draft.suspectedAi !== true &&
+    draft.unableToGrade !== true &&
+    draft.technicalFlag !== true &&
+    FITNESS_CRITERIA.every((criterion) => !String(draft[criterion.id] ?? '').trim())
+  );
+}
+
+function reviewDraftCanPersist(draft) {
+  if (!draft) {
+    return false;
+  }
+  if (reviewDraftIsEmpty(draft) || reviewDraftIsSaveable(draft)) {
+    return true;
+  }
+  return draft.technicalFlag === true;
+}
 
 function reviewDraftIsSaveable(draft) {
   if (!draft) {
@@ -8537,7 +8562,8 @@ function reviewDraftIsSaveable(draft) {
   }
   const hasEnglish = ENGLISH_LEVEL_SCORES.includes(String(draft.englishLevel ?? '').trim());
   const hasAi = draft.suspectedAi === true;
-  if (!hasEnglish && !hasAi) {
+  const hasUnable = draft.unableToGrade === true;
+  if (!hasEnglish && !hasAi && !hasUnable) {
     return false;
   }
   return FITNESS_CRITERIA.every((criterion) =>
@@ -8686,7 +8712,60 @@ function PortalReviewRubricHelp({ rubricKey, t, variant = 'fitness' }) {
   );
 }
 
-function PortalReviewSuspectedAiToggle({ active, onToggle, t }) {
+function PortalReviewSectionHelp({ title, helpText, t }) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) {
+      return undefined;
+    }
+    const onDocumentPointerDown = (event) => {
+      if (!wrapRef.current?.contains(event.target)) {
+        setOpen(false);
+      }
+    };
+    const onEscape = (event) => {
+      if (event.key === 'Escape') {
+        setOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', onDocumentPointerDown);
+    document.addEventListener('keydown', onEscape);
+    return () => {
+      document.removeEventListener('mousedown', onDocumentPointerDown);
+      document.removeEventListener('keydown', onEscape);
+    };
+  }, [open]);
+
+  return (
+    <span ref={wrapRef} className="portal-review-rubric-help">
+      <button
+        type="button"
+        className="portal-review-rubric-help-btn"
+        aria-expanded={open}
+        aria-label={`${t('reviews.rubric.moreInfo')}: ${title}`}
+        onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          setOpen((current) => !current);
+        }}
+      >
+        <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false">
+          <circle cx="8" cy="8" r="7" fill="none" stroke="currentColor" strokeWidth="1.5" />
+          <path fill="currentColor" d="M7.1 6.8h1.4V5.4H7.1v1.4zm0 3.8h1.4V7.8H7.1v2.8z" />
+        </svg>
+      </button>
+      {open ? (
+        <div className="portal-review-rubric-popover portal-review-section-help-popover" role="tooltip">
+          <p className="portal-review-section-help-text">{helpText}</p>
+        </div>
+      ) : null}
+    </span>
+  );
+}
+
+function PortalReviewFlagToggle({ active, onToggle, t, labelKey, flaggedLabelKey, hintKey }) {
   return (
     <button
       type="button"
@@ -8706,13 +8785,26 @@ function PortalReviewSuspectedAiToggle({ active, onToggle, t }) {
       </span>
       <span className="portal-review-ai-toggle-text">
         <span className="portal-review-ai-toggle-label">
-          {active ? t('reviews.suspectedAiFlagged') : t('reviews.suspectedAi')}
+          {active ? t(flaggedLabelKey) : t(labelKey)}
         </span>
-        {!active ? (
-          <span className="portal-review-ai-toggle-hint">{t('reviews.suspectedAiOffHint')}</span>
+        {!active && hintKey ? (
+          <span className="portal-review-ai-toggle-hint">{t(hintKey)}</span>
         ) : null}
       </span>
     </button>
+  );
+}
+
+function PortalReviewSuspectedAiToggle({ active, onToggle, t }) {
+  return (
+    <PortalReviewFlagToggle
+      active={active}
+      onToggle={onToggle}
+      t={t}
+      labelKey="reviews.suspectedAi"
+      flaggedLabelKey="reviews.suspectedAiFlagged"
+      hintKey="reviews.suspectedAiOffHint"
+    />
   );
 }
 
@@ -8813,7 +8905,7 @@ function useReviewAutoSave({ drafts, onSaveOne }) {
 
   const flushApplicant = useCallback(async (applicantId) => {
     const draft = draftsRef.current[applicantId];
-    if (!reviewDraftIsSaveable(draft)) {
+    if (!reviewDraftCanPersist(draft)) {
       dirtyRef.current.delete(applicantId);
       return;
     }
@@ -8831,7 +8923,7 @@ function useReviewAutoSave({ drafts, onSaveOne }) {
   const markDirty = useCallback(
     (applicantId, draftOverride) => {
       const draft = draftOverride || draftsRef.current[applicantId];
-      if (!reviewDraftIsSaveable(draft)) {
+      if (!reviewDraftCanPersist(draft)) {
         return;
       }
       dirtyRef.current.add(applicantId);
@@ -9152,16 +9244,28 @@ function PortalReviewCard({
           <span className="portal-review-card-age">
             {t('reviews.age')}: {ageDisplay}
           </span>
-          {promptHidden ? (
+          <div className="portal-review-card-header-actions">
             <button
               type="button"
-              className="portal-review-prompt-toggle portal-review-card-show-prompt"
-              onClick={onTogglePromptHidden}
-              aria-expanded={false}
+              className="portal-review-prompt-toggle"
+              onClick={() => {
+                onDraftChange(assignment.applicantId, EMPTY_REVIEW_DRAFT);
+                onMarkDirty(assignment.applicantId, EMPTY_REVIEW_DRAFT);
+              }}
             >
-              {t('reviews.showPrompt')}
+              {t('reviews.clearScores')}
             </button>
-          ) : null}
+            {promptHidden ? (
+              <button
+                type="button"
+                className="portal-review-prompt-toggle portal-review-card-show-prompt"
+                onClick={onTogglePromptHidden}
+                aria-expanded={false}
+              >
+                {t('reviews.showPrompt')}
+              </button>
+            ) : null}
+          </div>
         </h3>
       </header>
 
@@ -9212,6 +9316,46 @@ function PortalReviewCard({
                 onMarkDirty(assignment.applicantId, nextDraft);
               }}
             />
+          </div>
+          <div className="portal-review-scoring-section-row">
+            <PortalReviewFlagToggle
+              t={t}
+              active={draft.unableToGrade === true}
+              labelKey="reviews.unableToGrade"
+              flaggedLabelKey="reviews.unableToGradeFlagged"
+              hintKey="reviews.unableToGradeOffHint"
+              onToggle={() => {
+                const nextDraft = { ...draft, unableToGrade: !draft.unableToGrade };
+                onDraftChange(assignment.applicantId, { unableToGrade: nextDraft.unableToGrade });
+                onMarkDirty(assignment.applicantId, nextDraft);
+              }}
+            />
+          </div>
+          <div className="portal-review-technical-subsection">
+            <h5 className="portal-review-subsection-title">
+              <span className="portal-review-scale-field-label-row">
+                <span>{t('reviews.technicalSection')}</span>
+                <PortalReviewSectionHelp
+                  title={t('reviews.technicalSection')}
+                  helpText={t('reviews.technicalSectionHelp')}
+                  t={t}
+                />
+              </span>
+            </h5>
+            <p className="portal-review-subsection-label">{t('reviews.flagAnIssue')}</p>
+            <div className="portal-review-scoring-section-row">
+              <PortalReviewFlagToggle
+                t={t}
+                active={draft.technicalFlag === true}
+                labelKey="reviews.technicalFlag"
+                flaggedLabelKey="reviews.technicalFlagFlagged"
+                onToggle={() => {
+                  const nextDraft = { ...draft, technicalFlag: !draft.technicalFlag };
+                  onDraftChange(assignment.applicantId, { technicalFlag: nextDraft.technicalFlag });
+                  onMarkDirty(assignment.applicantId, nextDraft);
+                }}
+              />
+            </div>
           </div>
         </section>
 
@@ -9318,6 +9462,8 @@ function PortalReviewApplicationsPage() {
       applicantId,
       englishLevel: draft.englishLevel,
       suspectedAi: draft.suspectedAi === true,
+      unableToGrade: draft.unableToGrade === true,
+      technicalFlag: draft.technicalFlag === true,
       instructionFollowing: draft.instructionFollowing,
       originalThinking: draft.originalThinking,
       character: draft.character,
@@ -9374,6 +9520,8 @@ function PortalReviewApplicationsPage() {
           nextDrafts[row.applicantId] = {
             englishLevel: normalizeScale(englishFromApi),
             suspectedAi: row.suspectedAi === true,
+            unableToGrade: row.unableToGrade === true,
+            technicalFlag: row.technicalFlag === true,
             instructionFollowing: normalizeScale(row.instructionFollowing),
             originalThinking: normalizeScale(row.originalThinking),
             character: normalizeScale(row.character),

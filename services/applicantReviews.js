@@ -26,6 +26,8 @@ const ENGLISH_LEVELS = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"];
 const FITNESS_SCORES = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"];
 const FITNESS_CRITERIA = ["instructionFollowing", "originalThinking", "character"];
 const SUSPECTED_AI_SHEET_VALUE = "Suspected AI";
+const UNABLE_TO_GRADE_SHEET_VALUE = "Unable to Grade";
+const TECHNICAL_FLAG_SHEET_VALUE = "There is a technical problem with this application";
 const LEGACY_FLAGGED_AI_LEVEL = "Flagged for AI";
 
 /**
@@ -39,7 +41,8 @@ function normalizeEnglishLevel(value) {
   }
   if (
     trimmed.toLowerCase() === LEGACY_FLAGGED_AI_LEVEL.toLowerCase() ||
-    trimmed.toLowerCase() === SUSPECTED_AI_SHEET_VALUE.toLowerCase()
+    trimmed.toLowerCase() === SUSPECTED_AI_SHEET_VALUE.toLowerCase() ||
+    trimmed.toLowerCase() === UNABLE_TO_GRADE_SHEET_VALUE.toLowerCase()
   ) {
     return "";
   }
@@ -66,6 +69,44 @@ function normalizeSuspectedAi(value) {
     trimmed === "1" ||
     trimmed === SUSPECTED_AI_SHEET_VALUE.toLowerCase() ||
     trimmed === LEGACY_FLAGGED_AI_LEVEL.toLowerCase()
+  );
+}
+
+/**
+ * @param {unknown} value
+ * @returns {boolean}
+ */
+function normalizeUnableToGrade(value) {
+  const trimmed = String(value ?? "").trim().toLowerCase();
+  if (!trimmed) {
+    return false;
+  }
+  return (
+    trimmed === "yes" ||
+    trimmed === "y" ||
+    trimmed === "true" ||
+    trimmed === "1" ||
+    trimmed === UNABLE_TO_GRADE_SHEET_VALUE.toLowerCase()
+  );
+}
+
+/**
+ * @param {unknown} value
+ * @returns {boolean}
+ */
+function normalizeTechnicalFlag(value) {
+  const trimmed = String(value ?? "").trim().toLowerCase();
+  if (!trimmed) {
+    return false;
+  }
+  return (
+    trimmed === "yes" ||
+    trimmed === "y" ||
+    trimmed === "true" ||
+    trimmed === "1" ||
+    trimmed === TECHNICAL_FLAG_SHEET_VALUE.toLowerCase() ||
+    trimmed === "technical flag" ||
+    trimmed === "technical problem"
   );
 }
 
@@ -113,12 +154,16 @@ function normalizeFitnessScores(scores) {
  *   reviewerACol: number,
  *   aLevelCol: number,
  *   aSuspectedAiCol: number,
+ *   aUnableToGradeCol: number,
+ *   aTechnicalFlagCol: number,
  *   aInstructionCol: number,
  *   aOriginalThinkingCol: number,
  *   aCharacterCol: number,
  *   reviewerBCol: number,
  *   bLevelCol: number,
  *   bSuspectedAiCol: number,
+ *   bUnableToGradeCol: number,
+ *   bTechnicalFlagCol: number,
  *   bInstructionCol: number,
  *   bOriginalThinkingCol: number,
  *   bCharacterCol: number,
@@ -135,14 +180,18 @@ function getApplicantReviewsConfig() {
     reviewerBCol: col("applicantReviewsReviewerBColumn", "C"),
     aLevelCol: col("applicantReviewsALevelColumn", "D"),
     aSuspectedAiCol: col("applicantReviewsASuspectedAiColumn", "E"),
-    aInstructionCol: col("applicantReviewsAInstructionColumn", "F"),
-    aOriginalThinkingCol: col("applicantReviewsAOriginalThinkingColumn", "G"),
-    aCharacterCol: col("applicantReviewsACharacterColumn", "H"),
-    bLevelCol: col("applicantReviewsBLevelColumn", "I"),
-    bSuspectedAiCol: col("applicantReviewsBSuspectedAiColumn", "J"),
-    bInstructionCol: col("applicantReviewsBInstructionColumn", "K"),
-    bOriginalThinkingCol: col("applicantReviewsBOriginalThinkingColumn", "L"),
-    bCharacterCol: col("applicantReviewsBCharacterColumn", "M"),
+    aUnableToGradeCol: col("applicantReviewsAUnableToGradeColumn", "F"),
+    aTechnicalFlagCol: col("applicantReviewsATechnicalFlagColumn", "G"),
+    aInstructionCol: col("applicantReviewsAInstructionColumn", "H"),
+    aOriginalThinkingCol: col("applicantReviewsAOriginalThinkingColumn", "I"),
+    aCharacterCol: col("applicantReviewsACharacterColumn", "J"),
+    bLevelCol: col("applicantReviewsBLevelColumn", "K"),
+    bSuspectedAiCol: col("applicantReviewsBSuspectedAiColumn", "L"),
+    bUnableToGradeCol: col("applicantReviewsBUnableToGradeColumn", "M"),
+    bTechnicalFlagCol: col("applicantReviewsBTechnicalFlagColumn", "N"),
+    bInstructionCol: col("applicantReviewsBInstructionColumn", "O"),
+    bOriginalThinkingCol: col("applicantReviewsBOriginalThinkingColumn", "P"),
+    bCharacterCol: col("applicantReviewsBCharacterColumn", "Q"),
   };
 }
 
@@ -155,6 +204,8 @@ function getSlotColumns(cfg, slot) {
     return {
       level: cfg.aLevelCol,
       suspectedAi: cfg.aSuspectedAiCol,
+      unableToGrade: cfg.aUnableToGradeCol,
+      technicalFlag: cfg.aTechnicalFlagCol,
       instructionFollowing: cfg.aInstructionCol,
       originalThinking: cfg.aOriginalThinkingCol,
       character: cfg.aCharacterCol,
@@ -163,6 +214,8 @@ function getSlotColumns(cfg, slot) {
   return {
     level: cfg.bLevelCol,
     suspectedAi: cfg.bSuspectedAiCol,
+    unableToGrade: cfg.bUnableToGradeCol,
+    technicalFlag: cfg.bTechnicalFlagCol,
     instructionFollowing: cfg.bInstructionCol,
     originalThinking: cfg.bOriginalThinkingCol,
     character: cfg.bCharacterCol,
@@ -268,9 +321,24 @@ function readReviewFieldsFromRow(rowData, cols) {
   if (!englishLevel && normalizeSuspectedAi(levelRaw)) {
     suspectedAi = true;
   }
+  if (!englishLevel && normalizeUnableToGrade(levelRaw)) {
+    return {
+      englishLevel: "",
+      suspectedAi,
+      unableToGrade: true,
+      technicalFlag: normalizeTechnicalFlag(rowData[cols.technicalFlag]),
+      ...normalizeFitnessScores({
+        instructionFollowing: rowData[cols.instructionFollowing],
+        originalThinking: rowData[cols.originalThinking],
+        character: rowData[cols.character],
+      }),
+    };
+  }
   return {
     englishLevel,
     suspectedAi,
+    unableToGrade: normalizeUnableToGrade(rowData[cols.unableToGrade]),
+    technicalFlag: normalizeTechnicalFlag(rowData[cols.technicalFlag]),
     ...normalizeFitnessScores({
       instructionFollowing: rowData[cols.instructionFollowing],
       originalThinking: rowData[cols.originalThinking],
@@ -290,9 +358,24 @@ function readReviewFieldsFromDbRow(row, slot) {
   if (!englishLevel && normalizeSuspectedAi(levelRaw)) {
     suspectedAi = true;
   }
+  if (!englishLevel && normalizeUnableToGrade(levelRaw)) {
+    return {
+      englishLevel: "",
+      suspectedAi,
+      unableToGrade: true,
+      technicalFlag: normalizeTechnicalFlag(row[`${prefix}technical_flag`]),
+      ...normalizeFitnessScores({
+        instructionFollowing: row[`${prefix}instruction_following`],
+        originalThinking: row[`${prefix}original_thinking`],
+        character: row[`${prefix}character`],
+      }),
+    };
+  }
   return {
     englishLevel,
     suspectedAi,
+    unableToGrade: normalizeUnableToGrade(row[`${prefix}unable_to_grade`]),
+    technicalFlag: normalizeTechnicalFlag(row[`${prefix}technical_flag`]),
     ...normalizeFitnessScores({
       instructionFollowing: row[`${prefix}instruction_following`],
       originalThinking: row[`${prefix}original_thinking`],
@@ -515,13 +598,15 @@ async function loadReviewAssignmentsForReviewer(reviewerAesopId) {
  * @param {ReturnType<typeof getApplicantReviewsConfig>} reviewsCfg
  * @param {number} sheetRowNumber
  * @param {'A'|'B'} slot
- * @param {{ englishLevel: string, suspectedAi: boolean, instructionFollowing: string, originalThinking: string, character: string }} values
+ * @param {{ englishLevel: string, suspectedAi: boolean, unableToGrade: boolean, technicalFlag: boolean, instructionFollowing: string, originalThinking: string, character: string }} values
  */
 async function writeReviewCellsToSheet(worksheet, reviewsCfg, sheetRowNumber, slot, values) {
   const slotCols = getSlotColumns(reviewsCfg, slot);
   const columnIndices = [
     slotCols.level,
     slotCols.suspectedAi,
+    slotCols.unableToGrade,
+    slotCols.technicalFlag,
     slotCols.instructionFollowing,
     slotCols.originalThinking,
     slotCols.character,
@@ -539,6 +624,12 @@ async function writeReviewCellsToSheet(worksheet, reviewsCfg, sheetRowNumber, sl
   worksheet.getCell(gridRowIdx, slotCols.suspectedAi).value = values.suspectedAi
     ? SUSPECTED_AI_SHEET_VALUE
     : "";
+  worksheet.getCell(gridRowIdx, slotCols.unableToGrade).value = values.unableToGrade
+    ? UNABLE_TO_GRADE_SHEET_VALUE
+    : "";
+  worksheet.getCell(gridRowIdx, slotCols.technicalFlag).value = values.technicalFlag
+    ? TECHNICAL_FLAG_SHEET_VALUE
+    : "";
   worksheet.getCell(gridRowIdx, slotCols.instructionFollowing).value = values.instructionFollowing;
   worksheet.getCell(gridRowIdx, slotCols.originalThinking).value = values.originalThinking;
   worksheet.getCell(gridRowIdx, slotCols.character).value = values.character;
@@ -548,7 +639,7 @@ async function writeReviewCellsToSheet(worksheet, reviewsCfg, sheetRowNumber, sl
 /**
  * @param {Record<string, unknown>} dbRow
  * @param {'A'|'B'} slot
- * @param {{ englishLevel: string, suspectedAi: boolean, instructionFollowing: string, originalThinking: string, character: string }} values
+ * @param {{ englishLevel: string, suspectedAi: boolean, unableToGrade: boolean, technicalFlag: boolean, instructionFollowing: string, originalThinking: string, character: string }} values
  */
 async function writeThroughReviewToDb(dbRow, slot, values) {
   const syncedAt = new Date();
@@ -558,11 +649,15 @@ async function writeThroughReviewToDb(dbRow, slot, values) {
     reviewerB: String(dbRow.reviewer_b ?? "").trim(),
     aEnglishLevel: String(dbRow.a_english_level ?? "").trim(),
     aSuspectedAi: String(dbRow.a_suspected_ai ?? "").trim(),
+    aUnableToGrade: String(dbRow.a_unable_to_grade ?? "").trim(),
+    aTechnicalFlag: String(dbRow.a_technical_flag ?? "").trim(),
     aInstructionFollowing: String(dbRow.a_instruction_following ?? "").trim(),
     aOriginalThinking: String(dbRow.a_original_thinking ?? "").trim(),
     aCharacter: String(dbRow.a_character ?? "").trim(),
     bEnglishLevel: String(dbRow.b_english_level ?? "").trim(),
     bSuspectedAi: String(dbRow.b_suspected_ai ?? "").trim(),
+    bUnableToGrade: String(dbRow.b_unable_to_grade ?? "").trim(),
+    bTechnicalFlag: String(dbRow.b_technical_flag ?? "").trim(),
     bInstructionFollowing: String(dbRow.b_instruction_following ?? "").trim(),
     bOriginalThinking: String(dbRow.b_original_thinking ?? "").trim(),
     bCharacter: String(dbRow.b_character ?? "").trim(),
@@ -576,12 +671,16 @@ async function writeThroughReviewToDb(dbRow, slot, values) {
   if (slot === "A") {
     fields.aEnglishLevel = values.englishLevel;
     fields.aSuspectedAi = values.suspectedAi ? SUSPECTED_AI_SHEET_VALUE : "";
+    fields.aUnableToGrade = values.unableToGrade ? UNABLE_TO_GRADE_SHEET_VALUE : "";
+    fields.aTechnicalFlag = values.technicalFlag ? TECHNICAL_FLAG_SHEET_VALUE : "";
     fields.aInstructionFollowing = values.instructionFollowing;
     fields.aOriginalThinking = values.originalThinking;
     fields.aCharacter = values.character;
   } else {
     fields.bEnglishLevel = values.englishLevel;
     fields.bSuspectedAi = values.suspectedAi ? SUSPECTED_AI_SHEET_VALUE : "";
+    fields.bUnableToGrade = values.unableToGrade ? UNABLE_TO_GRADE_SHEET_VALUE : "";
+    fields.bTechnicalFlag = values.technicalFlag ? TECHNICAL_FLAG_SHEET_VALUE : "";
     fields.bInstructionFollowing = values.instructionFollowing;
     fields.bOriginalThinking = values.originalThinking;
     fields.bCharacter = values.character;
@@ -596,6 +695,8 @@ async function writeThroughReviewToDb(dbRow, slot, values) {
  *   applicantAesopId: string,
  *   englishLevel: string,
  *   suspectedAi: boolean,
+ *   unableToGrade: boolean,
+ *   technicalFlag: boolean,
  *   instructionFollowing: string,
  *   originalThinking: string,
  *   character: string,
@@ -606,6 +707,8 @@ async function saveReviewAssessment({
   applicantAesopId,
   englishLevel,
   suspectedAi,
+  unableToGrade,
+  technicalFlag,
   instructionFollowing,
   originalThinking,
   character,
@@ -620,32 +723,45 @@ async function saveReviewAssessment({
 
   const normalizedLevel = normalizeEnglishLevel(englishLevel);
   const normalizedSuspectedAi = suspectedAi === true;
+  const normalizedUnableToGrade = unableToGrade === true;
+  const normalizedTechnicalFlag = technicalFlag === true;
   const normalizedScores = normalizeFitnessScores({
     instructionFollowing,
     originalThinking,
     character,
   });
 
-  const hasEnglishLevel = ENGLISH_LEVELS.includes(normalizedLevel);
-  if (!hasEnglishLevel && !normalizedSuspectedAi) {
-    const error = new Error("English level or Suspected AI is required.");
-    error.statusCode = 400;
-    throw error;
-  }
-  if (!FITNESS_SCORES.includes(normalizedScores.instructionFollowing)) {
-    const error = new Error("Instruction Following score is required.");
-    error.statusCode = 400;
-    throw error;
-  }
-  if (!FITNESS_SCORES.includes(normalizedScores.originalThinking)) {
-    const error = new Error("Independent/Original Thinking score is required.");
-    error.statusCode = 400;
-    throw error;
-  }
-  if (!FITNESS_SCORES.includes(normalizedScores.character)) {
-    const error = new Error("Demonstration of Character score is required.");
-    error.statusCode = 400;
-    throw error;
+  const allEmpty =
+    !normalizedLevel &&
+    !normalizedSuspectedAi &&
+    !normalizedUnableToGrade &&
+    !normalizedTechnicalFlag &&
+    !normalizedScores.instructionFollowing &&
+    !normalizedScores.originalThinking &&
+    !normalizedScores.character;
+
+  if (!allEmpty && !normalizedTechnicalFlag) {
+    const hasEnglishLevel = ENGLISH_LEVELS.includes(normalizedLevel);
+    if (!hasEnglishLevel && !normalizedSuspectedAi && !normalizedUnableToGrade) {
+      const error = new Error("English level, Suspected AI, or Unable to grade is required.");
+      error.statusCode = 400;
+      throw error;
+    }
+    if (!FITNESS_SCORES.includes(normalizedScores.instructionFollowing)) {
+      const error = new Error("Instruction Following score is required.");
+      error.statusCode = 400;
+      throw error;
+    }
+    if (!FITNESS_SCORES.includes(normalizedScores.originalThinking)) {
+      const error = new Error("Independent/Original Thinking score is required.");
+      error.statusCode = 400;
+      throw error;
+    }
+    if (!FITNESS_SCORES.includes(normalizedScores.character)) {
+      const error = new Error("Demonstration of Character score is required.");
+      error.statusCode = 400;
+      throw error;
+    }
   }
 
   const reviewsCfg = getApplicantReviewsConfig();
@@ -658,6 +774,8 @@ async function saveReviewAssessment({
   const normalizedValues = {
     englishLevel: normalizedLevel,
     suspectedAi: normalizedSuspectedAi,
+    unableToGrade: normalizedUnableToGrade,
+    technicalFlag: normalizedTechnicalFlag,
     instructionFollowing: normalizedScores.instructionFollowing,
     originalThinking: normalizedScores.originalThinking,
     character: normalizedScores.character,
@@ -696,6 +814,8 @@ async function saveReviewAssessment({
       applicantId: applicantAesopId.trim(),
       englishLevel: normalizedLevel,
       suspectedAi: normalizedSuspectedAi,
+      unableToGrade: normalizedUnableToGrade,
+      technicalFlag: normalizedTechnicalFlag,
       ...normalizedScores,
     };
   }
@@ -745,6 +865,18 @@ async function saveReviewAssessment({
           ? SUSPECTED_AI_SHEET_VALUE
           : ""
         : cell(reviewsCfg.aSuspectedAiCol),
+    aUnableToGrade:
+      slot === "A"
+        ? normalizedValues.unableToGrade
+          ? UNABLE_TO_GRADE_SHEET_VALUE
+          : ""
+        : cell(reviewsCfg.aUnableToGradeCol),
+    aTechnicalFlag:
+      slot === "A"
+        ? normalizedValues.technicalFlag
+          ? TECHNICAL_FLAG_SHEET_VALUE
+          : ""
+        : cell(reviewsCfg.aTechnicalFlagCol),
     aInstructionFollowing:
       slot === "A" ? normalizedValues.instructionFollowing : cell(reviewsCfg.aInstructionCol),
     aOriginalThinking:
@@ -757,6 +889,18 @@ async function saveReviewAssessment({
           ? SUSPECTED_AI_SHEET_VALUE
           : ""
         : cell(reviewsCfg.bSuspectedAiCol),
+    bUnableToGrade:
+      slot === "B"
+        ? normalizedValues.unableToGrade
+          ? UNABLE_TO_GRADE_SHEET_VALUE
+          : ""
+        : cell(reviewsCfg.bUnableToGradeCol),
+    bTechnicalFlag:
+      slot === "B"
+        ? normalizedValues.technicalFlag
+          ? TECHNICAL_FLAG_SHEET_VALUE
+          : ""
+        : cell(reviewsCfg.bTechnicalFlagCol),
     bInstructionFollowing:
       slot === "B" ? normalizedValues.instructionFollowing : cell(reviewsCfg.bInstructionCol),
     bOriginalThinking:
@@ -770,6 +914,8 @@ async function saveReviewAssessment({
     applicantId: applicantAesopId.trim(),
     englishLevel: normalizedLevel,
     suspectedAi: normalizedSuspectedAi,
+    unableToGrade: normalizedUnableToGrade,
+    technicalFlag: normalizedTechnicalFlag,
     ...normalizedScores,
   };
 }
@@ -823,6 +969,8 @@ module.exports = {
   getApplicantReviewsConfig,
   normalizeEnglishLevel,
   normalizeSuspectedAi,
+  normalizeUnableToGrade,
+  normalizeTechnicalFlag,
   normalizeFitnessScore,
   loadReviewAssignmentsForReviewer,
   saveReviewAssessment,

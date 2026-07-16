@@ -119,45 +119,65 @@ function buildGoogleSheetsConfig(fileSection) {
       "applicantReviewsASuspectedAiColumn",
       "E",
     ),
+    applicantReviewsAUnableToGradeColumn: envOr(
+      "GOOGLE_APPLICANT_REVIEWS_A_UNABLE_TO_GRADE_COLUMN",
+      "applicantReviewsAUnableToGradeColumn",
+      "F",
+    ),
+    applicantReviewsATechnicalFlagColumn: envOr(
+      "GOOGLE_APPLICANT_REVIEWS_A_TECHNICAL_FLAG_COLUMN",
+      "applicantReviewsATechnicalFlagColumn",
+      "G",
+    ),
     applicantReviewsAInstructionColumn: envOr(
       "GOOGLE_APPLICANT_REVIEWS_A_INSTRUCTION_COLUMN",
       "applicantReviewsAInstructionColumn",
-      "F",
+      "H",
     ),
     applicantReviewsAOriginalThinkingColumn: envOr(
       "GOOGLE_APPLICANT_REVIEWS_A_ORIGINAL_THINKING_COLUMN",
       "applicantReviewsAOriginalThinkingColumn",
-      "G",
+      "I",
     ),
     applicantReviewsACharacterColumn: envOr(
       "GOOGLE_APPLICANT_REVIEWS_A_CHARACTER_COLUMN",
       "applicantReviewsACharacterColumn",
-      "H",
+      "J",
     ),
     applicantReviewsBLevelColumn: envOr(
       "GOOGLE_APPLICANT_REVIEWS_B_LEVEL_COLUMN",
       "applicantReviewsBLevelColumn",
-      "I",
+      "K",
     ),
     applicantReviewsBSuspectedAiColumn: envOr(
       "GOOGLE_APPLICANT_REVIEWS_B_SUSPECTED_AI_COLUMN",
       "applicantReviewsBSuspectedAiColumn",
-      "J",
+      "L",
+    ),
+    applicantReviewsBUnableToGradeColumn: envOr(
+      "GOOGLE_APPLICANT_REVIEWS_B_UNABLE_TO_GRADE_COLUMN",
+      "applicantReviewsBUnableToGradeColumn",
+      "M",
+    ),
+    applicantReviewsBTechnicalFlagColumn: envOr(
+      "GOOGLE_APPLICANT_REVIEWS_B_TECHNICAL_FLAG_COLUMN",
+      "applicantReviewsBTechnicalFlagColumn",
+      "N",
     ),
     applicantReviewsBInstructionColumn: envOr(
       "GOOGLE_APPLICANT_REVIEWS_B_INSTRUCTION_COLUMN",
       "applicantReviewsBInstructionColumn",
-      "K",
+      "O",
     ),
     applicantReviewsBOriginalThinkingColumn: envOr(
       "GOOGLE_APPLICANT_REVIEWS_B_ORIGINAL_THINKING_COLUMN",
       "applicantReviewsBOriginalThinkingColumn",
-      "L",
+      "P",
     ),
     applicantReviewsBCharacterColumn: envOr(
       "GOOGLE_APPLICANT_REVIEWS_B_CHARACTER_COLUMN",
       "applicantReviewsBCharacterColumn",
-      "M",
+      "Q",
     ),
     googleGradesSheetName: envOr(
       "GOOGLE_GRADES_SHEET_NAME",
