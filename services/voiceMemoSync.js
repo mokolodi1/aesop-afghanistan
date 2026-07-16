@@ -31,9 +31,8 @@ const { isDatabaseEnabled } = require("../db/index");
 const {
   getApplicantRowByAesopIdFromDb,
   getApplicantVoiceMemoDurationsMapFromDb,
-  updateApplicantDriveDurationSeconds,
 } = require("./classroomDb");
-const { syncVoiceMemoAudioFromScan, logVoiceMemoAudioTranscodeFailures } = require("./voiceMemoAudio");
+const { logVoiceMemoAudioTranscodeFailures } = require("./voiceMemoAudio");
 const { JOB_MAX_RUNTIME_MS } = require("./jobRuns");
 
 const VOICE_NOTE_LINK_HEADERS = ["Voice note link", "Links"];
@@ -845,11 +844,12 @@ let voiceMemoSyncInFlight = false;
 
 /**
  * Sync Round 2, Voice note link, Voice note last updated, and Voice memo length (secs)
- * from Google Drive voice memos.
+ * from Google Drive voice memos into the Applicants sheet only (no Postgres writes).
  *
  * Lengths are only computed for rows whose sheet length is blank/invalid or whose
  * Drive file changed since the last sync (detected via the Voice note link file id);
- * known lengths are reused from the sheet or the Postgres cache before probing Drive.
+ * known lengths are reused from the sheet or Postgres read cache before probing Drive.
+ * Postgres mirror and audio playback cache are owned by the hourly-cache job.
  * Drive/Sheets throttling (429s) is retried with backoff, so a run may take up to 6 hours.
  *
  * @param {{ timeBudgetMs?: number }} [options]
@@ -925,11 +925,7 @@ function chunkPendingSheetWrites(pendingSorted, options = {}) {
  * @param {Map<string, number|null>} durationByFileId
  * @param {Set<string>} fileIdsInChunk
  */
-async function cacheProbedDurationsInPostgres(candidates, durationByFileId, fileIdsInChunk) {
-  if (!isDatabaseEnabled()) {
-    return;
-  }
-  const writes = [];
+function applyProbedDurationsToCandidates(candidates, durationByFileId, fileIdsInChunk) {
   for (const candidate of candidates) {
     if (!candidate.lengthFromProbe || !fileIdsInChunk.has(candidate.memo.fileId)) {
       continue;
@@ -941,23 +937,9 @@ async function cacheProbedDurationsInPostgres(candidates, durationByFileId, file
     if (probed == null || !Number.isFinite(probed)) {
       continue;
     }
-    const seconds = sheetVoiceMemoLengthSeconds(probed, getVoiceMemoDurationLimits());
-    candidate.lengthSeconds = seconds;
+    candidate.lengthSeconds = sheetVoiceMemoLengthSeconds(probed, getVoiceMemoDurationLimits());
     candidate.lengthFromProbe = false;
-    writes.push(
-      updateApplicantDriveDurationSeconds(candidate.aesopId, {
-        driveDurationSeconds: seconds,
-        driveFileId: candidate.memo.fileId,
-        driveFileName: candidate.memo.fileName,
-      }).catch((error) =>
-        console.warn(
-          "[sync-voice-memos] could not cache duration in Postgres:",
-          error.message || error,
-        ),
-      ),
-    );
   }
-  await Promise.all(writes);
 }
 
 /**
@@ -1146,7 +1128,7 @@ async function runVoiceMemoRound2Sync(options = {}) {
       for (const [fileId, duration] of chunkMap) {
         durationByFileId.set(fileId, duration);
       }
-      await cacheProbedDurationsInPostgres(candidates, durationByFileId, new Set(chunk));
+      applyProbedDurationsToCandidates(candidates, durationByFileId, new Set(chunk));
       probedCount += chunk.length;
       console.info(
         `[sync-voice-memos] probed Drive lengths chunk ${chunkIndex + 1}/${chunks.length} ` +
@@ -1220,9 +1202,6 @@ async function runVoiceMemoRound2Sync(options = {}) {
 
   if (pending.length > 0) {
     pending.sort((a, b) => a.gridRowIdx - b.gridRowIdx);
-    console.info(
-      `[sync-voice-memos] Phase 1: writing ${pending.length} Applicants row update(s)...`,
-    );
     const { worksheet } = await loadApplicantsWorksheet({ deadlineAt });
     const columnIndices = [round2ColIdx, linksColIdx, dateColIdx];
     if (lengthEnabled) {
@@ -1235,7 +1214,7 @@ async function runVoiceMemoRound2Sync(options = {}) {
       maxRowSpan: VOICE_MEMO_SHEET_WRITE_MAX_ROW_SPAN,
     });
     console.info(
-      `[sync-voice-memos] writing ${pending.length} Applicants row update(s) in ${writeChunks.length} chunk(s)`,
+      `[sync-voice-memos] writing ${pending.length} Applicants row update(s) in ${writeChunks.length} chunk(s)...`,
     );
 
     for (let chunkIndex = 0; chunkIndex < writeChunks.length; chunkIndex += 1) {
@@ -1276,25 +1255,10 @@ async function runVoiceMemoRound2Sync(options = {}) {
           `(rows ${minRow + 1}-${maxRow})`,
       );
     }
-  }
-
-  let audioCacheResult = {
-    driveFiles: 0,
-    downloaded: 0,
-    pruned: 0,
-    skipped: 0,
-    transcodeFailures: [],
-  };
-  console.info("[sync-voice-memos] Phase 2: downloading/transcoding voice memo audio...");
-  try {
-    audioCacheResult = await syncVoiceMemoAudioFromScan(scan, { deadlineAt });
     console.info(
-      `[sync-voice-memos] voice memo audio cache: driveFiles=${audioCacheResult.driveFiles}, ` +
-        `downloaded=${audioCacheResult.downloaded}, pruned=${audioCacheResult.pruned}, ` +
-        `transcodeFailures=${audioCacheResult.transcodeFailures?.length || 0}`,
+      `[sync-voice-memos] sheet sync complete: updated=${updated}, lengthsWritten=${lengthsWritten}, ` +
+        `lengthProbes=${probeFileIds.size} (Postgres mirror is hourly-cache only)`,
     );
-  } catch (error) {
-    console.warn("[sync-voice-memos] voice memo audio cache failed:", error.message || error);
   }
 
   const result = {
@@ -1308,10 +1272,7 @@ async function runVoiceMemoRound2Sync(options = {}) {
     lengthsCleared,
     lengthsUnknown,
     lengthProbes: probeFileIds.size,
-    audioDownloaded: audioCacheResult.downloaded,
-    audioPruned: audioCacheResult.pruned,
-    audioSkipped: audioCacheResult.skipped,
-    audioTranscodeFailures: audioCacheResult.transcodeFailures || [],
+    audioTranscodeFailures: [],
     ...driveWarnings,
   };
   logVoiceMemoSyncAudit(result);

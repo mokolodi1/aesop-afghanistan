@@ -733,7 +733,7 @@ async function mirrorApplicantsFromSheetsOnly(options = {}) {
 
 /**
  * One-directional Drive → Postgres audio cache (download/transcode only, no sheet writes).
- * Runs at the end of hourly mirror and voice-memo-sync after metadata is settled.
+ * Runs at the end of hourly-cache after metadata is promoted.
  * @param {{ deadlineAt?: number, driveScan?: object|null }} [options]
  */
 async function syncApplicantVoiceMemoAudioCache(options = {}) {

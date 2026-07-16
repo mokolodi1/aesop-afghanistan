@@ -20,8 +20,8 @@
 # HOURLY_CACHE_INCLUDE_CLASSROOM=true in fly.toml [env].
 30 0-20,22 * * * node scripts/run-job.js hourly-cache
 
-# Daily voice memo sync: sheet writes first (Round 2, link, date, length), then
-# audio download/transcode for portal playback. 2:00 AM Afghanistan (21:30 UTC).
+# Daily voice memo sync: Applicants sheet only (Round 2, link, date, length).
+# Postgres mirror + audio cache are hourly-cache. 2:00 AM Afghanistan (21:30 UTC).
 30 21 * * * node scripts/run-job.js voice-memo-sync
 
 # Daily Google Classroom sync (rosters, grades, Ding change history).

@@ -4726,7 +4726,7 @@ function PortalAdminJobsTab({ mirrorCacheStatus }) {
 
   const clearVoiceMemoAudioCache = async () => {
     const confirmed = window.confirm(
-      'Clear all cached voice memo audio in Postgres? The next voice memo sync will re-download and rewrite every file. This can take a while.',
+      'Clear all cached voice memo audio in Postgres? The next hourly cache run will re-download and transcode every file. This can take a while.',
     );
     if (!confirmed) {
       return;
@@ -4739,7 +4739,7 @@ function PortalAdminJobsTab({ mirrorCacheStatus }) {
       const cleared = Number(data.cleared) || 0;
       setVoiceMemoCacheNotice(
         cleared > 0
-          ? `Cleared ${cleared} cached voice memo${cleared === 1 ? '' : 's'}. Run voice memo sync to rebuild the cache.`
+          ? `Cleared ${cleared} cached voice memo${cleared === 1 ? '' : 's'}. Run hourly cache to rebuild the cache.`
           : 'Voice memo audio cache was already empty.',
       );
     } catch (err) {
@@ -4898,8 +4898,8 @@ function PortalAdminJobsTab({ mirrorCacheStatus }) {
             {job.name === 'voice-memo-sync' ? (
               <div className="portal-admin-voice-memo-cache-actions">
                 <p className="portal-admin-hint">
-                  Clears all cached voice memo audio in Postgres. The next voice memo sync (or
-                  hourly cache) will re-download and transcode every file.
+                  Clears all cached voice memo audio in Postgres. The next hourly cache run
+                  will re-download and transcode every file.
                 </p>
                 <button
                   type="button"
