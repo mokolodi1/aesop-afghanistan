@@ -284,6 +284,32 @@ async function listJobRuns({ jobName, limit = 20 }) {
 }
 
 /**
+ * Newest non-stale `running` row per job name (may differ from {@link getLastRunsByJob}
+ * when a later skipped/failed row was recorded while an earlier run is still active).
+ * @returns {Promise<Record<string, Record<string, unknown>>>}
+ */
+async function getActiveRunsByJob() {
+  const pool = getPool();
+  if (!pool) {
+    return {};
+  }
+  const found = await pool.query(
+    `SELECT DISTINCT ON (job_name)
+       id, job_name, trigger_source, triggered_by, status, started_at, finished_at, result, error
+     FROM job_runs
+     WHERE status = 'running'
+       AND started_at > NOW() - ($1::bigint * INTERVAL '1 millisecond')
+     ORDER BY job_name, started_at DESC`,
+    [ACTIVE_RUN_STALE_MS],
+  );
+  const byJob = {};
+  for (const row of found.rows) {
+    byJob[row.job_name] = rowToRun(row);
+  }
+  return byJob;
+}
+
+/**
  * @returns {Promise<Record<string, Record<string, unknown>>>} latest run per job name
  */
 async function getLastRunsByJob() {
@@ -468,6 +494,7 @@ module.exports = {
   getJobRun,
   listJobRuns,
   getLastRunsByJob,
+  getActiveRunsByJob,
   pruneJobRuns,
   startJobRunChild,
   cancelJobRun,

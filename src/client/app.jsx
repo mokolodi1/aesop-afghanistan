@@ -4810,7 +4810,11 @@ function PortalAdminJobsTab({ mirrorCacheStatus }) {
   const [clearingVoiceMemoCache, setClearingVoiceMemoCache] = useState(false);
   const [voiceMemoCacheNotice, setVoiceMemoCacheNotice] = useState('');
 
-  const anyJobRunning = (overview?.jobs || []).some((job) => job.lastRun?.status === 'running');
+  const globalActiveRun = overview?.activeRun || null;
+  const anyJobRunning =
+    Boolean(globalActiveRun) || (overview?.jobs || []).some((job) => job.activeRun);
+  const jobLabelByName = Object.fromEntries((overview?.jobs || []).map((job) => [job.name, job.label]));
+
   useEffect(() => {
     let cancelled = false;
     let timer = null;
@@ -4822,7 +4826,8 @@ function PortalAdminJobsTab({ mirrorCacheStatus }) {
         }
         setOverview(data);
         setOverviewError('');
-        const anyRunning = (data.jobs || []).some((job) => job.lastRun?.status === 'running');
+        const anyRunning =
+          Boolean(data.activeRun) || (data.jobs || []).some((job) => job.activeRun);
         timer = setTimeout(load, anyRunning ? 4000 : 30000);
       } catch (err) {
         if (cancelled) {
@@ -4958,6 +4963,33 @@ function PortalAdminJobsTab({ mirrorCacheStatus }) {
     }
   };
 
+  const renderStopButtons = (jobName, runId) => {
+    if (!runId) {
+      return null;
+    }
+    const isCancelling = cancellingAction?.jobName === jobName;
+    return (
+      <>
+        <button
+          type="button"
+          className="portal-btn portal-btn--secondary"
+          disabled={Boolean(cancellingAction)}
+          onClick={() => cancelJob(jobName, runId, { restart: false })}
+        >
+          {isCancelling && !cancellingAction.restart ? 'Stopping…' : 'Stop'}
+        </button>
+        <button
+          type="button"
+          className="portal-btn portal-btn--secondary"
+          disabled={Boolean(cancellingAction)}
+          onClick={() => cancelJob(jobName, runId, { restart: true })}
+        >
+          {isCancelling && cancellingAction.restart ? 'Restarting…' : 'Stop & restart'}
+        </button>
+      </>
+    );
+  };
+
   return (
     <section className="portal-admin-panel" aria-label="Jobs">
       <p className="portal-admin-hint">
@@ -4997,9 +5029,25 @@ function PortalAdminJobsTab({ mirrorCacheStatus }) {
           Postgres is not configured — job history requires DATABASE_URL.
         </p>
       ) : null}
+      {globalActiveRun ? (
+        <div className="portal-admin-job-active-banner" role="status">
+          <p className="portal-admin-status">
+            <PortalAdminJobStatusBadge status="running" />{' '}
+            {jobLabelByName[globalActiveRun.jobName] || globalActiveRun.jobName} run #
+            {globalActiveRun.id} is in progress (started {formatJobTimestamp(globalActiveRun.startedAt)}
+            {globalActiveRun.triggeredBy ? ` · ${globalActiveRun.triggeredBy}` : ''}).
+          </p>
+          <div className="portal-admin-job-actions">
+            {renderStopButtons(globalActiveRun.jobName, globalActiveRun.id)}
+          </div>
+        </div>
+      ) : null}
       {(overview?.jobs || []).map((job) => {
         const lastRun = job.lastRun;
-        const isRunning = lastRun?.status === 'running';
+        const activeRun = job.activeRun;
+        const isRunning = Boolean(activeRun);
+        const blockedByOther =
+          Boolean(globalActiveRun) && globalActiveRun.jobName !== job.name;
         const isExpanded = expandedJob === job.name;
         const runs = runsByJob[job.name] || [];
         return (
@@ -5028,6 +5076,15 @@ function PortalAdminJobsTab({ mirrorCacheStatus }) {
                   )}
                 </dd>
               </div>
+              {isRunning && activeRun?.id !== lastRun?.id ? (
+                <div className="portal-admin-stat-row">
+                  <dt>Active run</dt>
+                  <dd>
+                    <PortalAdminJobStatusBadge status="running" /> run #{activeRun.id} ·{' '}
+                    {formatJobTimestamp(activeRun.startedAt)} · {formatJobTrigger(activeRun)}
+                  </dd>
+                </div>
+              ) : null}
               {lastRun?.status === 'failed' && lastRun.error ? (
                 <div className="portal-admin-stat-row">
                   <dt>Error</dt>
@@ -5035,30 +5092,15 @@ function PortalAdminJobsTab({ mirrorCacheStatus }) {
                 </div>
               ) : null}
             </dl>
+            {blockedByOther ? (
+              <p className="portal-admin-hint">
+                Blocked while {jobLabelByName[globalActiveRun.jobName] || globalActiveRun.jobName}{' '}
+                run #{globalActiveRun.id} is running. Use Stop below to cancel it.
+              </p>
+            ) : null}
             <div className="portal-admin-job-actions">
-              {isRunning ? (
-                <>
-                  <button
-                    type="button"
-                    className="portal-btn portal-btn--secondary"
-                    disabled={Boolean(cancellingAction) || !lastRun?.id}
-                    onClick={() => cancelJob(job.name, lastRun.id, { restart: false })}
-                  >
-                    {cancellingAction?.jobName === job.name && !cancellingAction.restart
-                      ? 'Stopping…'
-                      : 'Stop'}
-                  </button>
-                  <button
-                    type="button"
-                    className="portal-btn portal-btn--secondary"
-                    disabled={Boolean(cancellingAction) || !lastRun?.id}
-                    onClick={() => cancelJob(job.name, lastRun.id, { restart: true })}
-                  >
-                    {cancellingAction?.jobName === job.name && cancellingAction.restart
-                      ? 'Restarting…'
-                      : 'Stop & restart'}
-                  </button>
-                </>
+              {globalActiveRun ? (
+                renderStopButtons(globalActiveRun.jobName, globalActiveRun.id)
               ) : (
                 <button
                   type="button"
@@ -5141,6 +5183,19 @@ function PortalAdminJobsTab({ mirrorCacheStatus }) {
                               >
                                 View
                               </button>
+                              {run.status === 'running' ? (
+                                <>
+                                  {' · '}
+                                  <button
+                                    type="button"
+                                    className="portal-admin-job-log-link"
+                                    disabled={Boolean(cancellingAction)}
+                                    onClick={() => cancelJob(job.name, run.id, { restart: false })}
+                                  >
+                                    {cancellingAction?.jobName === job.name ? 'Stopping…' : 'Stop'}
+                                  </button>
+                                </>
+                              ) : null}
                             </td>
                           </tr>
                         ))}

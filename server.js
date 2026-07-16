@@ -44,7 +44,14 @@ const {
   runAdminVoiceMemoPlaybackTest,
   formatAdminVoiceMemoPlaybackTestError,
 } = require('./services/adminVoiceMemoPlaybackTest');
-const { getLastRunsByJob, listJobRuns, getJobRun, findBlockingJobRun } = require('./services/jobRuns');
+const {
+  getLastRunsByJob,
+  getActiveRunsByJob,
+  findActiveJobRunAmong,
+  listJobRuns,
+  getJobRun,
+  findBlockingJobRun,
+} = require('./services/jobRuns');
 const { clearAllVoiceMemoAudioCache } = require('./services/voiceMemoAudio');
 const {
   loadReviewAssignmentsForReviewer,
@@ -1915,11 +1922,15 @@ app.post('/api/portal-admin/jobs/overview', portalAdminRateLimiter, async (req, 
     }
     const databaseEnabled = isDatabaseEnabled();
     const lastRuns = databaseEnabled ? await getLastRunsByJob() : {};
+    const activeRuns = databaseEnabled ? await getActiveRunsByJob() : {};
+    const jobNames = listJobDefinitions().map((job) => job.name);
+    const activeRun = databaseEnabled ? await findActiveJobRunAmong(jobNames) : null;
     const jobs = listJobDefinitions().map((job) => ({
       ...job,
       lastRun: lastRuns[job.name] || null,
+      activeRun: activeRuns[job.name] || null,
     }));
-    res.json({ success: true, databaseEnabled, jobs });
+    res.json({ success: true, databaseEnabled, jobs, activeRun });
   } catch (error) {
     console.error('Error loading jobs overview:', formatErrorForLog(error));
     const status = error.statusCode || 500;
