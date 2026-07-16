@@ -11,12 +11,13 @@ const {
   sheetsApiCall,
 } = require("./googleSheets");
 const { getApplicantReviewsConfig } = require("./applicantReviews");
-const { loadApplicantAesopIdSetFromSheets } = require("./voiceMemoSync");
+const { loadApplicantAesopIdSetFromSheets, loadApplicantsDataForStats } = require("./voiceMemoSync");
 const {
   personSheetIdentityKey,
   preparePeopleRowsForMirror,
   logPeopleMirrorDedupeStats,
   collectApplicantMirrorEntriesFromSheet,
+  loadVoiceMemoDriveScanMap,
   syncApplicantVoiceMemoDriveData,
 } = require("./peopleMirror");
 const {
@@ -234,20 +235,30 @@ async function insertApplicantMirrorEntriesToStaging(pool, entries) {
   return mirrored;
 }
 
-/** Mirror Applicants sheet fields into staging without Drive scan or voice memo audio. */
+/** Mirror Applicants sheet + Drive file ids/links into staging (metadata scan only). */
 async function mirrorApplicantsFromSheetsToStaging(deadlineAt) {
   const pool = getPool();
   if (!pool) {
-    return { mirrored: 0 };
+    return { mirrored: 0, driveFiles: 0 };
+  }
+
+  const { dataRows, columns, cfg } = await loadApplicantsDataForStats({ deadlineAt });
+  const { memoById, driveFiles } = await loadVoiceMemoDriveScanMap({ deadlineAt, cfg });
+  if (driveFiles > 0) {
+    console.info(`[mirror] Drive folder scan: driveFiles=${driveFiles}`);
   }
 
   const { entries } = await collectApplicantMirrorEntriesFromSheet({
     deadlineAt,
-    useDriveScan: false,
+    dataRows,
+    columns,
+    cfg,
+    memoById,
+    useDriveScan: true,
     probeDriveDurations: false,
   });
   const mirrored = await insertApplicantMirrorEntriesToStaging(pool, entries);
-  return { mirrored };
+  return { mirrored, driveFiles };
 }
 
 /** @deprecated Use mirrorApplicantsFromSheetsToStaging + syncApplicantVoiceMemoDriveData */
@@ -396,7 +407,7 @@ async function mirrorPeopleAndDingViaStaging(options = {}) {
     try {
       applicantsResult = await mirrorApplicantsFromSheetsToStaging(deadlineAt);
       console.log(
-        `[people-mirror] Applicants sheet staging: mirrored=${applicantsResult.mirrored}`,
+        `[people-mirror] Applicants staging: mirrored=${applicantsResult.mirrored}, driveFiles=${applicantsResult.driveFiles}`,
       );
     } catch (error) {
       applicantsStagingFailed = true;
@@ -442,7 +453,7 @@ async function mirrorPeopleAndDingViaStaging(options = {}) {
 
     let voiceMemoResult = { updated: 0, driveFiles: 0 };
     try {
-      console.log("[people-mirror] Phase 2: syncing voice memo Drive data...");
+      console.log("[people-mirror] Phase 2: syncing voice memo audio cache...");
       voiceMemoResult = await syncApplicantVoiceMemoDriveData({ deadlineAt });
       console.log(
         `[people-mirror] Voice memo Drive: updated=${voiceMemoResult.updated}, driveFiles=${voiceMemoResult.driveFiles}`,
