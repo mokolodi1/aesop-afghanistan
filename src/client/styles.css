@@ -4979,21 +4979,39 @@ html[dir='rtl'] .portal-voice-memo-substeps {
 .portal-review-save-indicator {
   display: inline-flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 5px;
   flex: 0 1 auto;
+  margin-left: auto;
   max-width: 72%;
   font-size: 0.65rem;
   line-height: 1.2;
   color: var(--aesop-muted, #5c5c5c);
+  text-align: right;
+}
+
+.portal-review-save-indicator-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  min-width: 0;
+}
+
+.portal-review-save-indicator-line {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 5px;
 }
 
 .portal-review-save-indicator-label {
-  text-align: end;
+  text-align: right;
   line-height: 1.15;
 }
 
 .portal-review-save-now-link {
-  display: inline;
+  display: inline-block;
   margin: 0;
   padding: 0;
   border: 0;
@@ -5003,6 +5021,7 @@ html[dir='rtl'] .portal-voice-memo-substeps {
   font-size: inherit;
   font-weight: 600;
   line-height: inherit;
+  text-align: right;
   text-decoration: underline;
   text-underline-offset: 2px;
   cursor: pointer;
@@ -5016,6 +5035,12 @@ html[dir='rtl'] .portal-voice-memo-substeps {
   outline: 2px solid var(--aesop-teal-dark, #006b6f);
   outline-offset: 2px;
   border-radius: 2px;
+}
+
+.portal-review-save-now-link:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  text-decoration: none;
 }
 
 .portal-review-save-indicator--pending,

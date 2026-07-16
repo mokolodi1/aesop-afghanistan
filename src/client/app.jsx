@@ -9127,52 +9127,75 @@ function PortalReviewSaveStatus({ saveStatus, lastSavedAt, onSaveNow, t }) {
       role="status"
       aria-live="polite"
     >
-      <span className="portal-review-save-indicator-icon" aria-hidden="true">
-        {saveStatus === 'saving' || saveStatus === 'pending' ? (
-          <svg viewBox="0 0 16 16" width="14" height="14" focusable="false">
-            <circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" strokeWidth="1.5" opacity="0.25" />
-            <path
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.5"
-              strokeLinecap="round"
-              d="M8 2a6 6 0 0 1 6 6"
-            />
-          </svg>
-        ) : saveStatus === 'error' ? (
-          <svg viewBox="0 0 16 16" width="14" height="14" focusable="false">
-            <path
-              fill="currentColor"
-              d="M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13zm.75 3.5a.75.75 0 0 0-1.5 0v4a.75.75 0 0 0 1.5 0v-4zm-.75 6.25a.875.875 0 1 0 0-1.75.875.875 0 0 0 0 1.75z"
-            />
-          </svg>
-        ) : (
-          <svg viewBox="0 0 16 16" width="14" height="14" focusable="false">
-            <path
-              fill="currentColor"
-              d="M11.5 1.5 14 4v8.25A1.75 1.75 0 0 1 12.25 14H3.75A1.75 1.75 0 0 1 2 12.25V3.75A1.75 1.75 0 0 1 3.75 2h5.8l1.95-1.95zm-.2 1.05-1.3 1.3H12v7.9H4V4h7.3z"
-            />
-          </svg>
-        )}
-      </span>
-      <span className="portal-review-save-indicator-label">
-        {saveStatus === 'pending' ? (
-          <>
-            {t('reviews.savePending')}{' '}
-            <button type="button" className="portal-review-save-now-link" onClick={onSaveNow}>
-              {t('reviews.saveNow')}
-            </button>
-          </>
-        ) : (
-          label
-        )}
-      </span>
+      {saveStatus === 'pending' ? (
+        <span className="portal-review-save-indicator-stack">
+          <span className="portal-review-save-indicator-line">
+            <span className="portal-review-save-indicator-icon" aria-hidden="true">
+              <svg viewBox="0 0 16 16" width="14" height="14" focusable="false">
+                <circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" strokeWidth="1.5" opacity="0.25" />
+                <path
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                  d="M8 2a6 6 0 0 1 6 6"
+                />
+              </svg>
+            </span>
+            <span>{t('reviews.savePending')}</span>
+          </span>
+          <button
+            type="button"
+            className="portal-review-save-now-link"
+            disabled={saveStatus === 'saving'}
+            onClick={(event) => {
+              event.preventDefault();
+              onSaveNow?.();
+            }}
+          >
+            {t('reviews.saveNow')}
+          </button>
+        </span>
+      ) : (
+        <>
+          <span className="portal-review-save-indicator-icon" aria-hidden="true">
+            {saveStatus === 'saving' ? (
+              <svg viewBox="0 0 16 16" width="14" height="14" focusable="false">
+                <circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" strokeWidth="1.5" opacity="0.25" />
+                <path
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                  d="M8 2a6 6 0 0 1 6 6"
+                />
+              </svg>
+            ) : saveStatus === 'error' ? (
+              <svg viewBox="0 0 16 16" width="14" height="14" focusable="false">
+                <path
+                  fill="currentColor"
+                  d="M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13zm.75 3.5a.75.75 0 0 0-1.5 0v4a.75.75 0 0 0 1.5 0v-4zm-.75 6.25a.875.875 0 1 0 0-1.75.875.875 0 0 0 0 1.75z"
+                />
+              </svg>
+            ) : (
+              <svg viewBox="0 0 16 16" width="14" height="14" focusable="false">
+                <path
+                  fill="currentColor"
+                  d="M11.5 1.5 14 4v8.25A1.75 1.75 0 0 1 12.25 14H3.75A1.75 1.75 0 0 1 2 12.25V3.75A1.75 1.75 0 0 1 3.75 2h5.8l1.95-1.95zm-.2 1.05-1.3 1.3H12v7.9H4V4h7.3z"
+                />
+              </svg>
+            )}
+          </span>
+          <span className="portal-review-save-indicator-label">{label}</span>
+        </>
+      )}
     </span>
   );
 }
 
 function useReviewAutoSave({ drafts, onSaveOne }) {
   const dirtyRef = useRef(new Set());
+  const pendingDraftsRef = useRef(new Map());
   const draftsRef = useRef(drafts);
   const debounceTimersRef = useRef(new Map());
   const onSaveOneRef = useRef(onSaveOne);
@@ -9182,22 +9205,28 @@ function useReviewAutoSave({ drafts, onSaveOne }) {
   draftsRef.current = drafts;
   onSaveOneRef.current = onSaveOne;
 
+  const getPendingDraft = useCallback((applicantId) => {
+    return pendingDraftsRef.current.get(applicantId) ?? draftsRef.current[applicantId];
+  }, []);
+
   const flushApplicant = useCallback(async (applicantId) => {
-    const draft = draftsRef.current[applicantId];
+    const draft = getPendingDraft(applicantId);
     if (!reviewDraftCanPersist(draft)) {
       dirtyRef.current.delete(applicantId);
+      pendingDraftsRef.current.delete(applicantId);
       return;
     }
     setSaveStatus('saving');
     try {
       await onSaveOneRef.current(applicantId, draft);
       dirtyRef.current.delete(applicantId);
+      pendingDraftsRef.current.delete(applicantId);
       setLastSavedAt(Date.now());
       setSaveStatus('saved');
     } catch {
       setSaveStatus('error');
     }
-  }, []);
+  }, [getPendingDraft]);
 
   const markDirty = useCallback(
     (applicantId, draftOverride) => {
@@ -9206,6 +9235,7 @@ function useReviewAutoSave({ drafts, onSaveOne }) {
         return;
       }
       dirtyRef.current.add(applicantId);
+      pendingDraftsRef.current.set(applicantId, draft);
       setSaveStatus('pending');
       const existing = debounceTimersRef.current.get(applicantId);
       if (existing) {
@@ -9220,34 +9250,54 @@ function useReviewAutoSave({ drafts, onSaveOne }) {
     [flushApplicant],
   );
 
-  const saveNow = useCallback(async () => {
-    for (const timer of debounceTimersRef.current.values()) {
-      window.clearTimeout(timer);
-    }
-    debounceTimersRef.current.clear();
-
-    const applicantIds = Array.from(dirtyRef.current);
-    if (applicantIds.length === 0) {
-      return;
-    }
-
-    setSaveStatus('saving');
-    try {
-      for (const applicantId of applicantIds) {
-        const draft = draftsRef.current[applicantId];
-        if (!reviewDraftCanPersist(draft)) {
-          dirtyRef.current.delete(applicantId);
-          continue;
-        }
-        await onSaveOneRef.current(applicantId, draft);
-        dirtyRef.current.delete(applicantId);
+  const saveNow = useCallback(
+    async (focusedApplicantId) => {
+      for (const timer of debounceTimersRef.current.values()) {
+        window.clearTimeout(timer);
       }
-      setLastSavedAt(Date.now());
-      setSaveStatus('saved');
-    } catch {
-      setSaveStatus('error');
-    }
-  }, []);
+      debounceTimersRef.current.clear();
+
+      const applicantIds = new Set(dirtyRef.current);
+      const focused = String(focusedApplicantId || '').trim();
+      if (focused) {
+        const focusedDraft = getPendingDraft(focused);
+        if (reviewDraftCanPersist(focusedDraft)) {
+          applicantIds.add(focused);
+          pendingDraftsRef.current.set(focused, focusedDraft);
+        }
+      }
+
+      if (applicantIds.size === 0) {
+        return;
+      }
+
+      setSaveStatus('saving');
+      let savedCount = 0;
+      try {
+        for (const applicantId of applicantIds) {
+          const draft = getPendingDraft(applicantId);
+          if (!reviewDraftCanPersist(draft)) {
+            dirtyRef.current.delete(applicantId);
+            pendingDraftsRef.current.delete(applicantId);
+            continue;
+          }
+          await onSaveOneRef.current(applicantId, draft);
+          dirtyRef.current.delete(applicantId);
+          pendingDraftsRef.current.delete(applicantId);
+          savedCount += 1;
+        }
+        if (savedCount > 0) {
+          setLastSavedAt(Date.now());
+          setSaveStatus('saved');
+        } else {
+          setSaveStatus('pending');
+        }
+      } catch {
+        setSaveStatus('error');
+      }
+    },
+    [getPendingDraft],
+  );
 
   useEffect(() => {
     return () => {
@@ -10254,7 +10304,7 @@ function PortalReviewApplicationsPage() {
                   onSelect={handleSelectApplicant}
                   saveStatus={saveStatus}
                   lastSavedAt={lastSavedAt}
-                  onSaveNow={saveNow}
+                  onSaveNow={() => saveNow(selectedApplicantId)}
                   t={t}
                 />
                 <div className="portal-review-detail" ref={reviewDetailRef}>
