@@ -783,6 +783,7 @@ function logAesopIdsInLots(prefix, label, entries, options = {}) {
  *   warnings?: string[],
  *   duplicateAesopIds?: Array<{ aesopId: string, files?: Array<{ fileName: string }> }>,
  *   unmatchedFiles?: Array<{ aesopId: string, fileName: string }>,
+ *   lengthsUnknownEntries?: Array<{ aesopId: string, fileName: string, fileId: string }>,
  * }} result
  */
 function logVoiceMemoSyncAudit(result) {
@@ -797,6 +798,11 @@ function logVoiceMemoSyncAudit(result) {
     "[sync-voice-memos]",
     "unmatched voice note AESOP IDs (not on Applicants sheet)",
     (result.unmatchedFiles || []).map((entry) => entry.aesopId),
+  );
+  logAesopIdsInLots(
+    "[sync-voice-memos]",
+    "voice memo length unknown after Drive probe",
+    (result.lengthsUnknownEntries || []).map((entry) => entry.aesopId),
   );
   logVoiceMemoAudioTranscodeFailures(result.audioTranscodeFailures, { label: "[sync-voice-memos]" });
 }
@@ -852,7 +858,7 @@ let voiceMemoSyncInFlight = false;
  * Drive/Sheets throttling (429s) is retried with backoff, so a run may take up to 6 hours.
  *
  * @param {{ timeBudgetMs?: number }} [options]
- * @returns {Promise<{ updated: number, skippedUpToDate: number, skippedNoFile: number, skippedNotAccepted: number, skippedNoId: number, driveFileCount: number, lengthsWritten: number, lengthsCleared: number, lengthsUnknown: number, lengthProbes: number, warnings: string[], duplicateAesopIds: Array, unmatchedFiles: Array, invalidFileNames: string[] }>}
+ * @returns {Promise<{ updated: number, skippedUpToDate: number, skippedNoFile: number, skippedNotAccepted: number, skippedNoId: number, driveFileCount: number, lengthsWritten: number, lengthsCleared: number, lengthsUnknown: number, lengthsUnknownEntries: Array<{ aesopId: string, fileName: string, fileId: string }>, lengthProbes: number, warnings: string[], duplicateAesopIds: Array, unmatchedFiles: Array, invalidFileNames: string[] }>}
  */
 async function syncVoiceMemoRound2Status(options = {}) {
   if (voiceMemoSyncInFlight) {
@@ -1140,6 +1146,8 @@ async function runVoiceMemoRound2Sync(options = {}) {
   let lengthsWritten = 0;
   let lengthsCleared = 0;
   let lengthsUnknown = 0;
+  /** @type {Array<{ aesopId: string, fileName: string, fileId: string }>} */
+  const lengthsUnknownEntries = [];
 
   for (const candidate of candidates) {
     let writeLength = false;
@@ -1164,6 +1172,11 @@ async function runVoiceMemoRound2Sync(options = {}) {
         }
       } else {
         lengthsUnknown += 1;
+        lengthsUnknownEntries.push({
+          aesopId: candidate.aesopId,
+          fileName: candidate.memo.fileName,
+          fileId: candidate.memo.fileId,
+        });
         if (candidate.currentLengthRaw !== "") {
           // The Drive file changed and the new length is unknown: clear the stale value.
           writeLength = true;
@@ -1252,7 +1265,8 @@ async function runVoiceMemoRound2Sync(options = {}) {
     }
     console.info(
       `[sync-voice-memos] sheet sync complete: updated=${updated}, lengthsWritten=${lengthsWritten}, ` +
-        `lengthProbes=${probeFileIds.size} (Postgres mirror is hourly-cache only)`,
+        `lengthsUnknown=${lengthsUnknown}, lengthProbes=${probeFileIds.size} ` +
+        `(Postgres mirror is hourly-cache only)`,
     );
   }
 
@@ -1266,6 +1280,10 @@ async function runVoiceMemoRound2Sync(options = {}) {
     lengthsWritten,
     lengthsCleared,
     lengthsUnknown,
+    lengthsUnknownEntries: lengthsUnknownEntries.sort(
+      (a, b) =>
+        a.aesopId.localeCompare(b.aesopId) || a.fileName.localeCompare(b.fileName),
+    ),
     lengthProbes: probeFileIds.size,
     audioTranscodeFailures: [],
     ...driveWarnings,

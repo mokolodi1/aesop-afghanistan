@@ -196,7 +196,8 @@ const JOB_DEFINITIONS = {
       console.log(
         `[voice-memo-sync] updated=${result.updated} upToDate=${result.skippedUpToDate} ` +
           `noFile=${result.skippedNoFile} notAccepted=${result.skippedNotAccepted} ` +
-          `noId=${result.skippedNoId} driveFiles=${result.driveFileCount}`,
+          `noId=${result.skippedNoId} driveFiles=${result.driveFileCount} ` +
+          `lengthsWritten=${result.lengthsWritten} lengthsUnknown=${result.lengthsUnknown}`,
       );
       return result;
     },

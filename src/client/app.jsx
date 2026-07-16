@@ -4146,12 +4146,16 @@ function PortalAdminVoiceMemoSyncIssuesPanel({ syncResult }) {
   const invalidFileNames = Array.isArray(syncResult.invalidFileNames)
     ? syncResult.invalidFileNames
     : [];
+  const lengthsUnknownEntries = Array.isArray(syncResult.lengthsUnknownEntries)
+    ? syncResult.lengthsUnknownEntries
+    : [];
   const warnings = Array.isArray(syncResult.warnings) ? syncResult.warnings : [];
   const hasIssues =
     warnings.length > 0 ||
     duplicateAesopIds.length > 0 ||
     unmatchedFiles.length > 0 ||
-    invalidFileNames.length > 0;
+    invalidFileNames.length > 0 ||
+    lengthsUnknownEntries.length > 0;
 
   if (!hasIssues) {
     return null;
@@ -4231,6 +4235,34 @@ function PortalAdminVoiceMemoSyncIssuesPanel({ syncResult }) {
               </li>
             ))}
           </ul>
+        </section>
+      ) : null}
+      {lengthsUnknownEntries.length > 0 ? (
+        <section
+          className="portal-admin-application-issues-group"
+          aria-label="Voice memo lengths unknown after Drive probe"
+        >
+          <h5 className="portal-admin-application-issues-title">
+            Voice memo length unknown ({lengthsUnknownEntries.length})
+          </h5>
+          <div className="portal-admin-table-wrap portal-admin-table-wrap--scroll">
+            <table className="portal-admin-table portal-admin-application-category-table">
+              <thead>
+                <tr>
+                  <th scope="col">AESOP ID</th>
+                  <th scope="col">File</th>
+                </tr>
+              </thead>
+              <tbody>
+                {lengthsUnknownEntries.map((entry) => (
+                  <tr key={`${entry.aesopId}-${entry.fileId || entry.fileName}`}>
+                    <td className="portal-admin-mono">{entry.aesopId}</td>
+                    <td>{entry.fileName || '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </section>
       ) : null}
     </div>
@@ -9194,6 +9226,7 @@ function useReviewAutoSave({ drafts, onSaveOne }) {
   const draftsRef = useRef(drafts);
   const debounceTimersRef = useRef(new Map());
   const onSaveOneRef = useRef(onSaveOne);
+  const flushApplicantRef = useRef(async () => {});
   const [saveStatus, setSaveStatus] = useState('idle');
   const [lastSavedAt, setLastSavedAt] = useState(null);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
@@ -9205,23 +9238,49 @@ function useReviewAutoSave({ drafts, onSaveOne }) {
     return pendingDraftsRef.current.get(applicantId) ?? draftsRef.current[applicantId];
   }, []);
 
-  const flushApplicant = useCallback(async (applicantId) => {
-    const draft = getPendingDraft(applicantId);
-    if (!reviewDraftCanPersist(draft)) {
-      return;
-    }
-    setSaveStatus('saving');
-    try {
-      await onSaveOneRef.current(applicantId, draft);
-      dirtyRef.current.delete(applicantId);
-      pendingDraftsRef.current.delete(applicantId);
-      setHasUnsavedChanges(dirtyRef.current.size > 0);
-      setLastSavedAt(Date.now());
-      setSaveStatus('saved');
-    } catch {
-      setSaveStatus('error');
-    }
-  }, [getPendingDraft]);
+  const scheduleAutoSaveForApplicant = useCallback(
+    (applicantId) => {
+      const draft = getPendingDraft(applicantId);
+      if (!reviewDraftCanPersist(draft)) {
+        return;
+      }
+      const existing = debounceTimersRef.current.get(applicantId);
+      if (existing) {
+        window.clearTimeout(existing);
+      }
+      const timerId = window.setTimeout(() => {
+        debounceTimersRef.current.delete(applicantId);
+        flushApplicantRef.current(applicantId);
+      }, 30000);
+      debounceTimersRef.current.set(applicantId, timerId);
+    },
+    [getPendingDraft],
+  );
+
+  const flushApplicant = useCallback(
+    async (applicantId) => {
+      const draft = getPendingDraft(applicantId);
+      if (!reviewDraftCanPersist(draft)) {
+        return;
+      }
+      setSaveStatus('saving');
+      try {
+        await onSaveOneRef.current(applicantId, draft);
+        dirtyRef.current.delete(applicantId);
+        pendingDraftsRef.current.delete(applicantId);
+        setHasUnsavedChanges(dirtyRef.current.size > 0);
+        setLastSavedAt(Date.now());
+        setSaveStatus('saved');
+      } catch {
+        setHasUnsavedChanges(dirtyRef.current.size > 0);
+        setSaveStatus('error');
+        scheduleAutoSaveForApplicant(applicantId);
+      }
+    },
+    [getPendingDraft, scheduleAutoSaveForApplicant],
+  );
+
+  flushApplicantRef.current = flushApplicant;
 
   const markDirty = useCallback(
     (applicantId, draftOverride) => {
@@ -9230,23 +9289,18 @@ function useReviewAutoSave({ drafts, onSaveOne }) {
       pendingDraftsRef.current.set(applicantId, draft);
       setHasUnsavedChanges(true);
 
-      const existing = debounceTimersRef.current.get(applicantId);
-      if (existing) {
-        window.clearTimeout(existing);
-        debounceTimersRef.current.delete(applicantId);
-      }
-
       if (!reviewDraftCanPersist(draft)) {
+        const existing = debounceTimersRef.current.get(applicantId);
+        if (existing) {
+          window.clearTimeout(existing);
+          debounceTimersRef.current.delete(applicantId);
+        }
         return;
       }
 
-      const timerId = window.setTimeout(() => {
-        debounceTimersRef.current.delete(applicantId);
-        flushApplicant(applicantId);
-      }, 30000);
-      debounceTimersRef.current.set(applicantId, timerId);
+      scheduleAutoSaveForApplicant(applicantId);
     },
-    [flushApplicant],
+    [scheduleAutoSaveForApplicant],
   );
 
   const saveNow = useCallback(
@@ -9296,9 +9350,14 @@ function useReviewAutoSave({ drafts, onSaveOne }) {
       } catch {
         setHasUnsavedChanges(dirtyRef.current.size > 0);
         setSaveStatus('error');
+        for (const applicantId of applicantIds) {
+          if (dirtyRef.current.has(applicantId)) {
+            scheduleAutoSaveForApplicant(applicantId);
+          }
+        }
       }
     },
-    [getPendingDraft],
+    [getPendingDraft, scheduleAutoSaveForApplicant],
   );
 
   useEffect(() => {
