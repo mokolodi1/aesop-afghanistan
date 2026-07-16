@@ -48,6 +48,7 @@ const { getLastRunsByJob, listJobRuns, getJobRun, findBlockingJobRun } = require
 const { clearAllVoiceMemoAudioCache } = require('./services/voiceMemoAudio');
 const {
   loadReviewAssignmentsForReviewer,
+  getReviewVoiceStreamToken,
   saveReviewAssessment,
 } = require('./services/applicantReviews');
 const {
@@ -74,6 +75,7 @@ const {
 } = require('./services/voiceMemoSync');
 const {
   getPortalVoiceMemoStatus,
+  getPortalVoiceMemoStreamToken,
   reportPortalVoiceMemoDuration,
   getPortalVoiceMemoStream,
   getPortalVoiceMemoStreamByToken,
@@ -1624,6 +1626,32 @@ app.post('/api/portal-voice-memo/status', portalVoiceMemoRateLimiter, async (req
   }
 });
 
+app.post('/api/portal-voice-memo/stream-token', portalVoiceMemoRateLimiter, async (req, res) => {
+  try {
+    let { userId, email } = req.body;
+
+    if (!userId || typeof userId !== 'string' || !email || typeof email !== 'string') {
+      return res.status(400).json({ error: 'ID and email are required.' });
+    }
+
+    userId = sanitizeIdentifier(userId);
+    const emailSan = sanitizeEmail(email);
+    if (!userId || !emailSan) {
+      return res.status(400).json({ error: 'Invalid ID or email.' });
+    }
+
+    const tokenResult = await getPortalVoiceMemoStreamToken({
+      userId,
+      email: emailSan,
+    });
+    res.json({ success: true, ...tokenResult });
+  } catch (error) {
+    console.error('Error minting portal voice memo stream token:', formatGoogleDriveOperationError(error));
+    const status = error.statusCode || 500;
+    res.status(status).json({ error: error.message || 'Could not start voice memo playback.' });
+  }
+});
+
 app.post('/api/portal-voice-memo/duration', portalVoiceMemoRateLimiter, async (req, res) => {
   try {
     let { userId, email, fileId } = req.body;
@@ -1689,6 +1717,28 @@ app.post('/api/portal-reviews/list', portalReviewsRateLimiter, async (req, res) 
     console.error('Error loading review assignments:', formatErrorForLog(error));
     const status = error.statusCode || 500;
     res.status(status).json({ error: error.message || 'Could not load review assignments.' });
+  }
+});
+
+app.post('/api/portal-reviews/voice-memo/stream-token', portalReviewsRateLimiter, async (req, res) => {
+  try {
+    const profile = await requirePortalReviewer(res, req.body);
+    if (!profile) {
+      return;
+    }
+
+    const applicantId =
+      typeof req.body.applicantId === 'string' ? req.body.applicantId.trim() : '';
+    if (!applicantId) {
+      return res.status(400).json({ error: 'A valid applicant ID is required.' });
+    }
+
+    const tokenResult = await getReviewVoiceStreamToken(profile.id, applicantId);
+    res.json({ success: true, ...tokenResult });
+  } catch (error) {
+    console.error('Error minting review voice memo stream token:', formatErrorForLog(error));
+    const status = error.statusCode || 500;
+    res.status(status).json({ error: error.message || 'Could not start voice memo playback.' });
   }
 });
 
@@ -1821,7 +1871,7 @@ async function pipePortalVoiceMemoStreamByToken(req, res, token) {
 
 app.get('/api/portal-voice-memo/stream', portalVoiceMemoStreamRateLimiter, async (req, res) => {
   try {
-    // Authorized by a short-lived signed token (minted by the status endpoint),
+    // Authorized by a short-lived signed token (minted when playback is requested),
     // so no userId/email appears in the URL, access logs, or browser history.
     const token = typeof req.query.st === 'string' ? req.query.st : '';
     if (!token) {

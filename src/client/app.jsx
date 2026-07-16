@@ -1,4 +1,4 @@
-import React, { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import React, { Fragment, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { createRoot } from 'react-dom/client';
 import {
@@ -13,7 +13,7 @@ import {
   filterDingPhoneInputChars,
 } from '../../utils/validation';
 import { paragraphDirection } from '../shared/emailTextDirection.js';
-import { hasNonLatinLetters, stripNonLatinLetters } from '../shared/latinText.js';
+import { hasNonLatinLetters, isMixedDirectionLine, splitBidirectionalRuns, stripNonLatinLetters } from '../shared/latinText.js';
 import { countWords } from '../shared/countWords.js';
 import { REVIEWER_ESSAY_PROMPT } from '../shared/reviewerPrompts.js';
 import {
@@ -844,6 +844,17 @@ function formatVoiceMemoStreamClientError(t, payload) {
   return message;
 }
 
+function isPortalVoiceStreamExpiredMessage(message, t) {
+  const text = String(message || '').trim();
+  if (!text) {
+    return false;
+  }
+  const expiredMessages = [t('voiceMemo.streamExpired'), t('reviews.streamExpired')];
+  return expiredMessages.some(
+    (expiredMessage) => text === expiredMessage || text.startsWith(`${expiredMessage} `),
+  );
+}
+
 function formatVoiceMemoClientPlaybackError(t, errorCode) {
   let message = t('voiceMemo.audioPlayError');
   if (errorCode === VOICE_MEMO_CLIENT_ERROR_CODES.MEDIA_DECODE) {
@@ -926,6 +937,51 @@ async function loadPortalVoiceMemoStatusFromApi({ userId, email }) {
   })();
   portalVoiceMemoStatusInFlight.set(cacheKey, promise);
   return promise;
+}
+
+function buildPortalVoiceMemoStreamSrc(streamToken) {
+  const token = String(streamToken || '').trim();
+  if (!token) {
+    return '';
+  }
+  const params = new URLSearchParams({ st: token });
+  return `/api/portal-voice-memo/stream?${params.toString()}`;
+}
+
+async function fetchPortalVoiceMemoStreamToken({ userId, email }) {
+  const id = String(userId || '').trim();
+  const em = String(email || '').trim();
+  if (!id || !em) {
+    return { ok: false, streamToken: null, errorKind: 'load', errorMessage: '' };
+  }
+  try {
+    const response = await fetch('/api/portal-voice-memo/stream-token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId: id, email: em }),
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      return {
+        ok: false,
+        streamToken: null,
+        errorKind: 'load',
+        errorMessage: typeof data.error === 'string' ? data.error : '',
+      };
+    }
+    const streamToken = typeof data.streamToken === 'string' ? data.streamToken.trim() : '';
+    if (!streamToken) {
+      return {
+        ok: false,
+        streamToken: null,
+        errorKind: 'load',
+        errorMessage: '',
+      };
+    }
+    return { ok: true, streamToken, errorKind: '', errorMessage: '' };
+  } catch {
+    return { ok: false, streamToken: null, errorKind: 'network', errorMessage: '' };
+  }
 }
 
 function usePortalVoiceMemoStatus({ enabled, userId, email }) {
@@ -3082,6 +3138,8 @@ function PortalVoiceMemoSection({ studentUserId, studentEmail, enabled }) {
   const [refreshingStream, setRefreshingStream] = useState(false);
   const [voiceMemoPlayerRequested, setVoiceMemoPlayerRequested] = useState(false);
   const [voiceMemoPlayerLoading, setVoiceMemoPlayerLoading] = useState(false);
+  const [voiceMemoStreamToken, setVoiceMemoStreamToken] = useState('');
+  const [metadataPreloadStreamSrc, setMetadataPreloadStreamSrc] = useState('');
   const reportedDurationKeyRef = useRef('');
 
   useEffect(() => {
@@ -3091,6 +3149,8 @@ function PortalVoiceMemoSection({ studentUserId, studentEmail, enabled }) {
       setMeasuredDurationSeconds(null);
       setVoiceMemoPlayerRequested(false);
       setVoiceMemoPlayerLoading(false);
+      setVoiceMemoStreamToken('');
+      setMetadataPreloadStreamSrc('');
       reportedDurationKeyRef.current = '';
       return;
     }
@@ -3098,6 +3158,8 @@ function PortalVoiceMemoSection({ studentUserId, studentEmail, enabled }) {
     setMeasuredDurationSeconds(null);
     setVoiceMemoPlayerRequested(false);
     setVoiceMemoPlayerLoading(false);
+    setVoiceMemoStreamToken('');
+    setMetadataPreloadStreamSrc('');
     reportedDurationKeyRef.current = '';
   }, [enabled, fetchedVoiceMemoStatus]);
 
@@ -3109,8 +3171,9 @@ function PortalVoiceMemoSection({ studentUserId, studentEmail, enabled }) {
     setVoiceMemoAudioError('');
     setVoiceMemoPlayerRequested(false);
     setVoiceMemoPlayerLoading(false);
+    setVoiceMemoStreamToken('');
     try {
-      const result = await loadPortalVoiceMemoStatusFromApi({
+      const result = await fetchPortalVoiceMemoStreamToken({
         userId: studentUserId,
         email: studentEmail,
       });
@@ -3121,9 +3184,9 @@ function PortalVoiceMemoSection({ studentUserId, studentEmail, enabled }) {
         );
         return;
       }
-      setVoiceMemoStatus(result.status);
-      setMeasuredDurationSeconds(null);
-      reportedDurationKeyRef.current = '';
+      setVoiceMemoStreamToken(result.streamToken);
+      setVoiceMemoPlayerRequested(true);
+      setVoiceMemoPlayerLoading(true);
     } catch {
       setVoiceMemoAudioError(t('voiceMemo.networkError'));
     } finally {
@@ -3131,18 +3194,39 @@ function PortalVoiceMemoSection({ studentUserId, studentEmail, enabled }) {
     }
   }, [studentUserId, studentEmail, refreshingStream, t]);
 
-  const voiceMemoStreamSrc = useMemo(() => {
-    if (!voiceMemoStatus?.submitted || !voiceMemoStatus?.hasRecording || !enabled) {
-      return '';
+  const requestVoiceMemoPlayback = useCallback(async () => {
+    if (voiceMemoPlayerLoading || !studentUserId || !studentEmail) {
+      return;
     }
-    // The stream URL carries only a short-lived signed token (no userId/email).
-    const streamToken = voiceMemoStatus?.streamToken;
-    if (!streamToken) {
-      return '';
+    setVoiceMemoAudioError('');
+    setVoiceMemoPlayerRequested(true);
+    setVoiceMemoPlayerLoading(true);
+    try {
+      const result = await fetchPortalVoiceMemoStreamToken({
+        userId: studentUserId,
+        email: studentEmail,
+      });
+      if (!result.ok) {
+        setVoiceMemoAudioError(
+          result.errorMessage ||
+            (result.errorKind === 'network' ? t('voiceMemo.networkError') : t('voiceMemo.loadError')),
+        );
+        setVoiceMemoPlayerRequested(false);
+        setVoiceMemoPlayerLoading(false);
+        return;
+      }
+      setVoiceMemoStreamToken(result.streamToken);
+    } catch {
+      setVoiceMemoAudioError(t('voiceMemo.networkError'));
+      setVoiceMemoPlayerRequested(false);
+      setVoiceMemoPlayerLoading(false);
     }
-    const params = new URLSearchParams({ st: streamToken });
-    return `/api/portal-voice-memo/stream?${params.toString()}`;
-  }, [voiceMemoStatus?.submitted, voiceMemoStatus?.hasRecording, voiceMemoStatus?.streamToken, enabled]);
+  }, [studentUserId, studentEmail, voiceMemoPlayerLoading, t]);
+
+  const voiceMemoStreamSrc = useMemo(
+    () => buildPortalVoiceMemoStreamSrc(voiceMemoStreamToken),
+    [voiceMemoStreamToken],
+  );
 
   // Duration labels and issue state come from the server mirror only. Browser
   // measurement during playback is used to backfill the cache, not to re-render
@@ -3193,9 +3277,41 @@ function PortalVoiceMemoSection({ studentUserId, studentEmail, enabled }) {
 
   useEffect(() => {
     setVoiceMemoAudioError('');
-    setVoiceMemoPlayerRequested(false);
-    setVoiceMemoPlayerLoading(false);
   }, [voiceMemoStreamSrc]);
+
+  useEffect(() => {
+    const needsMetadataPreload =
+      enabled &&
+      Boolean(voiceMemoStatus?.hasRecording) &&
+      displayDurationStatus === 'too_long' &&
+      !displayDurationLabel;
+    if (!needsMetadataPreload || !studentUserId || !studentEmail) {
+      setMetadataPreloadStreamSrc('');
+      return undefined;
+    }
+
+    let cancelled = false;
+    fetchPortalVoiceMemoStreamToken({ userId: studentUserId, email: studentEmail }).then((result) => {
+      if (cancelled) {
+        return;
+      }
+      if (!result.ok) {
+        setMetadataPreloadStreamSrc('');
+        return;
+      }
+      setMetadataPreloadStreamSrc(buildPortalVoiceMemoStreamSrc(result.streamToken));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    enabled,
+    studentUserId,
+    studentEmail,
+    voiceMemoStatus?.hasRecording,
+    displayDurationStatus,
+    displayDurationLabel,
+  ]);
 
   useEffect(() => {
     if (
@@ -3374,12 +3490,12 @@ function PortalVoiceMemoSection({ studentUserId, studentEmail, enabled }) {
               </p>
             ) : null}
             {activeVoiceMemoStatus.hasRecording &&
-            voiceMemoStreamSrc &&
+            metadataPreloadStreamSrc &&
             displayDurationStatus === 'too_long' &&
             !displayDurationLabel ? (
               <audio
                 preload="metadata"
-                src={voiceMemoStreamSrc}
+                src={metadataPreloadStreamSrc}
                 aria-hidden="true"
                 tabIndex={-1}
                 className="portal-voice-memo-metadata-preload"
@@ -3402,15 +3518,8 @@ function PortalVoiceMemoSection({ studentUserId, studentEmail, enabled }) {
                   <button
                     type="button"
                     className="portal-voice-memo-play-btn"
-                    disabled={voiceMemoPlayerLoading || !voiceMemoStreamSrc}
-                    onClick={() => {
-                      if (voiceMemoPlayerLoading || !voiceMemoStreamSrc) {
-                        return;
-                      }
-                      setVoiceMemoAudioError('');
-                      setVoiceMemoPlayerRequested(true);
-                      setVoiceMemoPlayerLoading(true);
-                    }}
+                    disabled={voiceMemoPlayerLoading}
+                    onClick={requestVoiceMemoPlayback}
                   >
                     {voiceMemoPlayerLoading
                       ? t('voiceMemo.loadingRecording')
@@ -8798,10 +8907,7 @@ function reviewDraftCanPersist(draft) {
   if (!draft) {
     return false;
   }
-  if (reviewDraftIsEmpty(draft) || reviewDraftIsSaveable(draft)) {
-    return true;
-  }
-  return draft.technicalFlag === true;
+  return !reviewDraftIsEmpty(draft);
 }
 
 function reviewDraftIsSaveable(draft) {
@@ -9441,6 +9547,56 @@ function useReviewAutoSave({ drafts, onSaveOne }) {
   return { markDirty, saveNow, saveStatus, lastSavedAt, hasUnsavedChanges };
 }
 
+function PortalBidirectionalLine({ text }) {
+  const line = String(text ?? '');
+  if (!isMixedDirectionLine(line)) {
+    return (
+      <span className="portal-bidi-line" dir={paragraphDirection(line)}>
+        {line}
+      </span>
+    );
+  }
+
+  const runs = splitBidirectionalRuns(line);
+  if (runs.length <= 1) {
+    return (
+      <span className="portal-bidi-line" dir={paragraphDirection(line)}>
+        {line}
+      </span>
+    );
+  }
+
+  return (
+    <span className="portal-bidi-line portal-bidi-line--mixed">
+      {runs.map((run, index) => (
+        <bdi key={index} className="portal-bidi-run" dir={run.dir}>
+          {run.text}
+        </bdi>
+      ))}
+    </span>
+  );
+}
+
+function PortalBidirectionalText({ text, className = '' }) {
+  const content = String(text ?? '');
+  if (!content.trim()) {
+    return null;
+  }
+
+  const lines = content.split('\n');
+
+  return (
+    <div className={['portal-bidi-text', className].filter(Boolean).join(' ')}>
+      {lines.map((line, index) => (
+        <Fragment key={index}>
+          {index > 0 ? '\n' : null}
+          <PortalBidirectionalLine text={line} />
+        </Fragment>
+      ))}
+    </div>
+  );
+}
+
 function getReviewPromptDisplayText(text, showTranslation) {
   const fullText = String(text || '').trim();
   if (!fullText) {
@@ -9460,9 +9616,7 @@ function PortalReviewPromptColumn({ label, text, showTranslation, missingHint })
     <div className="portal-review-prompt-column">
       <h4 className="portal-review-field-label portal-review-prompt-label">{label}</h4>
       {fullText ? (
-        <div className="portal-review-essay portal-review-prompt-body" dir="auto">
-          {displayText}
-        </div>
+        <PortalBidirectionalText text={displayText} className="portal-review-essay portal-review-prompt-body" />
       ) : (
         <p className="portal-field-hint">{missingHint}</p>
       )}
@@ -9522,25 +9676,54 @@ function PortalReviewPromptsSection({ voiceMemoPrompt, t, onTogglePromptHidden }
   );
 }
 
-function PortalReviewVoicePlayer({ assignment, t, onRefreshStream }) {
+function PortalReviewVoicePlayer({ assignment, t }) {
   const [audioError, setAudioError] = useState('');
   const [refreshingStream, setRefreshingStream] = useState(false);
+  const [streamToken, setStreamToken] = useState('');
+  const [loadingStreamToken, setLoadingStreamToken] = useState(false);
+
+  const fetchReviewStreamToken = useCallback(async () => {
+    if (!assignment?.hasVoiceMemo || !assignment?.applicantId) {
+      setStreamToken('');
+      return;
+    }
+    setLoadingStreamToken(true);
+    try {
+      const data = await portalApiPost('/api/portal-reviews/voice-memo/stream-token', {
+        applicantId: assignment.applicantId,
+      });
+      setStreamToken(typeof data.streamToken === 'string' ? data.streamToken.trim() : '');
+    } catch (error) {
+      setStreamToken('');
+      setAudioError(error?.message || t('reviews.streamExpired'));
+    } finally {
+      setLoadingStreamToken(false);
+    }
+  }, [assignment?.hasVoiceMemo, assignment?.applicantId, t]);
+
+  useEffect(() => {
+    setStreamToken('');
+    setAudioError('');
+    if (assignment?.hasVoiceMemo) {
+      fetchReviewStreamToken();
+    }
+  }, [assignment?.hasVoiceMemo, assignment?.applicantId, fetchReviewStreamToken]);
 
   const streamSrc = useMemo(() => {
-    if (!assignment?.hasVoiceMemo || !assignment?.streamToken) {
+    if (!assignment?.hasVoiceMemo || !streamToken) {
       return '';
     }
-    const params = new URLSearchParams({ st: assignment.streamToken });
+    const params = new URLSearchParams({ st: streamToken });
     return `/api/portal-reviews/voice-memo/stream?${params.toString()}`;
-  }, [assignment?.hasVoiceMemo, assignment?.streamToken]);
+  }, [assignment?.hasVoiceMemo, streamToken]);
 
   const downloadHref = useMemo(() => {
     if (!streamSrc) {
       return '';
     }
-    const params = new URLSearchParams({ st: assignment.streamToken, download: '1' });
+    const params = new URLSearchParams({ st: streamToken, download: '1' });
     return `/api/portal-reviews/voice-memo/stream?${params.toString()}`;
-  }, [streamSrc, assignment?.streamToken]);
+  }, [streamSrc, streamToken]);
 
   const canDownloadMp4 = useMemo(
     () => voiceMemoExtensionFromFileName(assignment?.driveFileName) === 'mp4',
@@ -9552,24 +9735,60 @@ function PortalReviewVoicePlayer({ assignment, t, onRefreshStream }) {
   }, [streamSrc]);
 
   const handleRefreshStream = useCallback(async () => {
-    if (!onRefreshStream || refreshingStream) {
+    if (refreshingStream) {
       return;
     }
     setRefreshingStream(true);
     setAudioError('');
     try {
-      await onRefreshStream();
+      await fetchReviewStreamToken();
     } catch (error) {
       setAudioError(error?.message || t('reviews.streamExpired'));
     } finally {
       setRefreshingStream(false);
     }
-  }, [onRefreshStream, refreshingStream, t]);
+  }, [fetchReviewStreamToken, refreshingStream, t]);
 
-  if (!assignment?.hasVoiceMemo || !streamSrc) {
+  const streamExpired = isPortalVoiceStreamExpiredMessage(audioError, t);
+
+  if (!assignment?.hasVoiceMemo) {
     return (
       <div className="portal-review-voice-row">
         <p className="portal-field-hint">{t('reviews.voiceNotAvailable')}</p>
+      </div>
+    );
+  }
+
+  if (loadingStreamToken) {
+    return (
+      <div className="portal-review-voice-row">
+        <p className="portal-field-hint">{t('voiceMemo.loadingRecording')}</p>
+      </div>
+    );
+  }
+
+  if (!streamSrc) {
+    return (
+      <div className="portal-review-voice-row">
+        {audioError ? (
+          <p className="portal-field-hint portal-review-voice-error">{audioError}</p>
+        ) : (
+          <p className="portal-field-hint">{t('reviews.voiceNotAvailable')}</p>
+        )}
+        {refreshingStream || streamExpired ? (
+          <div className="portal-review-voice-actions">
+            <button
+              type="button"
+              className="portal-review-voice-btn"
+              onClick={handleRefreshStream}
+              disabled={refreshingStream}
+            >
+              <span className="portal-review-voice-btn-label">
+                {refreshingStream ? t('reviews.refreshingStream') : t('reviews.refreshStream')}
+              </span>
+            </button>
+          </div>
+        ) : null}
       </div>
     );
   }
@@ -9593,14 +9812,12 @@ function PortalReviewVoicePlayer({ assignment, t, onRefreshStream }) {
         {audioError ? <p className="portal-field-hint portal-review-voice-error">{audioError}</p> : null}
       </div>
       <div className="portal-review-voice-actions">
-        {refreshingStream ||
-        audioError === t('voiceMemo.streamExpired') ||
-        audioError === t('reviews.streamExpired') ? (
+        {refreshingStream || streamExpired ? (
           <button
             type="button"
             className="portal-review-voice-btn"
             onClick={handleRefreshStream}
-            disabled={refreshingStream || !onRefreshStream}
+            disabled={refreshingStream}
           >
             <span className="portal-review-voice-btn-label">
               {refreshingStream ? t('reviews.refreshingStream') : t('reviews.refreshStream')}
@@ -9724,7 +9941,6 @@ function PortalReviewCard({
   onMarkDirty,
   onNextStudent,
   showNextStudent,
-  onRefreshStream,
   promptHidden,
   onTogglePromptHidden,
   t,
@@ -9781,13 +9997,13 @@ function PortalReviewCard({
           <PortalReviewEssayWordCount essay={assignment.essay} t={t} />
         </div>
         {assignment.essay.trim() ? (
-          <div className="portal-review-essay">{assignment.essay}</div>
+          <PortalBidirectionalText text={assignment.essay} className="portal-review-essay" />
         ) : (
           <p className="portal-field-hint">{t('reviews.essayMissing')}</p>
         )}
       </section>
 
-      <PortalReviewVoicePlayer assignment={assignment} t={t} onRefreshStream={onRefreshStream} />
+      <PortalReviewVoicePlayer assignment={assignment} t={t} />
 
       <div className="portal-review-scoring-panel" aria-label={t('reviews.scoringAria')}>
         <section className="portal-review-scoring-section portal-review-scoring-section--english">
@@ -9947,11 +10163,7 @@ function PortalReviewInstructionsEnglishDetail({ detail }) {
 }
 
 function PortalReviewInstructionsEssay({ text, className = '' }) {
-  return (
-    <div className={`portal-review-instructions-essay${className ? ` ${className}` : ''}`} dir="auto">
-      {text}
-    </div>
-  );
+  return <PortalBidirectionalText text={text} className={`portal-review-instructions-essay${className ? ` ${className}` : ''}`} />;
 }
 
 function PortalReviewPracticeScoreNote({ note }) {
@@ -10241,27 +10453,6 @@ function PortalReviewApplicationsPage() {
     onSaveOne: saveOne,
   });
 
-  const refreshStreamTokens = useCallback(async () => {
-    const data = await portalApiPost('/api/portal-reviews/list', {}, { timeoutMs: 45000 });
-    const rows = Array.isArray(data.assignments) ? data.assignments : [];
-    setAssignments((prev) => {
-      const byId = new Map(rows.map((row) => [row.applicantId, row]));
-      return prev.map((assignment) => {
-        const fresh = byId.get(assignment.applicantId);
-        if (!fresh) {
-          return assignment;
-        }
-        return {
-          ...assignment,
-          hasVoiceMemo: fresh.hasVoiceMemo,
-          streamToken: fresh.streamToken,
-          durationStatus: fresh.durationStatus,
-          driveFileName: fresh.driveFileName ?? assignment.driveFileName,
-        };
-      });
-    });
-  }, []);
-
   useEffect(() => {
     if (!signedIn || !isReviewer) {
       setLoading(false);
@@ -10451,7 +10642,6 @@ function PortalReviewApplicationsPage() {
                       onMarkDirty={markDirty}
                       onNextStudent={goToNextStudent}
                       showNextStudent={showNextStudent}
-                      onRefreshStream={refreshStreamTokens}
                       promptHidden={promptHidden}
                       onTogglePromptHidden={togglePromptHidden}
                       t={t}

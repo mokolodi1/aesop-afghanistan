@@ -377,9 +377,6 @@ async function getPortalVoiceMemoStatus({ userId, email }) {
     hasRecording,
     submissionInstructions,
     round2Prompt: String(applicant.round2Prompt || "").trim(),
-    // Short-lived signed token the <audio> element uses to stream, so the URL
-    // carries no email/ID (keeps PII out of access logs and browser history).
-    streamToken: hasRecording ? mintVoiceStreamToken(profile.id || userId) : null,
     durationSeconds: durationStatus === "too_long" ? null : durationSeconds,
     durationLabel:
       durationStatus === "too_long" ? null : formatVoiceMemoDurationLabel(durationSeconds),
@@ -388,6 +385,46 @@ async function getPortalVoiceMemoStatus({ userId, email }) {
     minDurationSeconds: durationLimits.minSeconds,
     maxDurationSeconds: durationLimits.maxSeconds,
   };
+}
+
+/**
+ * Mint a fresh playback token when the client is ready to stream (so the 15-minute
+ * TTL starts at request time, not when status was loaded).
+ * @param {{ userId: string, email: string }} params
+ * @returns {Promise<{ streamToken: string }>}
+ */
+async function getPortalVoiceMemoStreamToken({ userId, email }) {
+  const profile = await verifyPortalVoiceMemoSession({ userId, email });
+  if (!profile) {
+    const error = new Error("Unable to play voice memo. Please sign in again from the login link.");
+    error.statusCode = 403;
+    throw error;
+  }
+
+  const cfg = getVoiceMemoSheetConfig();
+  const durationLimits = getVoiceMemoDurationLimits(cfg.voiceMemo);
+  const applicant = await getApplicantRowByAesopId(profile.id || userId);
+  if (!applicant) {
+    const error = new Error("Voice memo is not available for your account.");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const acceptedValue = cfg.acceptedValue.toLowerCase();
+  if (applicant.round1.trim().toLowerCase() !== acceptedValue) {
+    const error = new Error("Voice memo is not available for your account.");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const recording = resolveVoiceMemoRecordingFromApplicantCache(applicant, durationLimits);
+  if (!recording.hasRecording) {
+    const error = new Error("No voice memo file was found for your account.");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  return { streamToken: mintVoiceStreamToken(profile.id || userId) };
 }
 
 /**
@@ -553,6 +590,7 @@ async function getPortalVoiceMemoStreamByToken({ token, rangeHeader = "" }) {
 
 module.exports = {
   getPortalVoiceMemoStatus,
+  getPortalVoiceMemoStreamToken,
   reportPortalVoiceMemoDuration,
   getPortalVoiceMemoStream,
   getPortalVoiceMemoStreamByToken,

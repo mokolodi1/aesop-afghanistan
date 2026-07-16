@@ -19,6 +19,7 @@ const {
 const { classifyVoiceMemoDuration } = require("../utils/voiceMemoDuration");
 const {
   getVoiceMemoDurationLimits,
+  getApplicantRowByAesopId,
 } = require("./voiceMemoSync");
 const { extractDriveFileIdFromLink } = require("./googleDrive");
 
@@ -560,20 +561,6 @@ async function isReviewerAssignedToApplicant(reviewerAesopId, applicantAesopId) 
   return false;
 }
 
-/**
- * @param {string} reviewerAesopId
- * @param {Array<{ applicantId: string, hasVoiceMemo: boolean }>} assignments
- */
-function attachReviewVoiceStreamTokens(reviewerAesopId, assignments) {
-  return assignments.map((assignment) => ({
-    ...assignment,
-    streamToken:
-      assignment.hasVoiceMemo && reviewerAesopId
-        ? mintReviewVoiceStreamToken(reviewerAesopId, assignment.applicantId)
-        : null,
-  }));
-}
-
 async function loadReviewAssignmentsForReviewer(reviewerAesopId) {
   const reviewerKey = normalizeAesopIdKey(reviewerAesopId);
   if (!reviewerKey) {
@@ -583,15 +570,50 @@ async function loadReviewAssignmentsForReviewer(reviewerAesopId) {
   if (isDatabaseEnabled()) {
     const rows = await getReviewAssignmentsForReviewerFromDb(reviewerAesopId);
     if (rows !== null) {
-      return attachReviewVoiceStreamTokens(
-        reviewerAesopId,
-        mapReviewAssignmentsFromDbRows(rows, reviewerKey),
-      );
+      return mapReviewAssignmentsFromDbRows(rows, reviewerKey);
     }
   }
 
-  const assignments = await loadReviewAssignmentsForReviewerFromSheets(reviewerKey);
-  return attachReviewVoiceStreamTokens(reviewerAesopId, assignments);
+  return loadReviewAssignmentsForReviewerFromSheets(reviewerKey);
+}
+
+/**
+ * Mint a fresh playback token when a reviewer opens the voice player.
+ * @param {string} reviewerAesopId
+ * @param {string} applicantAesopId
+ * @returns {Promise<{ streamToken: string }>}
+ */
+async function getReviewVoiceStreamToken(reviewerAesopId, applicantAesopId) {
+  const reviewerKey = normalizeAesopIdKey(reviewerAesopId);
+  const applicantKey = normalizeAesopIdKey(applicantAesopId);
+  if (!reviewerKey || !applicantKey) {
+    const error = new Error("A valid applicant ID is required.");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const allowed = await isReviewerAssignedToApplicant(reviewerKey, applicantKey);
+  if (!allowed) {
+    const error = new Error("You are not assigned to review this applicant.");
+    error.statusCode = 403;
+    throw error;
+  }
+
+  const applicant = await getApplicantRowByAesopId(applicantKey);
+  if (
+    !applicant ||
+    !applicantHasReviewVoiceMemo({
+      driveFileId: applicant.driveFileId,
+      round2: applicant.round2,
+      links: applicant.links,
+    })
+  ) {
+    const error = new Error("No voice memo file was found for this applicant.");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  return { streamToken: mintReviewVoiceStreamToken(reviewerKey, applicantKey) };
 }
 
 /**
@@ -748,39 +770,6 @@ async function saveReviewAssessment({
     originalThinking,
     character,
   });
-
-  const allEmpty =
-    !normalizedLevel &&
-    !normalizedSuspectedAi &&
-    !normalizedUnableToGrade &&
-    !normalizedTechnicalFlag &&
-    !normalizedScores.instructionFollowing &&
-    !normalizedScores.originalThinking &&
-    !normalizedScores.character;
-
-  if (!allEmpty && !normalizedTechnicalFlag) {
-    const hasEnglishLevel = ENGLISH_LEVELS.includes(normalizedLevel);
-    if (!hasEnglishLevel && !normalizedSuspectedAi && !normalizedUnableToGrade) {
-      const error = new Error("English level, Suspected AI, or Unable to grade is required.");
-      error.statusCode = 400;
-      throw error;
-    }
-    if (!FITNESS_SCORES.includes(normalizedScores.instructionFollowing)) {
-      const error = new Error("Instruction Following score is required.");
-      error.statusCode = 400;
-      throw error;
-    }
-    if (!FITNESS_SCORES.includes(normalizedScores.originalThinking)) {
-      const error = new Error("Independent/Original Thinking score is required.");
-      error.statusCode = 400;
-      throw error;
-    }
-    if (!FITNESS_SCORES.includes(normalizedScores.character)) {
-      const error = new Error("Demonstration of Character score is required.");
-      error.statusCode = 400;
-      throw error;
-    }
-  }
 
   const normalizedValues = {
     englishLevel: normalizedLevel,
@@ -1000,6 +989,7 @@ module.exports = {
   normalizeTechnicalFlag,
   normalizeFitnessScore,
   loadReviewAssignmentsForReviewer,
+  getReviewVoiceStreamToken,
   saveReviewAssessment,
   isListedAsApplicantReviewer,
   isReviewerAssignedToApplicant,
