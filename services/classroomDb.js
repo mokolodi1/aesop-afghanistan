@@ -1451,9 +1451,6 @@ async function getApplicantReviewRowFromDb(aesopId) {
   if (!id) {
     return null;
   }
-  if (!(await isApplicantReviewsMirrorFresh())) {
-    return null;
-  }
   const result = await pool.query(
     `SELECT * FROM applicant_reviews WHERE lower(aesop_id) = $1 LIMIT 1`,
     [id],

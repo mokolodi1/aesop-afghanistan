@@ -5,10 +5,6 @@
 /** @type {Array<{ score: string, summary?: string, detail?: EnglishLevelDetail }>} */
 const ENGLISH_LEVEL_RUBRIC = [
   {
-    score: '0',
-    summary: 'No English. Essay is written in Dari.',
-  },
-  {
     score: '1',
     summary:
       'Very limited English. Essay is written in a combination of Dari and English or is extremely short, consisting of broken or very basic English sentences.',
@@ -402,8 +398,7 @@ const PRACTICE_SCORE_NOTES = [
 
 const REVIEW_INSTRUCTIONS = {
   title: '2026–2027 Rubric for Applications',
-  scaleNote:
-    'Portal dropdowns use scores 0–10. Training materials labeled “English Level 1–9” correspond to portal scores 0–8; the rubric table below uses portal scores throughout.',
+  scaleNote: 'Portal dropdowns use scores 1–10.',
 };
 
 module.exports = {

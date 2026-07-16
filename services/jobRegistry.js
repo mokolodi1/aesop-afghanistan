@@ -74,7 +74,8 @@ const JOB_DEFINITIONS = {
     label: "Hourly cache refresh",
     description:
       "Mirrors the People tab, current Ding numbers, Applicants, ApplicantReviews, and " +
-      "Drive voice memo metadata from Google Sheets and Drive into the Postgres cache.",
+      "Drive voice memo metadata from Google Sheets and Drive into the Postgres cache. " +
+      "Core sheet data is promoted first; voice memo Drive scan and audio cache run afterward.",
     schedule: "Hourly on the hour (AFT), except 2:00 AM and 4:00 AM",
     // Shares the cron VM with voice-memo-sync; both download Drive media.
     exclusiveGroup: "driveHeavy",

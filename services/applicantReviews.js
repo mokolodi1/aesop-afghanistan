@@ -22,7 +22,7 @@ const {
 } = require("./voiceMemoSync");
 const { extractDriveFileIdFromLink } = require("./googleDrive");
 
-const ENGLISH_LEVELS = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"];
+const ENGLISH_LEVELS = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"];
 const FITNESS_SCORES = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"];
 const FITNESS_CRITERIA = ["instructionFollowing", "originalThinking", "character"];
 const SUSPECTED_AI_SHEET_VALUE = "Suspected AI";
@@ -47,7 +47,7 @@ function normalizeEnglishLevel(value) {
     return "";
   }
   const asNumber = Number.parseInt(trimmed, 10);
-  if (Number.isFinite(asNumber) && asNumber >= 0 && asNumber <= 10) {
+  if (Number.isFinite(asNumber) && asNumber >= 1 && asNumber <= 10) {
     return String(asNumber);
   }
   return ENGLISH_LEVELS.find((level) => level === trimmed) || "";
@@ -577,19 +577,17 @@ async function loadReviewAssignmentsForReviewer(reviewerAesopId) {
     return [];
   }
 
-  let assignments = [];
-
   if (isDatabaseEnabled()) {
     const rows = await getReviewAssignmentsForReviewerFromDb(reviewerAesopId);
-    if (rows && rows.length > 0) {
-      assignments = mapReviewAssignmentsFromDbRows(rows, reviewerKey);
+    if (rows !== null) {
+      return attachReviewVoiceStreamTokens(
+        reviewerAesopId,
+        mapReviewAssignmentsFromDbRows(rows, reviewerKey),
+      );
     }
   }
 
-  if (assignments.length === 0) {
-    assignments = await loadReviewAssignmentsForReviewerFromSheets(reviewerKey);
-  }
-
+  const assignments = await loadReviewAssignmentsForReviewerFromSheets(reviewerKey);
   return attachReviewVoiceStreamTokens(reviewerAesopId, assignments);
 }
 
@@ -690,6 +688,23 @@ async function writeThroughReviewToDb(dbRow, slot, values) {
 }
 
 /**
+ * @param {Record<string, unknown>} dbRow
+ * @param {string} reviewerKey
+ * @returns {'A'|'B'|null}
+ */
+function resolveReviewSlotFromDbRow(dbRow, reviewerKey) {
+  const reviewerA = normalizeAesopIdKey(dbRow.reviewer_a);
+  const reviewerB = normalizeAesopIdKey(dbRow.reviewer_b);
+  if (reviewerA === reviewerKey) {
+    return "A";
+  }
+  if (reviewerB === reviewerKey) {
+    return "B";
+  }
+  return null;
+}
+
+/**
  * @param {{
  *   reviewerAesopId: string,
  *   applicantAesopId: string,
@@ -764,13 +779,6 @@ async function saveReviewAssessment({
     }
   }
 
-  const reviewsCfg = getApplicantReviewsConfig();
-  const doc = await initGoogleSheets();
-  const worksheet = await getWorksheetByTitle(doc, reviewsCfg.sheetName);
-  if (!worksheet) {
-    throw new Error(`Sheet "${reviewsCfg.sheetName}" was not found.`);
-  }
-
   const normalizedValues = {
     englishLevel: normalizedLevel,
     suspectedAi: normalizedSuspectedAi,
@@ -781,44 +789,67 @@ async function saveReviewAssessment({
     character: normalizedScores.character,
   };
 
+  const savedResponse = {
+    applicantId: applicantAesopId.trim(),
+    englishLevel: normalizedLevel,
+    suspectedAi: normalizedSuspectedAi,
+    unableToGrade: normalizedUnableToGrade,
+    technicalFlag: normalizedTechnicalFlag,
+    ...normalizedScores,
+  };
+
+  if (isDatabaseEnabled()) {
+    const dbRow = await getApplicantReviewRowFromDb(applicantAesopId);
+    const slot = dbRow ? resolveReviewSlotFromDbRow(dbRow, reviewerKey) : null;
+
+    if (!slot) {
+      const assigned = await isReviewerAssignedToApplicantFromDb(reviewerAesopId, applicantAesopId);
+      if (assigned !== true) {
+        const error = new Error("You are not assigned to review this applicant.");
+        error.statusCode = 403;
+        throw error;
+      }
+      const error = new Error("Review assignment is not available yet. Please try again shortly.");
+      error.statusCode = 503;
+      throw error;
+    }
+
+    await writeThroughReviewToDb(dbRow, slot, normalizedValues);
+
+    const sheetRowNumber =
+      dbRow.sheet_row_number != null && Number.isFinite(Number(dbRow.sheet_row_number))
+        ? Number(dbRow.sheet_row_number)
+        : null;
+    if (sheetRowNumber) {
+      const reviewsCfg = getApplicantReviewsConfig();
+      const doc = await initGoogleSheets();
+      const worksheet = await getWorksheetByTitle(doc, reviewsCfg.sheetName);
+      if (!worksheet) {
+        throw new Error(`Sheet "${reviewsCfg.sheetName}" was not found.`);
+      }
+      await writeReviewCellsToSheet(
+        worksheet,
+        reviewsCfg,
+        sheetRowNumber,
+        slot,
+        normalizedValues,
+      );
+    }
+
+    return savedResponse;
+  }
+
+  const reviewsCfg = getApplicantReviewsConfig();
+  const doc = await initGoogleSheets();
+  const worksheet = await getWorksheetByTitle(doc, reviewsCfg.sheetName);
+  if (!worksheet) {
+    throw new Error(`Sheet "${reviewsCfg.sheetName}" was not found.`);
+  }
+
   /** @type {import('google-spreadsheet').GoogleSpreadsheetRow | null} */
   let matchedRow = null;
   /** @type {'A'|'B'|null} */
   let slot = null;
-  /** @type {Record<string, unknown>|null} */
-  let dbRow = null;
-
-  if (isDatabaseEnabled()) {
-    dbRow = await getApplicantReviewRowFromDb(applicantAesopId);
-    if (dbRow) {
-      const reviewerA = normalizeAesopIdKey(dbRow.reviewer_a);
-      const reviewerB = normalizeAesopIdKey(dbRow.reviewer_b);
-      if (reviewerA === reviewerKey) {
-        slot = "A";
-      } else if (reviewerB === reviewerKey) {
-        slot = "B";
-      }
-    }
-  }
-
-  if (slot && dbRow?.sheet_row_number) {
-    await writeReviewCellsToSheet(
-      worksheet,
-      reviewsCfg,
-      Number(dbRow.sheet_row_number),
-      slot,
-      normalizedValues,
-    );
-    await writeThroughReviewToDb(dbRow, slot, normalizedValues);
-    return {
-      applicantId: applicantAesopId.trim(),
-      englishLevel: normalizedLevel,
-      suspectedAi: normalizedSuspectedAi,
-      unableToGrade: normalizedUnableToGrade,
-      technicalFlag: normalizedTechnicalFlag,
-      ...normalizedScores,
-    };
-  }
 
   await worksheet.loadHeaderRow(reviewsCfg.headerRowNum);
   const rows = await worksheet.getRows();
@@ -910,14 +941,7 @@ async function saveReviewAssessment({
     syncedAt: new Date(),
   });
 
-  return {
-    applicantId: applicantAesopId.trim(),
-    englishLevel: normalizedLevel,
-    suspectedAi: normalizedSuspectedAi,
-    unableToGrade: normalizedUnableToGrade,
-    technicalFlag: normalizedTechnicalFlag,
-    ...normalizedScores,
-  };
+  return savedResponse;
 }
 
 /**

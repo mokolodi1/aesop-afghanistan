@@ -8612,7 +8612,9 @@ function PortalAdminEmailsPage() {
 
 const SCALE_0_TO_10 = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '10'];
 const SCALE_0_TO_10_DESC = [...SCALE_0_TO_10].reverse();
-const ENGLISH_LEVEL_SCORES = SCALE_0_TO_10;
+const SCALE_1_TO_10 = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10'];
+const SCALE_1_TO_10_DESC = [...SCALE_1_TO_10].reverse();
+const ENGLISH_LEVEL_SCORES = SCALE_1_TO_10;
 const FITNESS_CRITERIA = [
   {
     id: 'instructionFollowing',
@@ -8919,7 +8921,7 @@ function PortalReviewRubricHelp({ rubricKey, t, variant = 'fitness' }) {
         {variant === 'english' ? (
           <div className="portal-review-rubric-popover-scroll">
             <ul className="portal-review-rubric-list">
-              {SCALE_0_TO_10_DESC.map((score) => (
+              {SCALE_1_TO_10_DESC.map((score) => (
                 <li key={score} className="portal-review-rubric-item">
                   <div className="portal-review-rubric-item-head">
                     <span className="portal-review-rubric-tier-score">{score}</span>
@@ -9544,12 +9546,18 @@ function PortalReviewCard({
                 fieldLabel={t('reviews.levelLabel')}
                 value={draft.englishLevel}
                 ariaLabel={t('reviews.levelLabel')}
+                scores={SCALE_1_TO_10_DESC}
                 onChange={(event) => {
                   const nextDraft = { ...draft, englishLevel: event.target.value };
                   onDraftChange(assignment.applicantId, { englishLevel: event.target.value });
                   onMarkDirty(assignment.applicantId, nextDraft);
                 }}
               />
+              {ENGLISH_LEVEL_SCORES.includes(String(draft.englishLevel ?? '').trim()) ? (
+                <p className="portal-review-scale-field-hint">
+                  {t(`reviews.rubric.englishLevel.${draft.englishLevel}`)}
+                </p>
+              ) : null}
             </label>
             <PortalReviewSuspectedAiToggle
               t={t}
@@ -9557,20 +9565,6 @@ function PortalReviewCard({
               onToggle={() => {
                 const nextDraft = { ...draft, suspectedAi: !draft.suspectedAi };
                 onDraftChange(assignment.applicantId, { suspectedAi: nextDraft.suspectedAi });
-                onMarkDirty(assignment.applicantId, nextDraft);
-              }}
-            />
-          </div>
-          <div className="portal-review-scoring-section-row">
-            <PortalReviewFlagToggle
-              t={t}
-              active={draft.unableToGrade === true}
-              labelKey="reviews.unableToGrade"
-              flaggedLabelKey="reviews.unableToGradeFlagged"
-              hintKey="reviews.unableToGradeOffHint"
-              onToggle={() => {
-                const nextDraft = { ...draft, unableToGrade: !draft.unableToGrade };
-                onDraftChange(assignment.applicantId, { unableToGrade: nextDraft.unableToGrade });
                 onMarkDirty(assignment.applicantId, nextDraft);
               }}
             />
@@ -9588,6 +9582,18 @@ function PortalReviewCard({
             </h5>
             <p className="portal-review-subsection-label">{t('reviews.flagAnIssue')}</p>
             <div className="portal-review-scoring-section-row">
+              <PortalReviewFlagToggle
+                t={t}
+                active={draft.unableToGrade === true}
+                labelKey="reviews.unableToGrade"
+                flaggedLabelKey="reviews.unableToGradeFlagged"
+                hintKey="reviews.unableToGradeOffHint"
+                onToggle={() => {
+                  const nextDraft = { ...draft, unableToGrade: !draft.unableToGrade };
+                  onDraftChange(assignment.applicantId, { unableToGrade: nextDraft.unableToGrade });
+                  onMarkDirty(assignment.applicantId, nextDraft);
+                }}
+              />
               <PortalReviewFlagToggle
                 t={t}
                 active={draft.technicalFlag === true}
@@ -9973,19 +9979,23 @@ function PortalReviewApplicationsPage() {
         setAssignments(rows);
         const nextDrafts = {};
         for (const row of rows) {
-          const normalizeScale = (value) => {
+          const normalizeEnglishScale = (value) => {
+            const trimmed = String(value ?? '').trim();
+            return ENGLISH_LEVEL_SCORES.includes(trimmed) ? trimmed : '';
+          };
+          const normalizeFitnessScale = (value) => {
             const trimmed = String(value ?? '').trim();
             return SCALE_0_TO_10.includes(trimmed) ? trimmed : '';
           };
           const englishFromApi = String(row.englishLevel ?? row.recommendedLevel ?? '').trim();
           nextDrafts[row.applicantId] = {
-            englishLevel: normalizeScale(englishFromApi),
+            englishLevel: normalizeEnglishScale(englishFromApi),
             suspectedAi: row.suspectedAi === true,
             unableToGrade: row.unableToGrade === true,
             technicalFlag: row.technicalFlag === true,
-            instructionFollowing: normalizeScale(row.instructionFollowing),
-            originalThinking: normalizeScale(row.originalThinking),
-            character: normalizeScale(row.character),
+            instructionFollowing: normalizeFitnessScale(row.instructionFollowing),
+            originalThinking: normalizeFitnessScale(row.originalThinking),
+            character: normalizeFitnessScale(row.character),
           };
         }
         setDrafts(nextDrafts);

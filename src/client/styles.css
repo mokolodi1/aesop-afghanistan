@@ -5860,6 +5860,14 @@ html[dir='rtl'] .portal-voice-memo-substeps {
   flex: 0 1 auto;
 }
 
+.portal-review-scale-field-hint {
+  margin: 0;
+  max-width: 22rem;
+  font-size: 0.8rem;
+  line-height: 1.4;
+  color: var(--aesop-muted, #5c5c5c);
+}
+
 .portal-review-scale-select:hover {
   border-color: #c5cdd8;
 }

@@ -1,6 +1,4 @@
-const config = require("../config/secrets");
 const { getPool, isDatabaseEnabled } = require("../db/index");
-const { getApplicantVoiceMemoDurationsMapFromDb } = require("./classroomDb");
 const {
   loadAllPeopleRowsFromSheets,
   loadEmailToPeopleProfileMap,
@@ -10,29 +8,16 @@ const {
   loadClassroomRoleEmailSetsFromSheets,
   initGoogleSheets,
   getWorksheetByTitle,
-  resolveColumnIndex,
   sheetsApiCall,
 } = require("./googleSheets");
 const { getApplicantReviewsConfig } = require("./applicantReviews");
-const {
-  loadApplicantsDataForStats,
-  loadApplicantAesopIdSetFromSheets,
-  getVoiceMemoDriveScanOptions,
-  getVoiceMemoDurationLimits,
-  findVoiceMemoInScan,
-  readApplicantRound2Prompt,
-  parseVoiceMemoSheetLengthSeconds,
-} = require("./voiceMemoSync");
-const { sheetVoiceMemoLengthSeconds, isTrustedVoiceMemoCachedDurationSeconds } = require("../utils/voiceMemoDuration");
-const {
-  scanVoiceMemoFolder,
-  resolveVoiceMemoDurationsMap,
-  extractDriveFileIdFromLink,
-} = require("./googleDrive");
+const { loadApplicantAesopIdSetFromSheets } = require("./voiceMemoSync");
 const {
   personSheetIdentityKey,
   preparePeopleRowsForMirror,
   logPeopleMirrorDedupeStats,
+  collectApplicantMirrorEntriesFromSheet,
+  syncApplicantVoiceMemoDriveData,
 } = require("./peopleMirror");
 const {
   truncateMirrorStagingTables,
@@ -41,7 +26,6 @@ const {
   finalizeMirrorSyncRun,
   promoteStagingMirror,
 } = require("./mirrorPromote");
-const { syncVoiceMemoAudioFromScan } = require("./voiceMemoAudio");
 const { JOB_MAX_RUNTIME_MS } = require("./jobRuns");
 
 /** Sheets/Drive throttling can stretch the mirror; retry 429s for up to 6 hours. */
@@ -202,142 +186,9 @@ async function mirrorDingNumbersToStaging(applicantIdSet, deadlineAt) {
   return { mirrored };
 }
 
-async function mirrorApplicantsAndDriveToStaging(deadlineAt) {
-  const pool = getPool();
-  if (!pool) {
-    return { mirrored: 0, driveFiles: 0 };
-  }
-
-  const { dataRows, columns, cfg } = await loadApplicantsDataForStats({ deadlineAt });
-  const durationLimits = getVoiceMemoDurationLimits(cfg.voiceMemo);
-
-  const folderId = String(cfg.voiceMemo?.driveFolderId || "").trim();
-  /** @type {Map<string, { aesopId: string, fileId: string, fileName: string }>} */
-  let memoById = new Map();
-  /** @type {Awaited<ReturnType<typeof scanVoiceMemoFolder>>|null} */
-  let driveScan = null;
-
-  if (folderId) {
-    const scanOptions = getVoiceMemoDriveScanOptions(cfg.voiceMemo);
-    driveScan = await scanVoiceMemoFolder(folderId, { ...scanOptions, deadlineAt });
-    memoById = driveScan.memosById;
-    try {
-      const audioResult = await syncVoiceMemoAudioFromScan(driveScan, { deadlineAt });
-      console.info(
-        `[mirror] voice memo audio cache: driveFiles=${audioResult.driveFiles}, ` +
-          `downloaded=${audioResult.downloaded}, pruned=${audioResult.pruned}`,
-      );
-    } catch (error) {
-      console.warn("[mirror] voice memo audio cache failed:", error.message || error);
-    }
-  }
-
-  /** @type {Map<string, number>} */
-  let cachedDurationByFileId = new Map();
-  try {
-    const cached = await getApplicantVoiceMemoDurationsMapFromDb();
-    if (cached) {
-      cachedDurationByFileId = cached.byFileId;
-    }
-  } catch (error) {
-    console.warn(
-      "[mirror] could not load cached voice memo durations:",
-      error.message || error,
-    );
-  }
-
-  const gs = config.googleSheets || {};
-  const levelColumnIndex = resolveColumnIndex(gs.admissionsLevelColumn || "E");
-  const ageColumnIndex = resolveColumnIndex(gs.admissionsAgeColumn || "L");
-  const essayColumnIndex = resolveColumnIndex(gs.admissionsEssayColumn || "K");
-
-  /** @type {Array<Record<string, unknown>>} */
-  const entries = [];
-  /** @type {Set<string>} */
-  const probeFileIds = new Set();
-  let durationsFromSheet = 0;
-  let durationsFromDb = 0;
-
-  for (const rowData of dataRows) {
-    const aesopId = String(rowData[cfg.idColumnIndex] ?? "").trim();
-    if (!aesopId) {
-      continue;
-    }
-
-    const email = String(rowData[cfg.emailColumnIndex] ?? "").trim();
-    const name = String(rowData[cfg.nameColumnIndex] ?? "").trim();
-    const appliedLevel = String(rowData[levelColumnIndex] ?? "").trim();
-    const age = String(rowData[ageColumnIndex] ?? "").trim();
-    const essay = String(rowData[essayColumnIndex] ?? "").trim();
-    const round1 = String(rowData[columns.round1] ?? "").trim();
-    const round2 = String(rowData[columns.round2] ?? "").trim();
-    const round2Prompt = readApplicantRound2Prompt(rowData, columns);
-    const applicantLinks = String(rowData[columns.links] ?? "").trim();
-    const submittedAt = String(rowData[columns.date] ?? "").trim();
-    const driveFile = findVoiceMemoInScan(memoById, aesopId);
-    const driveFileId = driveFile?.fileId ? String(driveFile.fileId).trim() : null;
-    const driveFileName = driveFile?.fileName ? String(driveFile.fileName).trim() : null;
-
-    let driveDurationSeconds = null;
-    if (driveFileId) {
-      const sheetLengthSeconds =
-        columns.length >= 0 ? parseVoiceMemoSheetLengthSeconds(rowData[columns.length]) : null;
-      const sheetLinkFileId = extractDriveFileIdFromLink(applicantLinks);
-      const cached = cachedDurationByFileId.get(driveFileId);
-      if (sheetLengthSeconds != null && sheetLinkFileId === driveFileId) {
-        driveDurationSeconds = sheetVoiceMemoLengthSeconds(sheetLengthSeconds, durationLimits);
-        durationsFromSheet += 1;
-      } else if (isTrustedVoiceMemoCachedDurationSeconds(cached)) {
-        driveDurationSeconds = sheetVoiceMemoLengthSeconds(cached, durationLimits);
-        durationsFromDb += 1;
-      } else {
-        probeFileIds.add(driveFileId);
-      }
-    }
-
-    entries.push({
-      aesopId,
-      email,
-      name,
-      appliedLevel,
-      age,
-      essay,
-      round1,
-      round2,
-      round2Prompt,
-      applicantLinks,
-      submittedAt,
-      driveFileId,
-      driveFileName,
-      driveDurationSeconds,
-    });
-  }
-
-  /** @type {Map<string, number|null>} */
-  let probedDurations = new Map();
-  if (probeFileIds.size > 0) {
-    const probeStartedAt = Date.now();
-    probedDurations = await resolveVoiceMemoDurationsMap([...probeFileIds], {
-      concurrency: 4,
-      deadlineAt,
-    });
-    console.info(
-      `[mirror] probed ${probeFileIds.size} missing voice memo duration(s) from Drive in ${Date.now() - probeStartedAt}ms`,
-    );
-  }
-
+async function insertApplicantMirrorEntriesToStaging(pool, entries) {
   let mirrored = 0;
-  let durationsUnknown = 0;
   for (const entry of entries) {
-    if (entry.driveFileId && entry.driveDurationSeconds == null) {
-      const probed = probedDurations.get(entry.driveFileId);
-      if (probed != null && Number.isFinite(Number(probed))) {
-        entry.driveDurationSeconds = sheetVoiceMemoLengthSeconds(probed, durationLimits);
-      } else {
-        durationsUnknown += 1;
-      }
-    }
-
     const result = await pool.query(
       `INSERT INTO applicants_staging (
          aesop_id, email, name, applied_level, age, essay,
@@ -380,12 +231,34 @@ async function mirrorApplicantsAndDriveToStaging(deadlineAt) {
       mirrored += 1;
     }
   }
+  return mirrored;
+}
 
-  console.info(
-    `[mirror] voice memo durations: sheet=${durationsFromSheet}, dbCache=${durationsFromDb}, probed=${probeFileIds.size}, unknown=${durationsUnknown}`,
-  );
+/** Mirror Applicants sheet fields into staging without Drive scan or voice memo audio. */
+async function mirrorApplicantsFromSheetsToStaging(deadlineAt) {
+  const pool = getPool();
+  if (!pool) {
+    return { mirrored: 0 };
+  }
 
-  return { mirrored, driveFiles: memoById.size };
+  const { entries } = await collectApplicantMirrorEntriesFromSheet({
+    deadlineAt,
+    useDriveScan: false,
+    probeDriveDurations: false,
+  });
+  const mirrored = await insertApplicantMirrorEntriesToStaging(pool, entries);
+  return { mirrored };
+}
+
+/** @deprecated Use mirrorApplicantsFromSheetsToStaging + syncApplicantVoiceMemoDriveData */
+async function mirrorApplicantsAndDriveToStaging(deadlineAt) {
+  const sheetResult = await mirrorApplicantsFromSheetsToStaging(deadlineAt);
+  const driveResult = await syncApplicantVoiceMemoDriveData({ deadlineAt });
+  return {
+    mirrored: sheetResult.mirrored,
+    driveFiles: driveResult.driveFiles,
+    voiceMemoUpdated: driveResult.updated,
+  };
 }
 
 async function mirrorApplicantReviewsToStaging(deadlineAt) {
@@ -518,16 +391,16 @@ async function mirrorPeopleAndDingViaStaging(options = {}) {
       await truncateMirrorStagingTable(pool, "ding_numbers_staging");
     }
 
-    let applicantsResult = { mirrored: 0, driveFiles: 0 };
+    let applicantsResult = { mirrored: 0 };
     let applicantsStagingFailed = false;
     try {
-      applicantsResult = await mirrorApplicantsAndDriveToStaging(deadlineAt);
+      applicantsResult = await mirrorApplicantsFromSheetsToStaging(deadlineAt);
       console.log(
-        `[people-mirror] Applicants/Drive staging: mirrored=${applicantsResult.mirrored}, driveFiles=${applicantsResult.driveFiles}`,
+        `[people-mirror] Applicants sheet staging: mirrored=${applicantsResult.mirrored}`,
       );
     } catch (error) {
       applicantsStagingFailed = true;
-      console.warn("[people-mirror] Applicants/Drive staging failed:", error.message);
+      console.warn("[people-mirror] Applicants sheet staging failed:", error.message);
       await truncateMirrorStagingTable(pool, "applicants_staging");
     }
 
@@ -567,14 +440,26 @@ async function mirrorPeopleAndDingViaStaging(options = {}) {
       );
     }
 
+    let voiceMemoResult = { updated: 0, driveFiles: 0 };
+    try {
+      console.log("[people-mirror] Phase 2: syncing voice memo Drive data...");
+      voiceMemoResult = await syncApplicantVoiceMemoDriveData({ deadlineAt });
+      console.log(
+        `[people-mirror] Voice memo Drive: updated=${voiceMemoResult.updated}, driveFiles=${voiceMemoResult.driveFiles}`,
+      );
+    } catch (error) {
+      console.warn("[people-mirror] Voice memo Drive sync failed:", error.message);
+    }
+
     return {
       people: promoteResult.people,
       peoplePruned: promoteResult.peoplePruned,
       dingNumbers: promoteResult.dingNumbers,
       dingHistory: 0,
       applicants: promoteResult.applicants,
-      driveFiles: applicantsResult.driveFiles,
+      driveFiles: voiceMemoResult.driveFiles,
       applicantReviews: promoteResult.applicantReviews,
+      voiceMemoUpdated: voiceMemoResult.updated,
       mirrorSyncRunId,
       partialFailures,
     };
@@ -587,6 +472,7 @@ async function mirrorPeopleAndDingViaStaging(options = {}) {
 module.exports = {
   mirrorAllPeopleToStaging,
   mirrorDingNumbersToStaging,
+  mirrorApplicantsFromSheetsToStaging,
   mirrorApplicantsAndDriveToStaging,
   mirrorApplicantReviewsToStaging,
   mirrorPeopleAndDingViaStaging,
