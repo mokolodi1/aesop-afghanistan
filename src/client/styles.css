@@ -4793,20 +4793,34 @@ html[dir='rtl'] .portal-voice-memo-substeps {
   color: var(--aesop-ink-soft, #454545);
 }
 
-.portal-review-instructions-example,
+.portal-review-instructions-example {
+  margin: 0 0 20px;
+  padding: 16px 16px 18px;
+  border: 1px solid var(--aesop-line, #e7e7e7);
+  border-radius: 12px;
+  background: #fff;
+}
+
+.portal-review-instructions-example + .portal-review-instructions-example {
+  margin-top: 18px;
+}
+
+.portal-review-instructions-example:last-child {
+  margin-bottom: 0;
+}
+
 .portal-review-instructions-criterion,
 .portal-review-instructions-score-note {
   margin-bottom: 18px;
 }
 
-.portal-review-instructions-example:last-child,
 .portal-review-instructions-score-note:last-child {
   margin-bottom: 0;
 }
 
 .portal-review-instructions-example-title,
 .portal-review-instructions-criterion-title {
-  margin: 0 0 8px;
+  margin: 0 0 10px;
   font-size: 0.95rem;
   font-weight: 600;
   line-height: 1.3;
@@ -4834,6 +4848,10 @@ html[dir='rtl'] .portal-voice-memo-substeps {
   unicode-bidi: plaintext;
 }
 
+.portal-review-instructions-example .portal-review-instructions-essay {
+  background: #f7f7f6;
+}
+
 .portal-bidi-text {
   white-space: pre-wrap;
   word-break: break-word;
@@ -4854,7 +4872,7 @@ html[dir='rtl'] .portal-voice-memo-substeps {
 }
 
 .portal-review-instructions-essay + .portal-review-instructions-essay {
-  margin-top: 10px;
+  margin-top: 16px;
 }
 
 .portal-review-instructions-practice-scores {

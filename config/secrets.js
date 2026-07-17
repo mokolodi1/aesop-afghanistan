@@ -23,7 +23,7 @@ function buildGoogleSheetsConfig(fileSection) {
     return fallback;
   };
 
-  return {
+  const config = {
     sheetId: envOr("GOOGLE_SHEET_ID", "sheetId", ""),
     sheetName: envOr("GOOGLE_SHEET_NAME", "sheetName", "People"),
     idColumn: envOr("GOOGLE_ID_COLUMN", "idColumn", "B"),
@@ -232,6 +232,42 @@ function buildGoogleSheetsConfig(fileSection) {
       "Application process",
     ),
     calendarDateHeader: envOr("GOOGLE_CALENDAR_DATE_HEADER", "calendarDateHeader", "Date"),
+  };
+
+  return normalizeLegacyApplicantReviewsColumns(config);
+}
+
+/**
+ * Before Unable-to-Grade / Technical Flag columns existed, A fitness lived in F–H and
+ * B scores in I–M. Secrets that still use that layout collide with the new F/G and M/N
+ * flag columns — upgrade them to the current A–Q layout.
+ * @param {Record<string, string>} config
+ */
+function normalizeLegacyApplicantReviewsColumns(config) {
+  const aInstruction = String(config.applicantReviewsAInstructionColumn || "")
+    .trim()
+    .toUpperCase();
+  if (aInstruction !== "F") {
+    return config;
+  }
+
+  console.warn(
+    "[secrets] Upgrading legacy ApplicantReviews column map (A fitness F–H → H–J, B I–M → K–Q).",
+  );
+  return {
+    ...config,
+    applicantReviewsAUnableToGradeColumn: "F",
+    applicantReviewsATechnicalFlagColumn: "G",
+    applicantReviewsAInstructionColumn: "H",
+    applicantReviewsAOriginalThinkingColumn: "I",
+    applicantReviewsACharacterColumn: "J",
+    applicantReviewsBLevelColumn: "K",
+    applicantReviewsBSuspectedAiColumn: "L",
+    applicantReviewsBUnableToGradeColumn: "M",
+    applicantReviewsBTechnicalFlagColumn: "N",
+    applicantReviewsBInstructionColumn: "O",
+    applicantReviewsBOriginalThinkingColumn: "P",
+    applicantReviewsBCharacterColumn: "Q",
   };
 }
 
