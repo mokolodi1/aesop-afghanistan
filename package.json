@@ -12,6 +12,7 @@
     "sync:classroom": "node scripts/run-job.js classroom-sync",
     "sync:hourly-cache": "node scripts/run-job.js hourly-cache",
     "sync:applicant-reviews": "node scripts/sync-applicant-reviews.js",
+    "fix:applicant-reviews-columns": "node scripts/fix-applicant-reviews-columns.js",
     "sync:applicants": "node scripts/sync-applicants.js",
     "sync:people-status": "node scripts/sync-people-status.js",
     "db:migrate": "node db/migrate.js",
