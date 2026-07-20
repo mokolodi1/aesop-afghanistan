@@ -218,11 +218,11 @@ function buildGoogleSheetsConfig(fileSection) {
       "Special emails",
     ),
     admissionsHeaderRow: envOr("GOOGLE_ADMISSIONS_HEADER_ROW", "admissionsHeaderRow", "1"),
-    /** Comma-separated header labels used as recipient filters (Level, Round 1, Round 2, Special emails). */
+    /** Comma-separated Applicants header labels used as recipient filters. */
     admissionsFilterColumns: envOr(
       "GOOGLE_ADMISSIONS_FILTER_COLUMNS",
       "admissionsFilterColumns",
-      "Level,Round 1,Round 2,Special emails",
+      "Level,Round 1,Round 2,Special emails,Review in Round 2",
     ),
     calendarSheetName: envOr("GOOGLE_CALENDAR_SHEET_NAME", "calendarSheetName", "Calendar"),
     calendarHeaderRow: envOr("GOOGLE_CALENDAR_HEADER_ROW", "calendarHeaderRow", "1"),
