@@ -181,6 +181,32 @@ function assertDatabaseForCampaigns() {
   }
 }
 
+const REVIEW_IN_ROUND_2_COLUMN = "Review in Round 2";
+const ROUND_1_COLUMN = "Round 1";
+const ROUND_1_ACCEPTED_VALUE = "Accepted";
+
+/**
+ * @param {{ column: string, values: string[] }| { filters: Array<{ column: string, values: string[] }> } | { aesopIds: string[] } | null} filter
+ * @returns {string}
+ */
+function describeAdmissionsFilter(filter) {
+  if (!filter) {
+    return "all";
+  }
+  if (Array.isArray(filter.aesopIds)) {
+    return `aesopIds (${filter.aesopIds.length} id(s))`;
+  }
+  if (Array.isArray(filter.filters)) {
+    return filter.filters
+      .map((part) => `${part.column}=${(part.values || []).join(",")}`)
+      .join(" AND ");
+  }
+  if (filter.column && Array.isArray(filter.values)) {
+    return `${filter.column}=${filter.values.join(",")}`;
+  }
+  return "all";
+}
+
 function normalizeFilter(filter) {
   if (!filter || typeof filter !== "object") {
     return null;
@@ -193,14 +219,51 @@ function normalizeFilter(filter) {
       return { aesopIds };
     }
   }
-  const column = typeof filter.column === "string" ? filter.column.trim() : "";
-  const values = Array.isArray(filter.values)
-    ? filter.values.map((v) => String(v ?? "").trim()).filter(Boolean)
-    : [];
-  if (!column || values.length === 0) {
+
+  /** @type {Array<{ column: string, values: string[] }>} */
+  const filters = [];
+  const pushPart = (part) => {
+    if (!part || typeof part !== "object") {
+      return;
+    }
+    const column = typeof part.column === "string" ? part.column.trim() : "";
+    const values = Array.isArray(part.values)
+      ? part.values.map((value) => String(value ?? "").trim()).filter(Boolean)
+      : [];
+    if (column && values.length > 0) {
+      filters.push({ column, values });
+    }
+  };
+
+  if (Array.isArray(filter.filters)) {
+    for (const part of filter.filters) {
+      pushPart(part);
+    }
+  } else {
+    pushPart(filter);
+  }
+
+  // Review in Round 2 always implies Round 1 Accepted (exclude first-round rejects).
+  const hasReviewInRound2 = filters.some(
+    (part) => part.column.toLowerCase() === REVIEW_IN_ROUND_2_COLUMN.toLowerCase(),
+  );
+  const hasRound1 = filters.some(
+    (part) => part.column.toLowerCase() === ROUND_1_COLUMN.toLowerCase(),
+  );
+  if (hasReviewInRound2 && !hasRound1) {
+    filters.unshift({
+      column: ROUND_1_COLUMN,
+      values: [ROUND_1_ACCEPTED_VALUE],
+    });
+  }
+
+  if (filters.length === 0) {
     return null;
   }
-  return { column, values };
+  if (filters.length === 1) {
+    return filters[0];
+  }
+  return { filters };
 }
 
 function normalizeGlobalVars(raw) {
@@ -419,15 +482,10 @@ async function resolveAdmissionsRecipients(filter) {
     broadcastRecipientCount: recipients.length - duplicateEmailSkips.length,
   };
   if (normalizedFilter) {
-    if (Array.isArray(normalizedFilter.aesopIds)) {
-      console.info(
-        `[admissions-email] filter aesopIds (${normalizedFilter.aesopIds.length} id(s)): ${matchedCount} row(s) matched, ${recipients.length} email(s) will be sent`,
-      );
-    } else {
-      console.info(
-        `[admissions-email] filter ${normalizedFilter.column}=${normalizedFilter.values.join(",")}: ${matchedCount} row(s) matched, ${recipients.length} email(s) will be sent`,
-      );
-    }
+    console.info(
+      `[admissions-email] filter ${describeAdmissionsFilter(normalizedFilter)}: ` +
+        `${matchedCount} row(s) matched, ${recipients.length} email(s) will be sent`,
+    );
   } else {
     console.info(
       `[admissions-email] all applicants: ${matchedCount} row(s) with email, ${recipients.length} email(s) will be sent`,

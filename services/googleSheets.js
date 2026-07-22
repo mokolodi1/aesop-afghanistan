@@ -3068,7 +3068,9 @@ function columnIndexToLetter(index) {
 }
 
 function parseAdmissionsFilterColumnLabels(gs) {
-  const raw = gs?.admissionsFilterColumns ?? "Level,Round 1,Round 2";
+  const raw =
+    gs?.admissionsFilterColumns ??
+    "Level,Round 1,Round 2,Special emails,Review in Round 2";
   if (Array.isArray(raw)) {
     return raw.map((label) => String(label).trim()).filter(Boolean);
   }
@@ -3246,8 +3248,36 @@ async function loadAdmissionsSheet() {
 }
 
 /**
+ * @param {Record<string, string>|undefined} fields
+ * @param {string} column
+ * @param {string[]} values
+ * @returns {boolean}
+ */
+function admissionsRowMatchesColumnValues(fields, column, values) {
+  const col = String(column || "").trim();
+  const want = new Set(
+    (Array.isArray(values) ? values : [])
+      .map((value) => String(value ?? "").trim().toLowerCase())
+      .filter(Boolean),
+  );
+  if (!col || want.size === 0) {
+    return true;
+  }
+  const cell = fields?.[col];
+  if (cell == null) {
+    return false;
+  }
+  return want.has(String(cell).trim().toLowerCase());
+}
+
+/**
  * @param {Array<{ id: string, name: string, email: string, fields: Record<string, string> }>} rows
- * @param {{ column?: string, values?: string[], aesopIds?: string[] }|null|undefined} filter
+ * @param {{
+ *   column?: string,
+ *   values?: string[],
+ *   filters?: Array<{ column?: string, values?: string[] }>,
+ *   aesopIds?: string[],
+ * }|null|undefined} filter
  */
 function filterAdmissionsRows(rows, filter) {
   if (!Array.isArray(rows)) {
@@ -3265,21 +3295,37 @@ function filterAdmissionsRows(rows, filter) {
     }
     return rows.filter((row) => want.has(String(row.id || "").trim().toLowerCase()));
   }
-  if (!filter.column || !Array.isArray(filter.values) || filter.values.length === 0) {
-    return rows;
-  }
-  const column = String(filter.column).trim();
-  const want = new Set(filter.values.map((v) => String(v ?? "").trim().toLowerCase()).filter(Boolean));
-  if (!column || want.size === 0) {
-    return rows;
-  }
-  return rows.filter((row) => {
-    const cell = row.fields[column];
-    if (cell == null) {
-      return false;
+
+  /** @type {Array<{ column: string, values: string[] }>} */
+  const parts = [];
+  if (Array.isArray(filter.filters)) {
+    for (const part of filter.filters) {
+      if (!part || typeof part !== "object") {
+        continue;
+      }
+      const column = String(part.column || "").trim();
+      const values = Array.isArray(part.values)
+        ? part.values.map((value) => String(value ?? "").trim()).filter(Boolean)
+        : [];
+      if (column && values.length > 0) {
+        parts.push({ column, values });
+      }
     }
-    return want.has(String(cell).trim().toLowerCase());
-  });
+  } else if (filter.column && Array.isArray(filter.values) && filter.values.length > 0) {
+    const column = String(filter.column).trim();
+    const values = filter.values.map((value) => String(value ?? "").trim()).filter(Boolean);
+    if (column && values.length > 0) {
+      parts.push({ column, values });
+    }
+  }
+
+  if (parts.length === 0) {
+    return rows;
+  }
+
+  return rows.filter((row) =>
+    parts.every((part) => admissionsRowMatchesColumnValues(row.fields, part.column, part.values)),
+  );
 }
 
 /**

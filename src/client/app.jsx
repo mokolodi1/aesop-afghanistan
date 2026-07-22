@@ -6392,17 +6392,47 @@ function AdminEmailBodyEditor({ id, value, onChange, placeholder }) {
 }
 
 function rowMatchesAdmissionsFilter(fields, filter) {
-  if (!filter?.column || !Array.isArray(filter.values) || filter.values.length === 0) {
+  if (!filter || typeof filter !== 'object') {
     return true;
   }
-  const cell = fields?.[filter.column];
-  if (cell == null) {
-    return false;
+  const parts = Array.isArray(filter.filters)
+    ? filter.filters
+    : filter.column && Array.isArray(filter.values)
+      ? [{ column: filter.column, values: filter.values }]
+      : [];
+  if (parts.length === 0) {
+    return true;
   }
-  const want = new Set(
-    filter.values.map((value) => String(value ?? '').trim().toLowerCase()).filter(Boolean),
-  );
-  return want.has(String(cell).trim().toLowerCase());
+  return parts.every((part) => {
+    if (!part?.column || !Array.isArray(part.values) || part.values.length === 0) {
+      return true;
+    }
+    const cell = fields?.[part.column];
+    if (cell == null) {
+      return false;
+    }
+    const want = new Set(
+      part.values.map((value) => String(value ?? '').trim().toLowerCase()).filter(Boolean),
+    );
+    return want.has(String(cell).trim().toLowerCase());
+  });
+}
+
+function formatAdmissionsFilterLabel(filter) {
+  if (!filter || typeof filter !== 'object') {
+    return '';
+  }
+  if (Array.isArray(filter.aesopIds) && filter.aesopIds.length > 0) {
+    return `${filter.aesopIds.length} AESOP ID${filter.aesopIds.length === 1 ? '' : 's'}`;
+  }
+  const parts = Array.isArray(filter.filters)
+    ? filter.filters
+    : filter.column && Array.isArray(filter.values)
+      ? [{ column: filter.column, values: filter.values }]
+      : [];
+  return parts
+    .map((part) => `${part.column} = ${(part.values || []).join(', ')}`)
+    .join(' AND ');
 }
 
 function filterDuplicateSkipsForScope(skips, filter) {
@@ -6568,8 +6598,7 @@ function ApplicantsSheetDebugPanel({
               </li>
             ) : recipientStats?.filter ? (
               <li>
-                Filter <strong>{recipientStats.filter.column}</strong> ={' '}
-                {recipientStats.filter.values?.join(', ')}:{' '}
+                Filter <strong>{formatAdmissionsFilterLabel(recipientStats.filter)}</strong>:{' '}
                 <strong>{recipientStats.rowsAfterFilter ?? 0}</strong> row(s) matched
               </li>
             ) : null}
@@ -8245,6 +8274,9 @@ function PortalAdminEmailsPage() {
 
   const filterValueOptions =
     filterColumn && metadata?.valuesByColumn ? metadata.valuesByColumn[filterColumn] || [] : [];
+  const admissionsFilterLabel = formatAdmissionsFilterLabel(admissionsFilterPayload);
+  const reviewInRound2Selected =
+    String(filterColumn || '').trim().toLowerCase() === 'review in round 2';
 
   const canSendTest =
     subject.trim().length > 0 &&
@@ -8502,48 +8534,55 @@ function PortalAdminEmailsPage() {
               </button>
             </div>
           ) : !filterAll ? (
-            <div className="portal-admin-emails-filter-row">
-              <label className="portal-admin-emails-field">
-                <span className="portal-admin-emails-label">Column</span>
-                <select
-                  className="portal-admin-emails-select"
-                  value={filterColumn}
-                  onChange={(e) => {
-                    setFilterColumn(e.target.value);
-                    setFilterValue('');
-                    setAesopIdsFilter(null);
-                    setRecipientListLabel('');
-                  }}
-                >
-                  <option value="">Select column…</option>
-                  {filterColumnLabels.map((label) => (
-                    <option key={label} value={label}>
-                      {label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="portal-admin-emails-field">
-                <span className="portal-admin-emails-label">Value</span>
-                <select
-                  className="portal-admin-emails-select"
-                  value={filterValue}
-                  onChange={(e) => {
-                    setFilterValue(e.target.value);
-                    setAesopIdsFilter(null);
-                    setRecipientListLabel('');
-                  }}
-                  disabled={!filterColumn}
-                >
-                  <option value="">Select value…</option>
-                  {filterValueOptions.map((value) => (
-                    <option key={value} value={value}>
-                      {value}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
+            <>
+              <div className="portal-admin-emails-filter-row">
+                <label className="portal-admin-emails-field">
+                  <span className="portal-admin-emails-label">Column</span>
+                  <select
+                    className="portal-admin-emails-select"
+                    value={filterColumn}
+                    onChange={(e) => {
+                      setFilterColumn(e.target.value);
+                      setFilterValue('');
+                      setAesopIdsFilter(null);
+                      setRecipientListLabel('');
+                    }}
+                  >
+                    <option value="">Select column…</option>
+                    {filterColumnLabels.map((label) => (
+                      <option key={label} value={label}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="portal-admin-emails-field">
+                  <span className="portal-admin-emails-label">Value</span>
+                  <select
+                    className="portal-admin-emails-select"
+                    value={filterValue}
+                    onChange={(e) => {
+                      setFilterValue(e.target.value);
+                      setAesopIdsFilter(null);
+                      setRecipientListLabel('');
+                    }}
+                    disabled={!filterColumn}
+                  >
+                    <option value="">Select value…</option>
+                    {filterValueOptions.map((value) => (
+                      <option key={value} value={value}>
+                        {value}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+              {reviewInRound2Selected ? (
+                <p className="portal-admin-hint">
+                  Also requires Round 1 = Accepted (Round 1 rejects are excluded automatically).
+                </p>
+              ) : null}
+            </>
           ) : null}
             </>
           )}
@@ -8692,10 +8731,8 @@ function PortalAdminEmailsPage() {
                   Recipient list: {recipientListLabel || 'Selected applicants'} (
                   {aesopIdsFilter.length} AESOP ID{aesopIdsFilter.length === 1 ? '' : 's'})
                 </p>
-              ) : !filterAll && filterColumn && filterValue ? (
-                <p className="portal-admin-hint">
-                  Filter: {filterColumn} = {filterValue}
-                </p>
+              ) : !filterAll && admissionsFilterLabel ? (
+                <p className="portal-admin-hint">Filter: {admissionsFilterLabel}</p>
               ) : null}
               {recipientCount === 0 ? (
                 <p className="portal-admin-status">No recipients match the current filter.</p>
